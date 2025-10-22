@@ -1,0 +1,123 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+} from "@nestjs/common";
+import { z } from "zod";
+import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
+import { CurrentUser } from "../middleware/current-user.decorator";
+import type { RequestUser } from "../middleware/auth.types";
+import { RunsService, ALL_RUN_STATES } from "../state-machine/runs.service";
+
+export const createRunSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    prompt: z.string().min(1).max(20000),
+    idempotencyKey: z.string().min(1).max(255).optional(),
+  })
+  .strict();
+
+export const confirmRunSchema = z
+  .object({
+    manifestVersion: z.string().min(1),
+    planVersion: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const clarifyRunSchema = z
+  .object({
+    answers: z.record(z.string(), z.unknown()),
+    idempotencyKey: z.string().min(1).max(255).optional(),
+  })
+  .strict();
+
+export type CreateRunDto = z.infer<typeof createRunSchema>;
+export type ConfirmRunDto = z.infer<typeof confirmRunSchema>;
+export type ClarifyRunDto = z.infer<typeof clarifyRunSchema>;
+
+const sessionIdQuerySchema = z.string().uuid().optional();
+const runStatusQuerySchema = z.enum(ALL_RUN_STATES).optional();
+const workspaceIdQuerySchema = z.string().uuid();
+
+@Controller("runs")
+export class ProvisioningRunsController {
+  constructor(private readonly runsService: RunsService) {}
+
+  @Post()
+  create(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Body(new ZodValidationPipe(createRunSchema)) dto: CreateRunDto,
+    @CurrentUser() user: RequestUser
+  ) {
+    return this.runsService.createRun(dto.sessionId, workspaceId, user.userId, dto.prompt, dto.idempotencyKey);
+  }
+
+  @Get()
+  list(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Query("sessionId", new ZodValidationPipe(sessionIdQuerySchema)) sessionId: string | undefined,
+    @Query("status", new ZodValidationPipe(runStatusQuerySchema)) status: string | undefined,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runsService.listRuns(workspaceId, sessionId, status, user.userId);
+  }
+
+  @Get(":id")
+  get(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runsService.getRun(id, workspaceId, user.userId);
+  }
+
+  @Post(":id/cancel")
+  cancel(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: RequestUser
+  ) {
+    return this.runsService.cancelRun(id, workspaceId, user.userId);
+  }
+
+  @Post(":id/confirm")
+  confirm(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(confirmRunSchema)) dto: ConfirmRunDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runsService.confirmRun(id, workspaceId, user.userId, dto);
+  }
+
+  @Post(":id/clarify")
+  clarify(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(clarifyRunSchema)) dto: ClarifyRunDto,
+    @CurrentUser() user: RequestUser,
+    @Headers("idempotency-key") headerIdempotencyKey?: string,
+  ) {
+    const idempotencyKey = headerIdempotencyKey ?? dto.idempotencyKey;
+    const validated = new ZodValidationPipe(clarifyRunSchema).transform(
+      { ...dto, ...(idempotencyKey !== undefined ? { idempotencyKey } : {}) },
+      { type: "body" },
+    );
+    return this.runsService.clarifyRun(id, workspaceId, user.userId, validated);
+  }
+
+  @Post(":id/revise")
+  revise(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(z.object({ prompt: z.string().trim().min(1).max(20000) }).strict())) dto: { prompt: string },
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runsService.reviseRun(id, workspaceId, user.userId, dto.prompt);
+  }
+}

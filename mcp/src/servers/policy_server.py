@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
+from src.servers.cost_server import router as cost_router
 from src.servers.manifest_server import router as manifest_creation_router
 from src.servers.manifest_validation import router as manifest_router
 
@@ -23,12 +24,17 @@ class Resources:
     http_client: httpx.AsyncClient
     backend_url: str
     manifest_url: str
+    plan_url: str
+    pricing_url: str
 
 
 def create_app(
     membership_store: MembershipStore | None = None,
     http_client: httpx.AsyncClient | None = None,
     backend_url: str | None = None,
+    manifest_url: str | None = None,
+    plan_url: str | None = None,
+    pricing_url: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -52,13 +58,25 @@ def create_app(
             or os.getenv("POLICY_SERVICE_URL")
             or os.getenv("BACKEND_URL", "http://localhost:8081")
         ).rstrip("/")
-        resolved_manifest_url = os.getenv("MANIFEST_SERVICE_URL", "http://localhost:8090").rstrip("/")
+        resolved_manifest_url = (
+            manifest_url or os.getenv("MANIFEST_SERVICE_URL", "http://localhost:8090")
+        ).rstrip("/")
+        resolved_plan_url = (
+            plan_url
+            or os.getenv("PLAN_SERVICE_URL")
+            or os.getenv("IAC_SERVICE_URL", "http://localhost:8083")
+        ).rstrip("/")
+        resolved_pricing_url = (
+            pricing_url or os.getenv("PRICING_SERVICE_URL", "http://localhost:8091")
+        ).rstrip("/")
 
         application.state.resources = Resources(
             membership_store=resolved_store,
             http_client=client,
             backend_url=resolved_backend_url,
             manifest_url=resolved_manifest_url,
+            plan_url=resolved_plan_url,
+            pricing_url=resolved_pricing_url,
         )
         try:
             yield
@@ -75,6 +93,7 @@ def create_app(
     install_context_error_handler(application)
     application.include_router(manifest_router)
     application.include_router(manifest_creation_router)
+    application.include_router(cost_router)
 
     @application.get("/health/live")
     async def live() -> dict[str, str]:

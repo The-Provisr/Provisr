@@ -1,0 +1,9 @@
+packages:
+  - "frontend"
+  - "orchestrator"
+  - "packages/shared-contracts"
+allowBuilds:
+  '@clerk/shared': true
+  esbuild: true
+  sharp: true
+  unrs-resolver: set this to true or false

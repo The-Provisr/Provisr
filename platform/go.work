@@ -1,0 +1,15 @@
+go 1.25.5
+
+use (
+	./pkg
+	./proto
+	./services/approval
+	./services/audit
+	./services/notification
+	./services/orchestration
+	./services/policy
+	./services/provisioning
+	./services/reconciler
+	./services/state
+	./tests/integration
+)

@@ -1,0 +1,5 @@
+{
+  "service_name": "orchestration",
+  "port": "8080",
+  "environment": "dev"
+}

@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chi_middleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/provisr/platform/pkg/health"
+	"github.com/provisr/platform/pkg/middleware"
 )
 
 type Config struct {
@@ -47,19 +50,23 @@ func main() {
 		Str("service", appConfig.ServiceName).
 		Str("port", appConfig.Port).
 		Str("env", appConfig.Environment).
-		Msg("Initializing stub HTTP server")
+		Msg("Initializing HTTP server")
 
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	
+	r.Use(chi_middleware.RequestID)
+	r.Use(chi_middleware.RealIP)
+	r.Use(chi_middleware.Recoverer)
+	r.Use(chi_middleware.Timeout(60 * time.Second))
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+	r.Use(middleware.StructuredLogger)
+
+	r.Get("/health", health.Handler(appConfig.ServiceName))
+
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"healthy","service":"` + appConfig.ServiceName + `"}`))
+		_, _ = w.Write([]byte(`{"message":"Welcome to Provisr ` + appConfig.ServiceName + ` service"}`))
 	})
 
 	srv := &http.Server{

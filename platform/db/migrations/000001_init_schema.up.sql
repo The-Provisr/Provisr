@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS conversation_messages CASCADE;
+DROP TABLE IF EXISTS agent_sessions CASCADE;
+DROP TABLE IF EXISTS resources CASCADE;
+DROP TABLE IF EXISTS provisioning_requests CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS organizations CASCADE;
+
+DROP TYPE IF EXISTS resource_status;
+DROP TYPE IF EXISTS cloud_provider;
+DROP TYPE IF EXISTS request_status;
+DROP TYPE IF EXISTS request_intent;
+DROP TYPE IF EXISTS user_role;

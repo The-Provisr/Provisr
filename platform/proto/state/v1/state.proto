@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package state.v1;
+
+import "state/v1/resources.proto";
+
+option go_package = "github.com/provisr/platform/proto/gen/go/state/v1;statev1";
+
+service StateService {
+  // Agent tool: get_team_resources (org scoped in v4.1)[cite: 2]
+  rpc GetOrgResources(GetOrgResourcesRequest) returns (GetOrgResourcesResponse) {}
+  
+  // Agent tool: get_historical_deployments[cite: 2]
+  rpc GetHistoricalDeployments(GetHistoricalDeploymentsRequest) returns (GetHistoricalDeploymentsResponse) {}
+}
+
+message GetOrgResourcesRequest {
+  string org_id = 1;
+  string tag_filter = 2;
+}
+
+message GetOrgResourcesResponse {
+  repeated Resource resources = 1;
+}
+
+message GetHistoricalDeploymentsRequest {
+  string org_id = 1;
+  int32 limit = 2;
+}
+
+message GetHistoricalDeploymentsResponse {
+  repeated string past_manifests_json = 1;
+}

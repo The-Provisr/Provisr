@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------
+  # Core Database Layer
+  # -------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: provisr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: provisr
+    ports:
+      # Mapped to 5433 to avoid conflicts with local Mac databases
+      - "5433:5432"
+    volumes:
+      - provisr-db-data:/var/lib/postgresql/data
+
+volumes:
+  provisr-db-data:
+    name: provisr-db-data

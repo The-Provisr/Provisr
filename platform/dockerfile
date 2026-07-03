@@ -1,0 +1,55 @@
+# ==============================================================================
+# Stage 1: Build Environment
+# ==============================================================================
+FROM golang:1.22-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /workspace
+
+# Copy the Go workspace configuration
+COPY go.work go.work.sum ./
+
+# Copy the shared packages and protobuf definitions
+COPY pkg/ ./pkg/
+COPY proto/ ./proto/
+
+# Copy the actual microservices code
+COPY services/ ./services/
+
+# The ARG allows us to tell Docker which service to build at runtime
+ARG SERVICE_NAME
+ENV TARGET_SERVICE=$SERVICE_NAME
+
+# Build the specific Go binary with optimizations (disable CGO for Alpine compatibility)
+RUN cd services/${TARGET_SERVICE} && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /go/bin/service ./cmd/main.go
+
+# ==============================================================================
+# Stage 2: Minimal Production Image
+# ==============================================================================
+FROM alpine:3.19
+
+WORKDIR /app
+
+# Add a non-root user for security compliance
+RUN addgroup -S provisr && adduser -S provisr -G provisr
+
+ARG SERVICE_NAME
+ENV TARGET_SERVICE=$SERVICE_NAME
+
+# Copy the compiled binary from the builder stage
+COPY --from=builder /go/bin/service ./service
+
+# Copy the specific configuration file for this service
+COPY services/${TARGET_SERVICE}/config.json ./config.json
+
+# Enforce non-root execution
+USER provisr
+
+# Expose the standard container port
+EXPOSE 8080
+
+# Run the binary
+CMD ["./service"]

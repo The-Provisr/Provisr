@@ -17,6 +17,8 @@ import (
 
 	"github.com/provisr/platform/pkg/health"
 	"github.com/provisr/platform/pkg/middleware"
+	
+	"github.com/provisr/platform/services/policy/internal/handler"
 )
 
 type Config struct {
@@ -68,6 +70,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message":"Welcome to Provisr ` + appConfig.ServiceName + ` service"}`))
 	})
+
+	r.Post("/evaluate", handler.EvaluatePolicy)
 
 	srv := &http.Server{
 		Addr:         ":" + appConfig.Port,

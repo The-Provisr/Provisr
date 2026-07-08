@@ -12,8 +12,7 @@ Before getting started, ensure the following software is installed:
 
 - Git
 - Docker Desktop
-- Go (latest stable version)
-- GNU Make
+- Go (version specified in go.work)
 - Visual Studio Code (recommended)
 
 ---

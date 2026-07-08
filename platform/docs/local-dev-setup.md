@@ -112,9 +112,7 @@ This command runs tests for all Go modules and backend services.
 
 After adding or updating Go packages, run:
 
-```bash
-make tidy
-```
+    go work sync
 
 This cleans and updates Go module dependencies across the project.
 

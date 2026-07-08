@@ -29,7 +29,7 @@ Before contributing, ensure you have installed:
 - Git
 - Docker Desktop
 - Docker Compose
-- Go (recommended version specified in go.mod)
+- Go (version specified in go.work)
 - Visual Studio Code (recommended)
 
 ---

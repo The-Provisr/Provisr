@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/provisr/platform/services/policy/internal/evaluator"
 )
@@ -87,9 +88,16 @@ func (h *PolicyHandler) EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, violation := range result.Violations {
+		code := "POLICY_VIOLATION"
+		message := violation
+		if violationCode, violationMessage, ok := strings.Cut(violation, ": "); ok && violationCode != "" && violationMessage != "" {
+			code = violationCode
+			message = violationMessage
+		}
+
 		response.Violations = append(response.Violations, Violation{
-			Code:    "POLICY_VIOLATION",
-			Message: violation,
+			Code:    code,
+			Message: message,
 		})
 	}
 

@@ -3,7 +3,7 @@ module github.com/provisr/platform/services/policy
 go 1.25.5
 
 require (
-	github.com/go-chi/chi/v5 v5.0.12
+	github.com/go-chi/chi/v5 v5.3.1
 	github.com/open-policy-agent/opa v1.18.2
 	github.com/provisr/platform/pkg v0.0.0-00010101000000-000000000000
 	github.com/rs/zerolog v1.33.0

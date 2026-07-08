@@ -5,7 +5,13 @@ ENDPOINT="http://localhost:4566"
 REGION="us-east-1"
 
 echo "Waiting for LocalStack to be healthy..."
+max_wait_seconds=60
+start_time=$(date +%s)
 until curl -sf "${ENDPOINT}/_localstack/health" >/dev/null 2>&1; do
+  if (( $(date +%s) - start_time >= max_wait_seconds )); then
+    echo "LocalStack did not become healthy within ${max_wait_seconds}s" >&2
+    exit 1
+  fi
   sleep 1
 done
 echo "LocalStack is up."

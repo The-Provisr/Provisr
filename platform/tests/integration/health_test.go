@@ -2,6 +2,8 @@ package integration
 
 import (
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -10,6 +12,10 @@ import (
 // Future versions will use testcontainers-go to automatically start
 // required services before executing the health check.
 func TestHealthEndpoint(t *testing.T) {
+	baseURL := strings.TrimRight(os.Getenv("PROVISR_BASE_URL"), "/")
+	if baseURL == "" {
+		t.Skip("set PROVISR_BASE_URL to run integration tests against a running service (e.g. http://localhost:8080)")
+	}
 
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -17,7 +23,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 	req, err := http.NewRequest(
 		http.MethodGet,
-		"http://localhost:8080/health",
+		baseURL+"/health",
 		nil,
 	)
 

@@ -64,6 +64,16 @@ func (h *PolicyHandler) EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.AllowedRegions == nil {
+		req.AllowedRegions = []string{}
+	}
+	if req.RequiredTags == nil {
+		req.RequiredTags = []string{}
+	}
+	if req.Manifest.Tags == nil {
+		req.Manifest.Tags = map[string]string{}
+	}
+
 	result, err := h.evaluator.Evaluate(r.Context(), req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

@@ -44,8 +44,7 @@ cd provisr-platform
 
 ## Start Development Environment
 
-docker compose up --build
-
+    docker compose up -d
 ---
 
 ## Coding Guidelines

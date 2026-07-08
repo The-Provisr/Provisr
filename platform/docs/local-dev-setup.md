@@ -88,9 +88,7 @@ If a migration tool is added later (such as golang-migrate), run the migrations 
 
 Build all Go modules and services by running:
 
-```bash
-make build
-```
+    go build ./...
 
 This command compiles the shared packages, protocol definitions, integration tests, and all backend services.
 

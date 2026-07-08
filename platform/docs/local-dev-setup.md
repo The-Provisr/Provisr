@@ -152,20 +152,19 @@ Stop the application using port 5433 or update the port mapping in `docker-compo
 
 ## Project Structure
 
-```
-provisr-platform/
-├── db/
-│   └── migrations/
-├── internal/
-├── pkg/
-├── proto/
-├── services/
-├── tests/
-├── docker-compose.yml
-├── Makefile
-├── go.work
-└── go.mod
-```
+    provisr-platform/
+    ├── CONTRIBUTING.md
+    ├── db/
+    │   └── migrations/
+    ├── docker-compose.yml
+    ├── dockerfile
+    ├── docs/
+    ├── go.work
+    ├── go.work.sum
+    ├── pkg/
+    ├── proto/
+    ├── services/
+    └── tests/
 
 ---
 

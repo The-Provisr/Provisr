@@ -100,9 +100,7 @@ This command compiles the shared packages, protocol definitions, integration tes
 
 Execute all project tests using:
 
-```bash
-make test
-```
+    go test ./...
 
 This command runs tests for all Go modules and backend services.
 

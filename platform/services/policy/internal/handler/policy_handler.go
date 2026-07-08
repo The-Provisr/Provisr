@@ -73,7 +73,7 @@ func (h *PolicyHandler) EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 			Violations: []Violation{
 				{
 					Code:    "POLICY_EVALUATION_FAILED",
-					Message: err.Error(),
+					Message: "Policy evaluation failed.",
 				},
 			},
 		})

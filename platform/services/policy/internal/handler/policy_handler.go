@@ -3,14 +3,16 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/provisr/platform/services/policy/internal/evaluator"
 )
 
 type EvaluateRequest struct {
 	OrgID            string   `json:"org_id"`
-	MonthlyBudgetUSD float64 `json:"monthly_budget_usd"`
-	AllowedRegions  []string `json:"allowed_regions"`
-	RequiredTags    []string `json:"required_tags"`
-	Manifest        Manifest `json:"manifest"`
+	MonthlyBudgetUSD float64  `json:"monthly_budget_usd"`
+	AllowedRegions   []string `json:"allowed_regions"`
+	RequiredTags     []string `json:"required_tags"`
+	Manifest         Manifest `json:"manifest"`
 }
 
 type Manifest struct {
@@ -31,7 +33,17 @@ type EvaluateResponse struct {
 	Violations []Violation `json:"violations"`
 }
 
-func EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
+type PolicyHandler struct {
+	evaluator *evaluator.Evaluator
+}
+
+func NewPolicyHandler(e *evaluator.Evaluator) *PolicyHandler {
+	return &PolicyHandler{
+		evaluator: e,
+	}
+}
+
+func (h *PolicyHandler) EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req EvaluateRequest
@@ -51,12 +63,34 @@ func EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mock response for Task 01.
-	// Later, this will call the OPA/Rego evaluator.
+	result, err := h.evaluator.Evaluate(r.Context(), req)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+
+		_ = json.NewEncoder(w).Encode(EvaluateResponse{
+			Allowed:  false,
+			Decision: "deny",
+			Violations: []Violation{
+				{
+					Code:    "POLICY_EVALUATION_FAILED",
+					Message: err.Error(),
+				},
+			},
+		})
+		return
+	}
+
 	response := EvaluateResponse{
-		Allowed:    true,
-		Decision:   "allow",
+		Allowed:    result.Allowed,
+		Decision:   result.Decision,
 		Violations: []Violation{},
+	}
+
+	for _, violation := range result.Violations {
+		response.Violations = append(response.Violations, Violation{
+			Code:    "POLICY_VIOLATION",
+			Message: violation,
+		})
 	}
 
 	w.WriteHeader(http.StatusOK)

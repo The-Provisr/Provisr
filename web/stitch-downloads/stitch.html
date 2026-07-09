@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Provisr | Cloud provisioning made simple</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600&amp;family=Hanken+Grotesk:wght@600;700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Hanken+Grotesk:wght@100..900&amp;family=Manrope:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#0d1515",
+                        "tertiary-fixed": "#ffe173",
+                        "surface-container-high": "#232b2c",
+                        "secondary-fixed-dim": "#38debb",
+                        "on-tertiary-container": "#725e00",
+                        "surface-container-lowest": "#080f10",
+                        "outline": "#849495",
+                        "tertiary-container": "#fed83a",
+                        "on-tertiary-fixed-variant": "#554500",
+                        "inverse-on-surface": "#2a3232",
+                        "inverse-primary": "#00696f",
+                        "inverse-surface": "#dce4e4",
+                        "error": "#ffb4ab",
+                        "on-surface-variant": "#b9cacb",
+                        "on-primary-fixed-variant": "#004f54",
+                        "primary-fixed-dim": "#00dbe7",
+                        "primary": "#e1fdff",
+                        "background": "#0d1515",
+                        "tertiary-fixed-dim": "#e8c423",
+                        "on-surface": "#dce4e4",
+                        "surface-container-low": "#151d1e",
+                        "on-primary-container": "#006a71",
+                        "tertiary": "#fff6e4",
+                        "on-secondary-container": "#004d3f",
+                        "secondary": "#3b82f6",
+                        "on-secondary-fixed-variant": "#005142",
+                        "on-tertiary": "#3b2f00",
+                        "secondary-fixed": "#60a5fa",
+                        "surface-tint": "#3b82f6",
+                        "primary-fixed": "#74f5ff",
+                        "on-secondary": "#ffffff",
+                        "on-secondary-fixed": "#002019",
+                        "on-primary-fixed": "#002022",
+                        "on-error-container": "#ffdad6",
+                        "on-primary": "#00363a",
+                        "surface-container-highest": "#2e3637",
+                        "secondary-container": "#2563eb",
+                        "surface": "#0d1515",
+                        "surface-bright": "#333b3b",
+                        "on-tertiary-fixed": "#221b00",
+                        "primary-container": "#00f2ff",
+                        "surface-container": "#192122",
+                        "on-background": "#dce4e4",
+                        "surface-variant": "#2e3637",
+                        "outline-variant": "#3a494b",
+                        "on-error": "#690005",
+                        "error-container": "#93000a",
+                        "navy-deep": "#0a192f",
+                        "navy-panel": "#112240",
+                        "navy-pop": "#172a45",
+                        "navy-accent": "#233554",
+                        "brand-blue": "#3b82f6"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit": "8px",
+                        "stack-lg": "48px",
+                        "margin-mobile": "20px",
+                        "margin-desktop": "64px",
+                        "gutter": "24px",
+                        "container-max": "1280px",
+                        "stack-md": "24px",
+                        "stack-sm": "12px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Manrope"],
+                        "display-lg": ["Hanken Grotesk"],
+                        "headline-lg": ["Hanken Grotesk"],
+                        "title-md": ["Manrope"],
+                        "headline-lg-mobile": ["Hanken Grotesk"],
+                        "body-sm": ["Manrope"],
+                        "label-caps": ["Geist"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "title-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                        "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>body {
+    background-color: #050a14;
+    color: #dce4e4;
+    overflow-x: hidden
+    }
+.glass {
+    backdrop-filter: blur(12px);
+    background-color: rgba(5, 10, 20, 0.8)
+    }
+.blue-glow {
+    box-shadow: 0 0 20px -5px rgba(59, 130, 246, 0.2)
+    }
+.ambient-orb {
+    position: absolute;
+    width: 500px;
+    height: 500px;
+    border-radius: 9999px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, transparent 70%);
+    filter: blur(80px);
+    z-index: -1
+    }
+.material-symbols-outlined {
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24
+    }
+.bento-card {
+    background: #112240;
+    border: 1px solid #233554;
+    transition: all 0.3s ease
+    }
+.bento-card:hover {
+    background: #172a45;
+    transform: translatey(-4px);
+    border-color: #3b82f6
+    }
+.cloud-bg {
+    background-image: url(https://lh3.googleusercontent.com/aida-public/AB6AXuBAVhEzBoCkkTW4GfElKrJ4VX4ec7i68ch8UZhSdJ7bavCslayBA3TdF7V3uTaVAtIdMTflJbbBVF-ximAhM4b2oMEMD7xcINJMbPJSmg7ARuSigSXSVmThfggXoIH5hVJM-yf3yRPBeGxaofjp3mHn4CebRMrwn_X0E-6JDBbpNiA0GEftp__qf_lm3Hy_R0kadnCeSglj0myaOMOdYRE6rTzXf8kIddqYkuzW6DUjGh31bKFdb5Ar-Eat_LeFlZk-xnJ4_j4bYioY);
+    background-size: cover;
+    background-position: center;
+    opacity: 0.15;
+    filter: grayscale(100%) brightness(0.5) contrast(1.2);
+    mix-blend-mode: overlay
+    }</style>
+</head>
+<body class="font-body-lg text-body-lg">
+<!-- Navbar -->
+<nav class="fixed top-0 w-full z-50 glass border-b border-outline-variant/10">
+<div class="max-w-container-max mx-auto px-margin-desktop py-4 flex justify-between items-center">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 bg-brand-blue rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-navy-deep" style="font-variation-settings: 'FILL' 1;">cloud_done</span>
+</div>
+<span class="font-display-lg text-headline-lg font-bold text-primary">Provisr</span>
+</div>
+<div class="hidden md:flex gap-8 items-center">
+<a class="text-primary font-bold border-b-2 border-brand-blue pb-1 hover:text-brand-blue transition-colors duration-200" href="#">Home</a>
+<a class="text-on-surface-variant font-body-lg hover:text-brand-blue transition-colors duration-200" href="#">Features</a>
+<a class="text-on-surface-variant font-body-lg hover:text-brand-blue transition-colors duration-200" href="#">Testimonials</a>
+<a class="text-on-surface-variant font-body-lg hover:text-brand-blue transition-colors duration-200" href="#">Pricing</a>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-brand-blue text-white px-6 py-2.5 rounded-full font-bold hover:bg-blue-600 transition-all shadow-[0_0_15px_-3px_rgba(59,130,246,0.4)]">Get Started</button>
+</div>
+</div>
+</nav>
+<main class="relative">
+<!-- Hero Background -->
+<div class="absolute inset-0 cloud-bg h-[900px] pointer-events-none"></div>
+<!-- Hero Section -->
+<section class="relative max-w-container-max mx-auto px-margin-desktop pt-40 pb-stack-lg">
+<div class="ambient-orb -top-20 -left-20"></div>
+<div class="flex flex-col items-center text-center space-y-stack-md max-w-4xl mx-auto">
+<div class="inline-block px-3 py-1 rounded-full bg-brand-blue/10 border border-brand-blue/20 text-brand-blue text-label-caps mb-4">
+                    NEXT-GEN CLOUD MANAGEMENT
+                </div>
+<h1 class="font-display-lg text-display-lg text-primary leading-tight">
+                    Cloud provisioning <br/><span class="text-brand-blue">made simple</span>
+</h1>
+<p class="text-on-surface-variant text-title-md max-w-2xl">
+                    Describe what you need, review the plan, and launch your cloud resources with confidence. No YAML headaches, just results.
+                </p>
+<div class="pt-4">
+<button class="bg-brand-blue text-white px-10 py-4 rounded-full font-bold hover:scale-105 transition-all shadow-lg shadow-blue-900/20">Get Started</button>
+</div>
+<!-- Product Screenshot Positioned Below -->
+<div class="relative group mt-16 w-full">
+<div class="absolute inset-0 bg-brand-blue/10 blur-3xl group-hover:bg-brand-blue/20 transition-all rounded-full"></div>
+<div class="relative rounded-2xl border border-navy-accent bg-navy-panel overflow-hidden shadow-2xl mx-auto">
+<img alt="Provisr Chat Interface Mockup" class="w-full h-auto object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAAbPKIp0O9VA9fwgbZMQWG4y8lseqeSoPyjJsNwmd0K4DJmg21b-tvt04pODUqHRpkdhzjbhEKYStzxQ9acRff8-k05Umj6sKt-gd1l2BHgrlTp2GgfGnaD-RQBPQi_sPP-Ll_y8zQWuUXUsUUkDD6N3S72dBxMvta-nAXuMzwAUg-qfXj7epR2XsGniZ2_BIeOa_Ud9FziYS5WOHhN_dwe8ZjqioPIV702fwebBCRAKBImhGA3VV34AX6R5JG3KQgfIQtT1lv2zov"/>
+</div>
+</div>
+</div>
+</section>
+<!-- Trust Strip -->
+<section class="border-y border-outline-variant/10 bg-surface-dim/50 py-12 relative z-10">
+<div class="max-w-container-max mx-auto px-margin-desktop text-center">
+<p class="text-label-caps text-on-surface-variant/60 mb-8 uppercase tracking-widest">Trusted by modern cloud teams</p>
+<div class="flex flex-wrap justify-center gap-x-16 gap-y-8 grayscale opacity-50 hover:grayscale-0 hover:opacity-100 transition-all">
+<span class="text-title-md font-bold text-on-surface">Nexora</span>
+<span class="text-title-md font-bold text-on-surface">CloudPeak</span>
+<span class="text-title-md font-bold text-on-surface">DevGrid</span>
+<span class="text-title-md font-bold text-on-surface">InfraLabs</span>
+<span class="text-title-md font-bold text-on-surface">StackPilot</span>
+</div>
+</div>
+</section>
+<!-- Features Bento Grid -->
+<section class="max-w-container-max mx-auto px-margin-desktop py-stack-lg relative z-10">
+<div class="ambient-orb top-1/2 right-0 opacity-20"></div>
+<div class="text-center mb-stack-lg">
+<h2 class="font-display-lg text-headline-lg text-primary mb-4">Infrastructure, but human.</h2>
+<p class="text-on-surface-variant max-w-xl mx-auto">Skip the complexity and focus on building. Provisr handles the orchestration with built-in guardrails.</p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- Simple Requests -->
+<div class="bento-card p-stack-md rounded-2xl flex flex-col gap-4">
+<div class="w-12 h-12 rounded-xl bg-brand-blue/10 flex items-center justify-center text-brand-blue">
+<span class="material-symbols-outlined">chat_bubble</span>
+</div>
+<h3 class="text-title-md text-primary">Simple requests</h3>
+<p class="text-on-surface-variant text-body-sm">Just type what you need. Our natural language processor translates your intent into secure cloud configurations.</p>
+</div>
+<!-- Clear cost estimates -->
+<div class="bento-card p-stack-md rounded-2xl flex flex-col gap-4">
+<div class="w-12 h-12 rounded-xl bg-brand-blue/10 flex items-center justify-center text-brand-blue">
+<span class="material-symbols-outlined">payments</span>
+</div>
+<h3 class="text-title-md text-primary">Clear cost estimates</h3>
+<p class="text-on-surface-variant text-body-sm">Know exactly what you'll pay before you click deploy. Transparent pricing projections for every resource.</p>
+</div>
+<!-- Approval before launch -->
+<div class="bento-card p-stack-md rounded-2xl flex flex-col gap-4">
+<div class="w-12 h-12 rounded-xl bg-brand-blue/10 flex items-center justify-center text-brand-blue">
+<span class="material-symbols-outlined">verified_user</span>
+</div>
+<h3 class="text-title-md text-primary">Approval before launch</h3>
+<p class="text-on-surface-variant text-body-sm">No accidental deletions or massive bills. Every change requires an explicit sign-off from your team.</p>
+</div>
+<!-- Team visibility -->
+<div class="bento-card p-stack-md rounded-2xl flex flex-col gap-4">
+<div class="w-12 h-12 rounded-xl bg-brand-blue/10 flex items-center justify-center text-brand-blue">
+<span class="material-symbols-outlined">groups</span>
+</div>
+<h3 class="text-title-md text-primary">Team visibility</h3>
+<p class="text-on-surface-variant text-body-sm">See who launched what and when. A centralized dashboard keeps everyone on the same page.</p>
+</div>
+<!-- Safer cloud changes -->
+<div class="bento-card p-stack-md rounded-2xl flex flex-col gap-4">
+<div class="w-12 h-12 rounded-xl bg-brand-blue/10 flex items-center justify-center text-brand-blue">
+<span class="material-symbols-outlined">security</span>
+</div>
+<h3 class="text-title-md text-primary">Safer cloud changes</h3>
+<p class="text-on-surface-variant text-body-sm">Automated policy checks ensure every deployment follows best practices and security protocols.</p>
+</div>
+<!-- Fast setup -->
+<div class="bento-card p-stack-md rounded-2xl flex flex-col gap-4">
+<div class="w-12 h-12 rounded-xl bg-brand-blue/10 flex items-center justify-center text-brand-blue">
+<span class="material-symbols-outlined">bolt</span>
+</div>
+<h3 class="text-title-md text-primary">Fast setup</h3>
+<p class="text-on-surface-variant text-body-sm">Get up and running in minutes. Connect your cloud provider and start provisioning instantly.</p>
+</div>
+</div>
+</section>
+<!-- Login Card Section -->
+<section class="max-w-container-max mx-auto px-margin-desktop py-stack-lg relative z-10">
+<div class="ambient-orb bottom-0 left-1/4 opacity-10"></div>
+<div class="max-w-md mx-auto">
+<div class="bento-card p-10 rounded-3xl blue-glow">
+<div class="text-center mb-8">
+<h2 class="font-display-lg text-headline-lg text-primary">Welcome back</h2>
+<p class="text-on-surface-variant">Log in to manage your cloud</p>
+</div>
+<form class="space-y-6">
+<div>
+<label class="block text-label-caps text-on-surface-variant mb-2">EMAIL ADDRESS</label>
+<input class="w-full bg-navy-deep border border-navy-accent rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-transparent transition-all" placeholder="name@company.com" type="email"/>
+</div>
+<div>
+<label class="block text-label-caps text-on-surface-variant mb-2">PASSWORD</label>
+<input class="w-full bg-navy-deep border border-navy-accent rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-transparent transition-all" placeholder="••••••••" type="password"/>
+</div>
+<button class="w-full bg-brand-blue text-white py-3 rounded-xl font-bold hover:brightness-110 transition-all" type="submit">Login</button>
+</form>
+<div class="mt-8 text-center space-y-4">
+<a class="block text-body-sm text-brand-blue hover:underline" href="#">Forgot password?</a>
+<p class="text-body-sm text-on-surface-variant">New to Provisr? <a class="text-primary font-bold hover:underline" href="#">Create an account</a></p>
+</div>
+</div>
+</div>
+</section>
+<!-- Testimonials -->
+<section class="max-w-container-max mx-auto px-margin-desktop py-stack-lg relative z-10">
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+<!-- Testimonial 1 -->
+<div class="flex flex-col gap-6 p-8 bg-surface-container-low rounded-2xl border border-outline-variant/10">
+<div class="flex items-center gap-4">
+<img class="w-12 h-12 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAytOd_QbSdg7kJ15_fKDz7mirblEgYamRdQIgyttrbXU6y0bBwKNUP6Ryd9U2f6x1531KzGAGr9AmUo8eNIfd0D77QVfGb1dkCHWBdSQSlps8hCQbhFkVPd2EPUqFRwaeyRTUguelwxYHr2tDK9PTF8konKvU3ZIt05-fz8VC2rgJGa9nM7vWZ6nlaHPEZPaCJe4f2O2BMA83tZpmqGwxL_84Kg4JOU4tOgVfRlUE5XV3Z5almQpujr12VzUI0e7ottAxz14wy-1qY"/>
+<div>
+<p class="font-bold text-primary">Maya Fernando</p>
+<p class="text-body-sm text-on-surface-variant">Engineering Manager</p>
+</div>
+</div>
+<p class="text-on-surface italic text-body-sm">"Provisr has completely changed how our product teams interact with infrastructure. We've reduced our deployment wait times by over 70%."</p>
+</div>
+<!-- Testimonial 2 -->
+<div class="flex flex-col gap-6 p-8 bg-surface-container-low rounded-2xl border border-outline-variant/10">
+<div class="flex items-center gap-4">
+<img class="w-12 h-12 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuArs5O91TB36sJY2_bnvsvmN9gc8nZuCS62ynvrDbvmYXK5PHpTRd3Emasn3heY47p3hcNh5IvpEskXFZJEThV_nvoVe9HQBpFsU3EzjPKRdwpXqP7BDvJCZzotmPE3w-DQGu7MOmVuhKRlMm8jIXrxyoebYUvKEaKLYdiWLJSt5xlIhW2b-omi55Kavj85QMsswQoi4Rn6IQvdSMqeoyXd-gDiL2nBR3h3qBNhH6savges-eJBvmKGvOTiamPIpJyRIFzoKy6i61mS"/>
+<div>
+<p class="font-bold text-primary">Daniel Perera</p>
+<p class="text-body-sm text-on-surface-variant">Cloud Lead</p>
+</div>
+</div>
+<p class="text-on-surface italic text-body-sm">"The cost projection feature is a game-changer. Finally, our developers understand the financial impact of their architecture choices."</p>
+</div>
+<!-- Testimonial 3 -->
+<div class="flex flex-col gap-6 p-8 bg-surface-container-low rounded-2xl border border-outline-variant/10">
+<div class="flex items-center gap-4">
+<img class="w-12 h-12 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWS1QA7E4tO3IrnGUDRz1EOnFYQYmzChytrxKgYTAs9DvQDA3UEQlJTFuZ4N2-DP1wZFLfvSwSIv8QUEqtNK1O0i1DdhSlSQqmHWRXrxyUQDPuQgTT7Eb7qeTLCBe3u70bw7xwg4WSKJW5WmxeMkUGNEOGDVU29JvLRfmr67Q1R2zvq_NOhEB5EZ8J-OGonQsqwKWNKEBPM7fNJZwHde-s5U4FOTYxMy1zcb7mm54hxpAX1hENVx9m82MZA_BGR9QBqWu-ATdG7KJu"/>
+<div>
+<p class="font-bold text-primary">Aisha Khan</p>
+<p class="text-body-sm text-on-surface-variant">Product Operations</p>
+</div>
+</div>
+<p class="text-on-surface italic text-body-sm">"I don't need to be a cloud architect to provision what my team needs. Provisr makes me feel empowered and safe in the cloud."</p>
+</div>
+<!-- Testimonial 4 -->
+<div class="flex flex-col gap-6 p-8 bg-surface-container-low rounded-2xl border border-outline-variant/10">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-brand-blue/20 flex items-center justify-center text-brand-blue">
+<span class="material-symbols-outlined">person</span>
+</div>
+<div>
+<p class="font-bold text-primary">Marcus Chen</p>
+<p class="text-body-sm text-on-surface-variant">DevOps Lead</p>
+</div>
+</div>
+<p class="text-on-surface italic text-body-sm">"Provisr has completely streamlined our infrastructure reviews. It's the most intuitive tool we've added to our stack this year."</p>
+</div>
+</div>
+</section>
+<!-- Final CTA -->
+<section class="max-w-container-max mx-auto px-margin-desktop py-stack-lg mb-stack-lg relative z-10">
+<div class="relative overflow-hidden rounded-[40px] bg-gradient-to-br from-navy-panel to-navy-deep p-16 border border-brand-blue/20 text-center">
+<div class="ambient-orb -top-20 -right-20 opacity-30"></div>
+<div class="ambient-orb -bottom-20 -left-20 opacity-30"></div>
+<div class="relative z-10">
+<h2 class="font-display-lg text-display-lg text-primary mb-6">Start provisioning with confidence</h2>
+<p class="text-on-surface-variant text-title-md mb-10 max-w-2xl mx-auto">Join hundreds of teams who have simplified their cloud operations with Provisr.</p>
+<button class="bg-brand-blue text-white px-12 py-5 rounded-full font-bold text-title-md hover:scale-105 hover:shadow-[0_0_30px_-5px_rgba(59,130,246,0.6)] transition-all">Get Started for Free</button>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="bg-surface-dim border-t border-outline-variant/10 relative z-10">
+<div class="max-w-container-max mx-auto px-margin-desktop py-stack-lg flex flex-col md:flex-row justify-between items-center gap-stack-md">
+<div class="flex flex-col items-center md:items-start gap-4">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 bg-brand-blue rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-navy-deep text-[16px]" style="font-variation-settings: 'FILL' 1;">cloud_done</span>
+</div>
+<span class="font-display-lg text-title-md font-bold text-primary">Provisr</span>
+</div>
+<p class="text-on-surface-variant font-body-sm">© 2024 Provisr Cloud Solutions. All rights reserved.</p>
+</div>
+<div class="flex flex-wrap justify-center gap-8">
+<a class="text-on-surface-variant hover:text-brand-blue transition-colors" href="#">Privacy Policy</a>
+<a class="text-on-surface-variant hover:text-brand-blue transition-colors" href="#">Terms of Service</a>
+<a class="text-on-surface-variant hover:text-brand-blue transition-colors" href="#">Contact Support</a>
+<a class="text-on-surface-variant hover:text-brand-blue transition-colors" href="#">Documentation</a>
+</div>
+</div>
+</footer>
+<script>
+        // Simple scroll interaction for navbar
+        window.addEventListener('scroll', () => {
+            const nav = document.querySelector('nav');
+            if (window.scrollY > 20) {
+                nav.classList.add('py-2');
+                nav.classList.remove('py-4');
+            } else {
+                nav.classList.add('py-4');
+                nav.classList.remove('py-2');
+            }
+        });
+
+        // Hover effect for feature cards
+        const cards = document.querySelectorAll('.bento-card');
+        cards.forEach(card => {
+            card.addEventListener('mousemove', (e) => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                card.style.setProperty('--mouse-x', `${x}px`);
+                card.style.setProperty('--mouse-y', `${y}px`);
+            });
+        });
+    </script>
+</body></html>

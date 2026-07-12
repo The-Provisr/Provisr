@@ -17,12 +17,14 @@ import (
 
 	"github.com/provisr/platform/pkg/health"
 	"github.com/provisr/platform/pkg/middleware"
+	"github.com/provisr/platform/services/audit/internal/db"
 )
 
 type Config struct {
-	ServiceName string `json:"service_name"`
-	Port        string `json:"port"`
-	Environment string `json:"environment"`
+	ServiceName string    `json:"service_name"`
+	Port        string    `json:"port"`
+	Environment string    `json:"environment"`
+	Database    db.Config `json:"database"`
 }
 
 func main() {
@@ -33,7 +35,16 @@ func main() {
 		ServiceName: "audit",
 		Port:        "8080",
 		Environment: "development",
+		Database: db.Config{
+			Host:     "localhost",
+			Port:     5433,
+			Name:     "provisr",
+			User:     "audit_writer",
+			Password: "audit_writer_secret",
+			SSLMode:  "disable",
+		},
 	}
+
 
 	configFile, err := os.ReadFile("config.json")
 	if err == nil {
@@ -45,6 +56,14 @@ func main() {
 	} else {
 		log.Info().Msg("No config.json found; relying on environment defaults")
 	}
+	// Initialize database connection pool.
+	// The pool is long-lived; close it during graceful shutdown.
+	ctx := context.Background()
+	dbPool, err := db.NewPool(ctx, appConfig.Database)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to database")
+	}
+	defer dbPool.Close()
 
 	log.Info().
 		Str("service", appConfig.ServiceName).
@@ -53,7 +72,7 @@ func main() {
 		Msg("Initializing HTTP server")
 
 	r := chi.NewRouter()
-	
+
 	r.Use(chi_middleware.RequestID)
 	r.Use(chi_middleware.RealIP)
 	r.Use(chi_middleware.Recoverer)
@@ -93,11 +112,17 @@ func main() {
 		log.Fatal().Err(err).Msg("Server encountered a fatal error during startup")
 	case sig := <-shutdown:
 		log.Info().Str("signal", sig.String()).Msg("Graceful shutdown initiated")
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+
+		// Shutdown HTTP server first — stop accepting new requests.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
+		if err := srv.Shutdown(shutdownCtx); err != nil {
 			_ = srv.Close()
 		}
+
+		// Then close the database pool — drain in-flight queries.
+		dbPool.Close()
+
 		log.Info().Msg("Server exiting cleanly")
 	}
 }

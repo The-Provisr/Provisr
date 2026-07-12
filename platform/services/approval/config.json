@@ -1,5 +1,13 @@
 {
-  "service_name": "approval",
-  "port": "8084",
-  "environment": "dev"
+  "service_name": "audit",
+  "port": "8085",
+  "environment": "dev",
+  "database": {
+    "host": "localhost",
+    "port": 5433,
+    "name": "provisr",
+    "user": "audit_writer",
+    "password": "audit_writer_secret",
+    "sslmode": "disable"
+  }
 }

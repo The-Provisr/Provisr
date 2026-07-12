@@ -18,6 +18,8 @@ import (
 	"github.com/provisr/platform/pkg/health"
 	"github.com/provisr/platform/pkg/middleware"
 	"github.com/provisr/platform/services/audit/internal/db"
+	"github.com/provisr/platform/services/audit/internal/handler"
+	
 )
 
 type Config struct {
@@ -87,6 +89,9 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message":"Welcome to Provisr ` + appConfig.ServiceName + ` service"}`))
 	})
+		// Register audit event routes
+	eventHandler := handler.NewEventHandler(dbPool)
+	r.Post("/v1/audit/events", eventHandler.CreateEvent)
 
 	srv := &http.Server{
 		Addr:         ":" + appConfig.Port,

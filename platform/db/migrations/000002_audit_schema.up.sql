@@ -120,6 +120,15 @@ CREATE INDEX idx_audit_trace
 
 ALTER TABLE provisr_audit.audit_events ENABLE ROW LEVEL SECURITY;
 
+-- audit_writer role can access all rows (INSERT from audit service, SELECT for hash chain)
+CREATE POLICY audit_writer_all_access ON provisr_audit.audit_events
+    FOR ALL
+    TO audit_writer
+    USING (true)
+    WITH CHECK (true);
+
+-- Restrictive policy for all other roles (e.g. future auditor role)
+-- Filters rows by the session-level org_id setting
 CREATE POLICY tenant_isolation_audit ON provisr_audit.audit_events
     FOR ALL
     USING (org_id = current_setting('provisr.current_org', true)::uuid);
@@ -143,6 +152,7 @@ GRANT USAGE ON SCHEMA provisr_audit TO audit_writer;
 -- Grant INSERT only — explicitly NOT UPDATE or DELETE
 GRANT INSERT ON provisr_audit.audit_events TO audit_writer;
 
+GRANT SELECT ON provisr_audit.audit_events TO audit_writer;
 -- Restrict access to other tables in public schema if any
 -- (audit_writer should not touch anything else)
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM audit_writer;

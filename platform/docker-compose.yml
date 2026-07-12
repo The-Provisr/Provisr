@@ -13,10 +13,63 @@ services:
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: provisr
     ports:
-      # Mapped to 5433 to avoid conflicts with local Mac databases
       - "5433:5432"
     volumes:
       - provisr-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # -------------------------------------------------------------
+  # Orchestration Service (State Machine)
+  # -------------------------------------------------------------
+  orchestration:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: orchestration
+    container_name: provisr-orchestration
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: "postgres://postgres:secret@postgres:5432/provisr?sslmode=disable"
+      EVENT_SUBSCRIBERS: '["http://audit:8085/v1/audit/events"]'
+      PORT: "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # -------------------------------------------------------------
+  # Policy Engine Service (OPA/Rego)
+  # -------------------------------------------------------------
+  policy:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: policy
+    container_name: provisr-policy
+    ports:
+      - "8083:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # -------------------------------------------------------------
+  # Audit Service (Event Logging)
+  # -------------------------------------------------------------
+  audit:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: audit
+    container_name: provisr-audit
+    ports:
+      - "8085:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   provisr-db-data:

@@ -79,6 +79,7 @@ CREATE TABLE conversation_messages (
 );
 
 -- ROW LEVEL SECURITY (RLS)
+-- This enforces tenant isolation by strictly checking the current_setting variable[cite: 1].
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE provisioning_requests ENABLE ROW LEVEL SECURITY;

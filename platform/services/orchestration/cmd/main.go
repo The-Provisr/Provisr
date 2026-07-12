@@ -11,35 +11,38 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	chi_middleware "github.com/go-chi/chi/v5/middleware" // Aliased to prevent naming collision
+	chi_middleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	// Your custom shared workspace packages
 	"github.com/provisr/platform/pkg/health"
 	"github.com/provisr/platform/pkg/middleware"
+
+	"github.com/provisr/platform/services/orchestration/internal/events"
+	"github.com/provisr/platform/services/orchestration/internal/handler"
+	"github.com/provisr/platform/services/orchestration/internal/repository"
+	"github.com/provisr/platform/services/orchestration/internal/statemachine"
 )
 
 type Config struct {
-	ServiceName string `json:"service_name"`
-	Port        string `json:"port"`
-	Environment string `json:"environment"`
+	ServiceName      string   `json:"service_name"`
+	Port             string   `json:"port"`
+	Environment      string   `json:"environment"`
+	DatabaseURL      string   `json:"database_url"`
+	EventSubscribers []string `json:"event_subscribers"`
 }
 
 func main() {
-	// 1. Initialize structured logging
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
 
-	// 2. Load Configuration
 	appConfig := Config{
 		ServiceName: "orchestration",
 		Port:        "8080",
 		Environment: "development",
 	}
 
-	// Important: Run the app from the service root (e.g., `cd services/orchestration`)
-	// so it can find this config.json file!
 	configFile, err := os.ReadFile("config.json")
 	if err == nil {
 		if parseErr := json.Unmarshal(configFile, &appConfig); parseErr != nil {
@@ -51,35 +54,63 @@ func main() {
 		log.Info().Msg("No config.json found; relying on environment defaults")
 	}
 
+	if envURL := os.Getenv("DATABASE_URL"); envURL != "" {
+		appConfig.DatabaseURL = envURL
+		log.Info().Msg("Overrode database_url from environment")
+	}
+	if envSub := os.Getenv("EVENT_SUBSCRIBERS"); envSub != "" {
+		if err := json.Unmarshal([]byte(envSub), &appConfig.EventSubscribers); err != nil {
+			log.Warn().Err(err).Msg("Failed to parse EVENT_SUBSCRIBERS env var, keeping config.json value")
+		} else {
+			log.Info().Msg("Overrode event_subscribers from environment")
+		}
+	}
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		appConfig.Port = envPort
+	}
+
 	log.Info().
 		Str("service", appConfig.ServiceName).
 		Str("port", appConfig.Port).
 		Str("env", appConfig.Environment).
 		Msg("Initializing HTTP server")
 
-	// 3. Setup Router and Middleware
+	pool, err := pgxpool.New(context.Background(), appConfig.DatabaseURL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create database connection pool")
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(context.Background()); err != nil {
+		log.Fatal().Err(err).Msg("Failed to ping database")
+	}
+	log.Info().Msg("Connected to PostgreSQL")
+
+	repo := repository.New(pool)
+	machine := statemachine.New(repo)
+	publisher := events.NewHTTPPublisher(appConfig.EventSubscribers)
+	defer publisher.Close()
+	provisionHandler := handler.New(repo, machine, publisher)
+
 	r := chi.NewRouter()
 
 	r.Use(chi_middleware.RequestID)
 	r.Use(chi_middleware.RealIP)
 	r.Use(chi_middleware.Recoverer)
 	r.Use(chi_middleware.Timeout(60 * time.Second))
-
-	// STRICTLY using your custom logger here (the default Chi logger is gone)
 	r.Use(middleware.StructuredLogger)
 
-	// 4. Endpoints
-	// Using your shared health package
 	r.Get("/health", health.Handler(appConfig.ServiceName))
-
-	// Re-added the root endpoint that went missing
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message":"Welcome to Provisr ` + appConfig.ServiceName + ` service"}`))
 	})
 
-	// 5. Server Configuration
+	r.Post("/v1/provision", provisionHandler.CreateProvision)
+	r.Get("/v1/requests/{id}", provisionHandler.GetRequest)
+	r.Post("/v1/requests/{id}/transition", provisionHandler.TransitionRequest)
+
 	srv := &http.Server{
 		Addr:         ":" + appConfig.Port,
 		Handler:      r,
@@ -88,7 +119,6 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// 6. Graceful Shutdown
 	serverErrors := make(chan error, 1)
 	go func() {
 		log.Info().Str("addr", srv.Addr).Msg("Server listening")

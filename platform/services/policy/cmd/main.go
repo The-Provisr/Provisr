@@ -17,6 +17,8 @@ import (
 
 	"github.com/provisr/platform/pkg/health"
 	"github.com/provisr/platform/pkg/middleware"
+	"github.com/provisr/platform/services/policy/internal/evaluator"
+	"github.com/provisr/platform/services/policy/internal/handler"
 )
 
 type Config struct {
@@ -52,13 +54,19 @@ func main() {
 		Str("env", appConfig.Environment).
 		Msg("Initializing HTTP server")
 
+	policyEvaluator, err := evaluator.New(context.Background())
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize policy evaluator")
+	}
+
+	policyHandler := handler.NewPolicyHandler(policyEvaluator)
+
 	r := chi.NewRouter()
-	
+
 	r.Use(chi_middleware.RequestID)
 	r.Use(chi_middleware.RealIP)
 	r.Use(chi_middleware.Recoverer)
 	r.Use(chi_middleware.Timeout(60 * time.Second))
-
 	r.Use(middleware.StructuredLogger)
 
 	r.Get("/health", health.Handler(appConfig.ServiceName))
@@ -68,6 +76,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message":"Welcome to Provisr ` + appConfig.ServiceName + ` service"}`))
 	})
+
+	r.Post("/evaluate", policyHandler.EvaluatePolicy)
 
 	srv := &http.Server{
 		Addr:         ":" + appConfig.Port,

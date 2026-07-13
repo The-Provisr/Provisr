@@ -1,19 +1,20 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/provisr/platform/services/policy/internal/evaluator"
+	"github.com/provisr/platform/services/policy/internal/repository"
 )
 
 type EvaluateRequest struct {
-	OrgID            string   `json:"org_id"`
-	MonthlyBudgetUSD float64  `json:"monthly_budget_usd"`
-	AllowedRegions   []string `json:"allowed_regions"`
-	RequiredTags     []string `json:"required_tags"`
-	Manifest         Manifest `json:"manifest"`
+	OrgID    string   `json:"org_id"`
+	Manifest Manifest `json:"manifest"`
 }
 
 type Manifest struct {
@@ -23,24 +24,28 @@ type Manifest struct {
 	Tags                    map[string]string `json:"tags"`
 }
 
-type Violation struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+type EvaluateResponse struct {
+	Passed     bool                  `json:"passed"`
+	Violations []evaluator.Violation `json:"violations"`
 }
 
-type EvaluateResponse struct {
-	Allowed    bool        `json:"allowed"`
-	Decision   string      `json:"decision"`
-	Violations []Violation `json:"violations"`
+type PolicyEvaluator interface {
+	Evaluate(context.Context, any) (evaluator.EvaluationResult, error)
+}
+
+type OrganizationPolicyRepository interface {
+	GetOrganizationPolicy(context.Context, string) (repository.OrganizationPolicy, error)
 }
 
 type PolicyHandler struct {
-	evaluator *evaluator.Evaluator
+	evaluator  PolicyEvaluator
+	repository OrganizationPolicyRepository
 }
 
-func NewPolicyHandler(e *evaluator.Evaluator) *PolicyHandler {
+func NewPolicyHandler(e PolicyEvaluator, repo OrganizationPolicyRepository) *PolicyHandler {
 	return &PolicyHandler{
-		evaluator: e,
+		evaluator:  e,
+		repository: repo,
 	}
 }
 
@@ -52,10 +57,10 @@ func (h *PolicyHandler) EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 
 		_ = json.NewEncoder(w).Encode(EvaluateResponse{
-			Allowed:  false,
-			Decision: "deny",
-			Violations: []Violation{
+			Passed: false,
+			Violations: []evaluator.Violation{
 				{
+					Rule:    "request",
 					Code:    "INVALID_JSON",
 					Message: "Request body must be valid JSON.",
 				},
@@ -64,25 +69,92 @@ func (h *PolicyHandler) EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.AllowedRegions == nil {
-		req.AllowedRegions = []string{}
+	if req.OrgID == "" || req.Manifest.Provider == "" || req.Manifest.Region == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(EvaluateResponse{
+			Passed: false,
+			Violations: []evaluator.Violation{{
+				Rule:    "request",
+				Code:    "VALIDATION_ERROR",
+				Message: "org_id, manifest.provider, and manifest.region are required.",
+			}},
+		})
+		return
 	}
-	if req.RequiredTags == nil {
-		req.RequiredTags = []string{}
+	if _, err := uuid.Parse(req.OrgID); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(EvaluateResponse{
+			Passed: false,
+			Violations: []evaluator.Violation{{
+				Rule:    "request",
+				Code:    "VALIDATION_ERROR",
+				Message: "org_id must be a valid UUID.",
+			}},
+		})
+		return
 	}
+	if req.Manifest.EstimatedMonthlyCostUSD < 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(EvaluateResponse{
+			Passed: false,
+			Violations: []evaluator.Violation{{
+				Rule:    "request",
+				Code:    "VALIDATION_ERROR",
+				Message: "Estimated monthly cost cannot be negative.",
+			}},
+		})
+		return
+	}
+
 	if req.Manifest.Tags == nil {
 		req.Manifest.Tags = map[string]string{}
 	}
 
-	result, err := h.evaluator.Evaluate(r.Context(), req)
+	organizationPolicy, err := h.repository.GetOrganizationPolicy(r.Context(), req.OrgID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		code := "POLICY_CONFIGURATION_FAILED"
+		message := "Failed to load organization policy."
+		if errors.Is(err, repository.ErrPolicyNotFound) {
+			status = http.StatusNotFound
+			code = "POLICY_NOT_CONFIGURED"
+			message = "Organization policy was not found or is incomplete."
+		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(EvaluateResponse{
+			Passed: false,
+			Violations: []evaluator.Violation{{
+				Rule:    "organization_policy",
+				Code:    code,
+				Message: message,
+			}},
+		})
+		return
+	}
+
+	input := struct {
+		OrgID            string   `json:"org_id"`
+		MonthlyBudgetUSD float64  `json:"monthly_budget_usd"`
+		AllowedRegions   []string `json:"allowed_regions"`
+		RequiredTags     []string `json:"required_tags"`
+		Manifest         Manifest `json:"manifest"`
+	}{
+		OrgID:            req.OrgID,
+		MonthlyBudgetUSD: organizationPolicy.MonthlyBudgetUSD,
+		AllowedRegions:   organizationPolicy.AllowedRegions,
+		RequiredTags:     organizationPolicy.RequiredTags,
+		Manifest:         req.Manifest,
+	}
+
+	result, err := h.evaluator.Evaluate(r.Context(), input)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 
 		_ = json.NewEncoder(w).Encode(EvaluateResponse{
-			Allowed:  false,
-			Decision: "deny",
-			Violations: []Violation{
+			Passed: false,
+			Violations: []evaluator.Violation{
 				{
+					Rule:    "policy_engine",
 					Code:    "POLICY_EVALUATION_FAILED",
 					Message: "Policy evaluation failed.",
 				},
@@ -92,23 +164,8 @@ func (h *PolicyHandler) EvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := EvaluateResponse{
-		Allowed:    result.Allowed,
-		Decision:   result.Decision,
-		Violations: []Violation{},
-	}
-
-	for _, violation := range result.Violations {
-		code := "POLICY_VIOLATION"
-		message := violation
-		if violationCode, violationMessage, ok := strings.Cut(violation, ": "); ok && violationCode != "" && violationMessage != "" {
-			code = violationCode
-			message = violationMessage
-		}
-
-		response.Violations = append(response.Violations, Violation{
-			Code:    code,
-			Message: message,
-		})
+		Passed:     result.Passed,
+		Violations: result.Violations,
 	}
 
 	w.WriteHeader(http.StatusOK)

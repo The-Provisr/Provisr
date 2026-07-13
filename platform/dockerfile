@@ -1,19 +1,21 @@
 # ==============================================================================
 # Stage 1: Build Environment
 # ==============================================================================
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /workspace
 
-# Copy the Go workspace configuration
-COPY go.work go.work.sum ./
+# Copy the Go workspace configuration and every workspace module descriptor.
+COPY go.work go.work.sum go.mod ./
 
 # Copy the shared packages and protobuf definitions
 COPY pkg/ ./pkg/
 COPY proto/ ./proto/
+COPY internal/ ./internal/
+COPY tests/integration/go.mod ./tests/integration/go.mod
 
 # Copy the actual microservices code
 COPY services/ ./services/
@@ -25,6 +27,11 @@ ENV TARGET_SERVICE=$SERVICE_NAME
 # Build the specific Go binary with optimizations (disable CGO for Alpine compatibility)
 RUN cd services/${TARGET_SERVICE} && \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /go/bin/service ./cmd/main.go
+
+# Collect runtime configuration and optional service assets such as Rego policies.
+RUN mkdir -p /go/runtime && \
+    cp services/${TARGET_SERVICE}/config.json /go/runtime/config.json && \
+    if [ -d services/${TARGET_SERVICE}/policies ]; then cp -R services/${TARGET_SERVICE}/policies /go/runtime/policies; fi
 
 # ==============================================================================
 # Stage 2: Minimal Production Image
@@ -42,8 +49,8 @@ ENV TARGET_SERVICE=$SERVICE_NAME
 # Copy the compiled binary from the builder stage
 COPY --from=builder /go/bin/service ./service
 
-# Copy the specific configuration file for this service
-COPY services/${TARGET_SERVICE}/config.json ./config.json
+# Copy service configuration and optional runtime assets from the builder.
+COPY --from=builder /go/runtime/ ./
 
 # Enforce non-root execution
 USER provisr

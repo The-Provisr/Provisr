@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chi_middleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -19,12 +20,14 @@ import (
 	"github.com/provisr/platform/pkg/middleware"
 	"github.com/provisr/platform/services/policy/internal/evaluator"
 	"github.com/provisr/platform/services/policy/internal/handler"
+	"github.com/provisr/platform/services/policy/internal/repository"
 )
 
 type Config struct {
 	ServiceName string `json:"service_name"`
 	Port        string `json:"port"`
 	Environment string `json:"environment"`
+	DatabaseURL string `json:"database_url"`
 }
 
 func main() {
@@ -47,6 +50,12 @@ func main() {
 	} else {
 		log.Info().Msg("No config.json found; relying on environment defaults")
 	}
+	if envURL := os.Getenv("DATABASE_URL"); envURL != "" {
+		appConfig.DatabaseURL = envURL
+	}
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		appConfig.Port = envPort
+	}
 
 	log.Info().
 		Str("service", appConfig.ServiceName).
@@ -59,7 +68,17 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize policy evaluator")
 	}
 
-	policyHandler := handler.NewPolicyHandler(policyEvaluator)
+	pool, err := pgxpool.New(context.Background(), appConfig.DatabaseURL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create database connection pool")
+	}
+	defer pool.Close()
+	if err := pool.Ping(context.Background()); err != nil {
+		log.Fatal().Err(err).Msg("Failed to ping database")
+	}
+
+	organizationRepository := repository.NewOrganizationRepository(pool)
+	policyHandler := handler.NewPolicyHandler(policyEvaluator, organizationRepository)
 
 	r := chi.NewRouter()
 
@@ -77,7 +96,9 @@ func main() {
 		_, _ = w.Write([]byte(`{"message":"Welcome to Provisr ` + appConfig.ServiceName + ` service"}`))
 	})
 
-	r.Post("/evaluate", policyHandler.EvaluatePolicy)
+	r.Route("/v1/policy", func(r chi.Router) {
+		r.Post("/evaluate", policyHandler.EvaluatePolicy)
+	})
 
 	srv := &http.Server{
 		Addr:         ":" + appConfig.Port,

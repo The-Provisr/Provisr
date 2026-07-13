@@ -21,6 +21,7 @@ import (
 
 	"github.com/provisr/platform/services/orchestration/internal/events"
 	"github.com/provisr/platform/services/orchestration/internal/handler"
+	policyclient "github.com/provisr/platform/services/orchestration/internal/policy"
 	"github.com/provisr/platform/services/orchestration/internal/repository"
 	"github.com/provisr/platform/services/orchestration/internal/statemachine"
 )
@@ -31,6 +32,7 @@ type Config struct {
 	Environment      string   `json:"environment"`
 	DatabaseURL      string   `json:"database_url"`
 	EventSubscribers []string `json:"event_subscribers"`
+	PolicyServiceURL string   `json:"policy_service_url"`
 }
 
 func main() {
@@ -68,6 +70,9 @@ func main() {
 	if envPort := os.Getenv("PORT"); envPort != "" {
 		appConfig.Port = envPort
 	}
+	if envURL := os.Getenv("POLICY_SERVICE_URL"); envURL != "" {
+		appConfig.PolicyServiceURL = envURL
+	}
 
 	log.Info().
 		Str("service", appConfig.ServiceName).
@@ -90,7 +95,9 @@ func main() {
 	machine := statemachine.New(repo)
 	publisher := events.NewHTTPPublisher(appConfig.EventSubscribers)
 	defer publisher.Close()
-	provisionHandler := handler.New(repo, machine, publisher)
+	policyClient := policyclient.NewClient(appConfig.PolicyServiceURL)
+	defer policyClient.Close()
+	provisionHandler := handler.New(repo, machine, publisher, policyClient)
 
 	r := chi.NewRouter()
 
@@ -110,6 +117,7 @@ func main() {
 	r.Post("/v1/provision", provisionHandler.CreateProvision)
 	r.Get("/v1/requests/{id}", provisionHandler.GetRequest)
 	r.Post("/v1/requests/{id}/transition", provisionHandler.TransitionRequest)
+	r.Post("/v1/requests/{id}/policy-check", provisionHandler.CheckPolicy)
 
 	srv := &http.Server{
 		Addr:         ":" + appConfig.Port,

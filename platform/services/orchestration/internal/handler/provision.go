@@ -13,6 +13,7 @@ import (
 
 	"github.com/provisr/platform/services/orchestration/internal/events"
 	"github.com/provisr/platform/services/orchestration/internal/models"
+	policyclient "github.com/provisr/platform/services/orchestration/internal/policy"
 	"github.com/provisr/platform/services/orchestration/internal/repository"
 	"github.com/provisr/platform/services/orchestration/internal/statemachine"
 )
@@ -21,10 +22,15 @@ type ProvisionHandler struct {
 	repo    *repository.Repository
 	machine *statemachine.Machine
 	events  events.Publisher
+	policy  PolicyClient
 }
 
-func New(repo *repository.Repository, machine *statemachine.Machine, events events.Publisher) *ProvisionHandler {
-	return &ProvisionHandler{repo: repo, machine: machine, events: events}
+type PolicyClient interface {
+	Evaluate(context.Context, policyclient.EvaluateRequest) (policyclient.EvaluateResponse, error)
+}
+
+func New(repo *repository.Repository, machine *statemachine.Machine, events events.Publisher, policy PolicyClient) *ProvisionHandler {
+	return &ProvisionHandler{repo: repo, machine: machine, events: events, policy: policy}
 }
 
 type errorResponse struct {
@@ -229,4 +235,105 @@ func (h *ProvisionHandler) TransitionRequest(w http.ResponseWriter, r *http.Requ
 	}()
 
 	writeJSON(w, http.StatusOK, updated)
+}
+
+func (h *ProvisionHandler) CheckPolicy(w http.ResponseWriter, r *http.Request) {
+	requestID, err := uuidFromParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_ID", "request_id must be a valid UUID")
+		return
+	}
+
+	var body struct {
+		Manifest policyclient.Manifest `json:"manifest"`
+		Actor    string                `json:"actor,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "request body is not valid JSON")
+		return
+	}
+	if body.Manifest.Provider == "" || body.Manifest.Region == "" || body.Manifest.EstimatedMonthlyCostUSD < 0 {
+		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "manifest.provider and manifest.region are required, and estimated cost cannot be negative")
+		return
+	}
+	if body.Manifest.Tags == nil {
+		body.Manifest.Tags = map[string]string{}
+	}
+	if body.Actor == "" {
+		body.Actor = "system"
+	}
+
+	current, err := h.repo.GetRequest(r.Context(), requestID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "request not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to fetch request")
+		return
+	}
+	if current.Status != models.StatusPolicyCheck {
+		writeError(w, http.StatusConflict, "INVALID_STATE", "request must be in POLICY_CHECK before evaluation")
+		return
+	}
+
+	decision, err := h.policy.Evaluate(r.Context(), policyclient.EvaluateRequest{
+		OrgID:    current.OrgID,
+		Manifest: body.Manifest,
+	})
+	if err != nil {
+		log.Error().Err(err).Str("request_id", requestID.String()).Msg("policy evaluation request failed")
+		writeError(w, http.StatusBadGateway, "POLICY_SERVICE_ERROR", "policy evaluation could not be completed")
+		return
+	}
+
+	nextStatus := models.StatusPendingApproval
+	if !decision.Passed {
+		nextStatus = models.StatusPendingAgent
+	}
+
+	updated, err := h.machine.Transition(r.Context(), statemachine.TransitionInput{
+		RequestID:       requestID,
+		NewStatus:       nextStatus,
+		ExpectedVersion: current.StateVersion,
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrVersionConflict) {
+			writeError(w, http.StatusConflict, "VERSION_CONFLICT", "request was modified during policy evaluation")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "TRANSITION_FAILED", "failed to apply policy decision")
+		return
+	}
+
+	go h.publishTransition(updated, models.StatusPolicyCheck, body.Actor)
+
+	writeJSON(w, http.StatusOK, struct {
+		Passed     bool                        `json:"passed"`
+		Violations []policyclient.Violation    `json:"violations"`
+		Request    *models.ProvisioningRequest `json:"request"`
+	}{
+		Passed:     decision.Passed,
+		Violations: decision.Violations,
+		Request:    updated,
+	})
+}
+
+func (h *ProvisionHandler) publishTransition(updated *models.ProvisioningRequest, previous models.RequestStatus, actor string) {
+	event := models.StateChangedEvent{
+		EventID:        uuid.New(),
+		RequestID:      updated.RequestID,
+		OrgID:          updated.OrgID,
+		PreviousStatus: previous,
+		NewStatus:      updated.Status,
+		StateVersion:   updated.StateVersion,
+		Actor:          actor,
+		Timestamp:      time.Now().UTC(),
+	}
+	if updated.CorrelationID != nil {
+		event.CorrelationID = *updated.CorrelationID
+	}
+	if err := h.events.PublishStateChanged(context.Background(), event); err != nil {
+		log.Error().Err(err).Str("request_id", updated.RequestID.String()).Msg("failed to publish state changed event")
+	}
 }

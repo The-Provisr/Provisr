@@ -1,0 +1,11 @@
+{
+  "service_name": "orchestration",
+  "port": "8080",
+  "environment": "dev",
+  "database_url": "postgres://postgres:secret@localhost:5433/provisr?sslmode=disable",
+  "event_subscribers": [
+    "http://localhost:8090/v1/events",
+    "http://localhost:8086/v1/events",
+    "http://localhost:8085/v1/audit/events"
+  ]
+}

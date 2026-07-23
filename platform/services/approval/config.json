@@ -1,0 +1,5 @@
+{
+  "service_name": "approval",
+  "port": "8084",
+  "environment": "dev"
+}

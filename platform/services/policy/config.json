@@ -1,0 +1,5 @@
+{
+  "service_name": "policy",
+  "port": "8083",
+  "environment": "dev"
+}

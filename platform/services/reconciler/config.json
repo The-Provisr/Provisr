@@ -1,0 +1,5 @@
+{
+  "service_name": "reconciler",
+  "port": "8087",
+  "environment": "dev"
+}

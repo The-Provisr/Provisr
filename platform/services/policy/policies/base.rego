@@ -2,21 +2,22 @@ package provisr.policy
 
 import rego.v1
 
-default allow := false
+default passed := false
 
-allow if {
-	count(deny) == 0
+passed if {
+	count(violations) == 0
 }
 
-deny := array.concat(array.concat(budget_violations, region_violations), tag_violations)
+violations := array.concat(array.concat(budget_violations, region_violations), tag_violations)
 
 budget_violations := [violation |
 	input.manifest.estimated_monthly_cost_usd > input.monthly_budget_usd
 
 	violation := {
+		"rule": "monthly_budget_usd",
 		"code": "BUDGET_EXCEEDED",
 		"message": sprintf(
-			"Estimated monthly cost %.2f USD exceeds allowed budget %.2f USD.",
+			"monthly_budget_usd rule failed: estimated monthly cost %.2f USD exceeds budget %.2f USD",
 			[input.manifest.estimated_monthly_cost_usd, input.monthly_budget_usd],
 		),
 	}
@@ -26,8 +27,9 @@ region_violations := [violation |
 	not allowed_region(input.manifest.region)
 
 	violation := {
+		"rule": "allowed_regions",
 		"code": "REGION_NOT_ALLOWED",
-		"message": sprintf("Region '%s' is not allowed for this organization.", [input.manifest.region]),
+		"message": sprintf("allowed_regions rule failed: region %q is not allowed", [input.manifest.region]),
 	}
 ]
 
@@ -36,8 +38,9 @@ tag_violations := [violation |
 	not has_required_tag(required_tag)
 
 	violation := {
+		"rule": "required_tags",
 		"code": "MISSING_REQUIRED_TAG",
-		"message": sprintf("Required tag '%s' is missing.", [required_tag]),
+		"message": sprintf("required_tags rule failed: required tag %q is missing", [required_tag]),
 	}
 ]
 

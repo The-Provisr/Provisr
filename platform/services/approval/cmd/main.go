@@ -17,12 +17,15 @@ import (
 
 	"github.com/provisr/platform/pkg/health"
 	"github.com/provisr/platform/pkg/middleware"
+	"github.com/provisr/platform/services/approval/internal/handler"
+	"github.com/provisr/platform/services/approval/internal/orchestration"
 )
 
 type Config struct {
-	ServiceName string `json:"service_name"`
-	Port        string `json:"port"`
-	Environment string `json:"environment"`
+	ServiceName             string `json:"service_name"`
+	Port                    string `json:"port"`
+	Environment             string `json:"environment"`
+	OrchestrationServiceURL string `json:"orchestration_service_url"`
 }
 
 func main() {
@@ -45,6 +48,12 @@ func main() {
 	} else {
 		log.Info().Msg("No config.json found; relying on environment defaults")
 	}
+	if envURL := os.Getenv("ORCHESTRATION_SERVICE_URL"); envURL != "" {
+		appConfig.OrchestrationServiceURL = envURL
+	}
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		appConfig.Port = envPort
+	}
 
 	log.Info().
 		Str("service", appConfig.ServiceName).
@@ -52,8 +61,12 @@ func main() {
 		Str("env", appConfig.Environment).
 		Msg("Initializing HTTP server")
 
+	orchestrationClient := orchestration.NewClient(appConfig.OrchestrationServiceURL)
+	defer orchestrationClient.Close()
+	approvalHandler := handler.New(orchestrationClient)
+
 	r := chi.NewRouter()
-	
+
 	r.Use(chi_middleware.RequestID)
 	r.Use(chi_middleware.RealIP)
 	r.Use(chi_middleware.Recoverer)
@@ -68,6 +81,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message":"Welcome to Provisr ` + appConfig.ServiceName + ` service"}`))
 	})
+	r.Post("/v1/approvals/{request_id}/decision", approvalHandler.Decide)
 
 	srv := &http.Server{
 		Addr:         ":" + appConfig.Port,

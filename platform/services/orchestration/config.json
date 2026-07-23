@@ -2,7 +2,8 @@
   "service_name": "orchestration",
   "port": "8080",
   "environment": "dev",
-  "database_url": "postgres://postgres:secret@localhost:5433/provisr?sslmode=disable",
+  "database_url": "postgres://provisr:provisr_dev@localhost:5433/provisr?sslmode=disable",
+  "policy_service_url": "http://localhost:8083",
   "event_subscribers": [
     "http://localhost:8090/v1/events",
     "http://localhost:8086/v1/events",

@@ -8,76 +8,82 @@ services:
       POSTGRES_PASSWORD: provisr_dev
       POSTGRES_DB: provisr
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - provisr-db-data:/var/lib/postgresql/data
+      - ./db/migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/000001_init_schema.up.sql:ro
+      - ./db/migrations/000002_add_orchestration_columns.up.sql:/docker-entrypoint-initdb.d/000002_add_orchestration_columns.up.sql:ro
+      - ./db/migrations/000003_add_policy_configuration.up.sql:/docker-entrypoint-initdb.d/000003_add_policy_configuration.up.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U provisr -d provisr"]
       interval: 5s
-      timeout: 3s
-      retries: 5
+      timeout: 5s
+      retries: 10
 
-  # -------------------------------------------------------------
-  # Orchestration Service (State Machine)
-  # -------------------------------------------------------------
   orchestration:
     build:
       context: .
+      dockerfile: dockerfile
       args:
         SERVICE_NAME: orchestration
     container_name: provisr-orchestration
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: "postgres://postgres:secret@postgres:5432/provisr?sslmode=disable"
+      DATABASE_URL: "postgres://provisr:provisr_dev@postgres:5432/provisr?sslmode=disable"
+      POLICY_SERVICE_URL: "http://policy:8080"
       EVENT_SUBSCRIBERS: '["http://audit:8085/v1/audit/events"]'
       PORT: "8080"
     depends_on:
       postgres:
         condition: service_healthy
+      policy:
+        condition: service_started
 
-  # -------------------------------------------------------------
-  # Policy Engine Service (OPA/Rego)
-  # -------------------------------------------------------------
   policy:
     build:
       context: .
+      dockerfile: dockerfile
       args:
         SERVICE_NAME: policy
     container_name: provisr-policy
     ports:
       - "8083:8080"
+    environment:
+      DATABASE_URL: "postgres://provisr:provisr_dev@postgres:5432/provisr?sslmode=disable"
+      PORT: "8080"
     depends_on:
       postgres:
         condition: service_healthy
 
-  # -------------------------------------------------------------
-  # Audit Service (Event Logging)
-  # -------------------------------------------------------------
+  approval:
+    build:
+      context: .
+      dockerfile: dockerfile
+      args:
+        SERVICE_NAME: approval
+    container_name: provisr-approval
+    ports:
+      - "8084:8080"
+    environment:
+      ORCHESTRATION_SERVICE_URL: "http://orchestration:8080"
+      PORT: "8080"
+    depends_on:
+      orchestration:
+        condition: service_started
+
   audit:
     build:
       context: .
+      dockerfile: dockerfile
       args:
         SERVICE_NAME: audit
     container_name: provisr-audit
     ports:
-      - "8085:8080"
+      - "8085:8085"
     depends_on:
       postgres:
         condition: service_healthy
-
-volumes:
-  provisr-db-data:
-    name: provisr-db-data
-      - "${POSTGRES_PORT:-5433}:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./db/migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/000001_init_schema.up.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U provisr -d provisr"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   redis:
     image: redis:7
@@ -98,7 +104,7 @@ volumes:
     container_name: provisr-localstack
     restart: unless-stopped
     ports:
-      - "4566:4566" # single edge port for all emulated AWS services
+      - "4566:4566"
     environment:
       SERVICES: sqs,s3,dynamodb,events
       DEBUG: 1
@@ -107,11 +113,6 @@ volumes:
     volumes:
       - localstackdata:/var/lib/localstack
       - /var/run/docker.sock:/var/run/docker.sock
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   jaeger:
     image: jaegertracing/all-in-one:1.57
@@ -120,11 +121,11 @@ volumes:
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686" # Jaeger UI
-      - "4317:4317" # OTLP gRPC
-      - "4318:4318" # OTLP HTTP
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
 
 volumes:
-  pgdata:
+  provisr-db-data:
   redisdata:
   localstackdata:

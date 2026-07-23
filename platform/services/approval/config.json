@@ -1,5 +1,6 @@
 {
   "service_name": "approval",
   "port": "8084",
-  "environment": "dev"
+  "environment": "dev",
+  "orchestration_service_url": "http://localhost:8080"
 }

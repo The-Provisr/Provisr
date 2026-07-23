@@ -2,16 +2,22 @@ package evaluator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/open-policy-agent/opa/v1/rego"
 )
 
+type Violation struct {
+	Rule    string `json:"rule"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 type EvaluationResult struct {
-	Allowed    bool     `json:"allowed"`
-	Decision   string   `json:"decision"`
-	Violations []string `json:"violations"`
+	Passed     bool        `json:"passed"`
+	Violations []Violation `json:"violations"`
 }
 
 type Evaluator struct {
@@ -23,10 +29,13 @@ func New(ctx context.Context) (*Evaluator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read base policy: %w", err)
 	}
+	return NewFromSource(ctx, string(policyBytes))
+}
 
+func NewFromSource(ctx context.Context, policySource string) (*Evaluator, error) {
 	r := rego.New(
-		rego.Query("data.provisr.policy"),
-		rego.Module("base.rego", string(policyBytes)),
+		rego.Query("data.provisr.policy.violations"),
+		rego.Module("base.rego", policySource),
 	)
 
 	query, err := r.PrepareForEval(ctx)
@@ -49,40 +58,18 @@ func (e *Evaluator) Evaluate(ctx context.Context, input any) (EvaluationResult, 
 		return EvaluationResult{}, fmt.Errorf("policy returned no result")
 	}
 
-	value, ok := results[0].Expressions[0].Value.(map[string]any)
-	if !ok {
-		return EvaluationResult{}, fmt.Errorf("unexpected policy result format")
+	data, err := json.Marshal(results[0].Expressions[0].Value)
+	if err != nil {
+		return EvaluationResult{}, fmt.Errorf("marshal policy result: %w", err)
 	}
 
-	denyValues, _ := value["deny"].([]any)
-
-	violations := make([]string, 0, len(denyValues))
-	for _, item := range denyValues {
-		violationMap, ok := item.(map[string]any)
-		if !ok {
-			violations = append(violations, fmt.Sprint(item))
-			continue
-		}
-
-		code, _ := violationMap["code"].(string)
-		message, _ := violationMap["message"].(string)
-
-		if code != "" && message != "" {
-			violations = append(violations, fmt.Sprintf("%s: %s", code, message))
-		} else {
-			violations = append(violations, fmt.Sprint(item))
-		}
-	}
-
-	allowed := len(violations) == 0
-	decision := "deny"
-	if allowed {
-		decision = "allow"
+	violations := make([]Violation, 0)
+	if err := json.Unmarshal(data, &violations); err != nil {
+		return EvaluationResult{}, fmt.Errorf("decode policy violations: %w", err)
 	}
 
 	return EvaluationResult{
-		Allowed:    allowed,
-		Decision:   decision,
+		Passed:     len(violations) == 0,
 		Violations: violations,
 	}, nil
 }

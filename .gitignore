@@ -1,0 +1,82 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# AI tooling
+.claude/
+.cursor/
+
+# Node / TS
+node_modules/
+dist/
+.cache/
+.turbo/
+.next/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.uv/
+.pytest_cache/
+.ruff_cache/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Build artefacts
+build/
+bin/
+
+# Docker
+.docker/
+
+# Environment
+.env
+.env.*
+*.pem
+*.key
+secrets.yaml
+credentials.json
+
+# Local-only
+/scratch/
+/local/
+TODO.local.md
+NOTES.local.md
+*.local

@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: packages/proto
+    lint:
+      use:
+        - STANDARD
+      except:
+        - ENUM_VALUE_PREFIX
+        - PACKAGE_VERSION_SUFFIX
+    breaking:
+      use:
+        - FILE

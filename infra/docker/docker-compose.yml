@@ -1,0 +1,224 @@
+services:
+  # ── Infrastructure (always on) ──
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: provisr
+      POSTGRES_USER: provisr
+      POSTGRES_PASSWORD: provisr-dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U provisr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  localstack:
+    image: localstack/localstack:4.0
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs,s3,dynamodb,events
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - localstack_data:/var/lib/localstack
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+
+  # ── Backend services (profile: backend) ──
+  policy-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./policy-service"]
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  state-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./state-service"]
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  provisioning-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./provisioning-service"]
+    ports:
+      - "8083:8083"
+    environment:
+      PORT: "8083"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      AWS_ENDPOINT_URL: http://localstack:4566
+    depends_on:
+      postgres: { condition: service_healthy }
+      localstack: { condition: service_started }
+
+  approval-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./approval-service"]
+    ports:
+      - "8084:8084"
+    environment:
+      PORT: "8084"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  audit-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./audit-service"]
+    ports:
+      - "8085:8085"
+    environment:
+      PORT: "8085"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  notification-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./notification-service"]
+    ports:
+      - "8086:8086"
+    environment:
+      PORT: "8086"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  reconciler:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./reconciler"]
+    ports:
+      - "8087:8087"
+    environment:
+      PORT: "8087"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ── Agent layer (profile: agent) ──
+  agent:
+    profiles: [all, agent]
+    build:
+      context: ../../agent
+      dockerfile: ../infra/docker/Dockerfile.agent
+    ports:
+      - "5000:5000"
+    environment:
+      PORT: "5000"
+      REDIS_URL: redis://redis:6379/0
+      ORCHESTRATOR_URL: http://orchestrator:4000
+    depends_on:
+      redis: { condition: service_healthy }
+      orchestrator:
+        condition: service_started
+        required: false
+
+  mcp:
+    profiles: [all, agent]
+    build:
+      context: ../../mcp
+      dockerfile: ../infra/docker/Dockerfile.mcp
+    ports:
+      - "5100:5100"
+    environment:
+      PORT: "5100"
+      BACKEND_URL: http://provisioning-service:8083
+    depends_on:
+      provisioning-service:
+        condition: service_started
+        required: false
+
+  # ── Orchestrator (profile: orchestrator) ──
+  orchestrator:
+    profiles: [all, orchestrator]
+    build:
+      context: ../../orchestrator
+      dockerfile: ../infra/docker/Dockerfile.orchestrator
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: "4000"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # ── Frontend (profile: frontend) ──
+  frontend:
+    profiles: [all, frontend]
+    build:
+      context: ../../frontend
+      dockerfile: ../infra/docker/Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      NEXT_PUBLIC_ORCHESTRATOR_URL: http://localhost:4000
+    depends_on:
+      orchestrator:
+        condition: service_started
+        required: false
+
+volumes:
+  pgdata:
+  localstack_data:

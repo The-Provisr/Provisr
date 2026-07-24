@@ -1,0 +1,18 @@
+{
+  "name": "provisr",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "task dev",
+    "build": "task build",
+    "test": "task test",
+    "lint": "task lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

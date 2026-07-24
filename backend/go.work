@@ -1,0 +1,11 @@
+go 1.23
+
+use (
+	./cmd/policy-service
+	./cmd/state-service
+	./cmd/provisioning-service
+	./cmd/approval-service
+	./cmd/audit-service
+	./cmd/notification-service
+	./cmd/reconciler
+)

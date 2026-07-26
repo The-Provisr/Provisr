@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  CopyIcon,
-  FolderKanbanIcon,
-  LayoutGridIcon,
+  ClipboardListIcon,
+  GaugeIcon,
   MessageSquareIcon,
+  ScrollTextIcon,
+  ServerStackIcon,
   SettingsIcon,
+  ShieldCheckIcon,
   SunIcon,
-  UsersIcon,
-  ZapIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 
@@ -19,13 +19,13 @@ const navItems = [
   {
     label: "Workspace Dashboard",
     href: "/workspace",
-    icon: LayoutGridIcon,
+    icon: GaugeIcon,
     match: ["/workspace", "/policy"],
   },
-  { label: "Requests", href: "/requests", icon: FolderKanbanIcon },
-  { label: "Approvals", href: "/approvals", icon: UsersIcon, indicator: true },
-  { label: "Resources", href: "/resources", icon: ZapIcon },
-  { label: "Audit Log", href: "/audit", icon: CopyIcon },
+  { label: "Requests", href: "/requests", icon: ClipboardListIcon },
+  { label: "Approvals", href: "/approvals", icon: ShieldCheckIcon, indicator: true },
+  { label: "Resources", href: "/resources", icon: ServerStackIcon },
+  { label: "Audit Log", href: "/audit", icon: ScrollTextIcon },
   { label: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
@@ -36,9 +36,16 @@ export function NavigationRail() {
     <nav className="hidden w-16 shrink-0 flex-col items-center border-r border-gray-100 bg-white py-4 md:flex">
       <Link
         aria-label="Provisr chat"
-        className="mb-2 flex size-10 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-blue-600 text-white shadow-sm"
+        className="mb-2 flex size-10 items-center justify-center"
         href="/chat"
       >
+        <img
+          alt=""
+         
+          height={40}
+          src="/logo.webp"
+          width={40}
+        />
         <span className="sr-only">Provisr</span>
       </Link>
 
@@ -57,7 +64,7 @@ export function NavigationRail() {
               className={cn(
                 "relative inline-flex size-9 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100",
                 active
-                  ? "bg-slate-900 text-white"
+                  ? "bg-gray-100 text-white"
                   : "text-gray-400 hover:bg-gray-100 hover:text-gray-600",
               )}
               href={item.href}

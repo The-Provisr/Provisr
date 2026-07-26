@@ -1,96 +1,107 @@
-# Provisr Chat UI Design
+# Provisr Frontend Design
 
-This design spec is the source of truth for the Provisr chat front-end. It is based on the supplied Orbita GPT Tailwind reference and should guide future chat, sidebar, composer, and UI component work.
+This design spec is the source of truth for the Provisr frontend. It adapts the supplied Framer-style dark canvas direction to a chat-first governed cloud infrastructure product.
+
+## Product Model
+
+Provisr is an operational app, not a marketing site.
+
+- Chat is the primary experience for requesting infrastructure.
+- Workspace Dashboard owns admin and insight surfaces.
+- Requests, approvals, resources, and audit are operational views.
+- The global icon rail contains only top-level navigation.
 
 ## Visual Direction
 
-The chat UI is a quiet, work-focused infrastructure assistant surface. It uses a bright white canvas, pale gray separators, compact navigation, rounded controls, and restrained slate primary actions. The interface should feel precise and operational, not like a marketing page.
+The app uses a near-black canvas with lifted charcoal panels and high-contrast white text. It should feel precise, calm, and cinematic without becoming decorative. Use one or two gradient atmosphere cards sparingly inside grids; never turn whole sections into gradients.
+
+The interface language is:
+
+- Near-black canvas.
+- Charcoal surface cards.
+- Pure white primary pill buttons.
+- Muted gray secondary text.
+- Blue only for focus, links, and selected signals.
+- Gradient cards only as rare atmospheric accents.
+
+## Tokens
+
+| Token | Value | Use |
+|---|---:|---|
+| Canvas | `#050505` | Page and app background |
+| Surface 1 | `#141414` | Sidebars, panels, cards |
+| Surface 2 | `#222222` | Selected state, elevated panels, secondary controls |
+| Ink | `#ffffff` | Headings and primary text |
+| Ink muted | `#999999` | Secondary text and meta |
+| Hairline | `rgba(255,255,255,.10)` | Borders |
+| Hairline soft | `rgba(255,255,255,.07)` | Dividers |
+| Accent blue | `#0099ff` | Focus rings, links, selection only |
+| Primary CTA | `#ffffff` on `#050505` | Main action pills |
+
+## Typography
+
+Use Inter across the product with OpenType character variants enabled. Keep letter spacing at normal product UI spacing; the attached Framer marketing spec uses aggressive display tracking, but Provisr screens are operational and must remain readable.
+
+- Page titles: compact, confident, white.
+- Body: 14-15px with tight but readable line height.
+- Captions and metadata: muted gray.
+- Tables: tabular figures where possible.
 
 ## Layout
 
-The desktop layout has three fixed regions:
+The desktop app keeps the established Provisr structure:
 
 | Region | Width | Purpose |
 |---|---:|---|
-| Icon rail | 64px | Global product navigation and user controls |
-| Chat sidebar | 260px | New chat, saved chats, and recent history |
-| Main chat | Fluid | Conversation header, messages, tables, actions, composer |
+| Icon rail | 64px | Top-level app navigation |
+| Chat sidebar or workspace sidebar | 260px | Contextual navigation/history |
+| Main content | Fluid | Chat, dashboard, tables, drawers |
 
-The body is full viewport height, non-scrolling at the page level, and each scrollable region manages its own overflow.
-
-## Tailwind Tokens
-
-| Token | Tailwind |
-|---|---|
-| Page background | `bg-gray-50` |
-| Surface | `bg-white` |
-| Soft input surface | `bg-gray-50` |
-| Primary action | `bg-slate-900 text-white hover:bg-slate-800` |
-| Borders | `border-gray-100`, `border-gray-200` |
-| Main text | `text-gray-900`, `text-gray-800` |
-| Secondary text | `text-gray-600`, `text-gray-500` |
-| Muted icon text | `text-gray-400` |
-| Focus ring | `focus-visible:ring-2 focus-visible:ring-blue-100` |
-| Main content max width | `max-w-[850px]` |
-| Icon rail width | `w-16` |
-| Sidebar width | `w-[260px]` |
+Use full-height app shells. The page body should not scroll as a whole when a contained region can own scrolling.
 
 ## Components
 
 ### Buttons
 
-Use pill buttons for primary actions and compact icon buttons for navigation/action tools.
+- Primary: white pill, black text, at least 40px high.
+- Secondary: charcoal pill, white text, subtle hairline border.
+- Ghost: text action with charcoal hover.
+- Icon buttons: rounded square or circle, charcoal selected state.
 
-- Primary pill: slate background, white text, `rounded-full`, `text-xs` or `text-sm`, bold.
-- Secondary pill: white background, gray border, gray text, hover gray fill.
-- Icon button: square hit target, `rounded-lg`, hover gray fill, active slate fill.
+### Cards
 
-### Sidebar
+- Default cards use `Surface 1`, hairline border, 15-20px radius, and subtle light-edge depth.
+- Featured cards use `Surface 2`.
+- Gradient cards are allowed only as rare spotlight cards in dashboards or onboarding.
 
-The sidebar is a white fixed-width column with:
+### Tables
 
-- Header row: title and search icon.
-- Full-width `New Chat` primary pill.
-- Scrollable history sections.
-- Saved items with 24px avatars or icons.
-- Recent items as one-line truncated text buttons.
-- Bottom `Upgrade to Pro` primary pill.
+Tables stay dark and quiet:
 
-### Chat Header
+- Muted uppercase headers.
+- Soft dividers.
+- White primary values.
+- Status badges with semantic text colors and dark-tinted surfaces.
 
-The header is 64px high with:
+### Navigation
 
-- Product title `Provisr GPT`.
-- Small `Plus` badge.
-- Right-aligned secondary and primary actions.
+The global rail contains only:
 
-### Messages
+- Provisioning Chat
+- Workspace Dashboard
+- Requests
+- Approvals
+- Resources
+- Audit Log
+- Settings
 
-User messages are right-aligned light-gray bubbles with `rounded-3xl`, compact padding, and max width of 80%.
-
-Assistant messages are left-aligned, unframed content blocks. Tables use a subtle border, rounded corners, gray header, generous cell padding, and `divide-y divide-gray-100`.
-
-### Composer
-
-The composer sits at the bottom of the main chat view inside the 850px content width. It is a large rounded gray panel with:
-
-- Prompt hint row with sparkle icon.
-- Bottom action row for source, attach, voice, and send.
-- Small centered disclaimer below.
-
-## Responsive Behavior
-
-The exact desktop reference is the primary target. On smaller screens, preserve the main chat first:
-
-- Hide the icon rail below `md`.
-- Hide the history sidebar below `lg`.
-- Keep the header actions horizontally compact.
-- Keep table content horizontally scrollable rather than squeezing columns.
+Workspace Dashboard contains Policies, Cloud Accounts, Team, Billing & Usage, Workspace Settings, and Insights.
 
 ## Implementation Rules
 
-- Build with reusable React components under `frontend/components/ui`.
-- Keep chat composition in `frontend/app/chat/page.tsx`.
-- Prefer Tailwind utility classes over custom CSS.
-- Custom CSS is allowed only for global page sizing and scrollbars.
-- Do not allow arbitrary HTML from agent output into the UI component registry.
+- Prefer reusable components in `frontend/components/ui`.
+- Keep the global dark theme in `frontend/app/globals.css`.
+- Use the shared `provisr-app.tsx` primitives for app screens.
+- Do not ask for long-lived cloud credentials anywhere in the UI.
+- Do not show raw policy code by default.
+- Keep the app chat-first and operational; avoid marketing landing-page composition.

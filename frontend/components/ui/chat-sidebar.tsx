@@ -46,7 +46,7 @@ export function ChatSidebar() {
   return (
     <aside className="hidden w-[260px] shrink-0 flex-col border-r border-gray-100 bg-white lg:flex">
       <div className="flex items-center justify-between p-4">
-        <h2 className="font-semibold text-gray-900">Provisioning</h2>
+        <h2 className="font-semibold text-gray-900">Provisr</h2>
         <IconButton className="size-8" label="Search requests">
           <SearchIcon className="size-4" />
         </IconButton>
@@ -56,7 +56,7 @@ export function ChatSidebar() {
         <Button className="w-full py-2.5 text-sm" variant="primary">
           <PlusIcon className="size-4" />
           New Request
-          <SparklesIcon className="ml-1 size-3" />
+          
         </Button>
       </div>
 

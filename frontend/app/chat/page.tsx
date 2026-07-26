@@ -48,7 +48,7 @@ export default function ChatPage() {
       <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-50 px-4 sm:px-6">
           <div className="flex items-center gap-2">
-            <h1 className="font-bold text-gray-900">Provisr</h1>
+            <h3 className="font-medium text-sm text-gray-900">Deploy ECS web app</h3>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
@@ -64,10 +64,7 @@ export default function ChatPage() {
               Share Request
               <UploadIcon className="size-3.5 text-gray-500" />
             </Button>
-            <Button variant="primary">
-              New Request
-              <SparklesIcon className="size-3" />
-            </Button>
+         
           </div>
         </header>
 

@@ -1,8 +1,18 @@
-@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
+  --provisr-canvas: #050505;
+  --provisr-surface-1: #141414;
+  --provisr-surface-2: #222222;
+  --provisr-hairline: rgba(255, 255, 255, 0.1);
+  --provisr-hairline-soft: rgba(255, 255, 255, 0.07);
+  --provisr-ink: #ffffff;
+  --provisr-ink-muted: #999999;
+  --provisr-primary: #ffffff;
+  --provisr-on-primary: #050505;
+  --provisr-accent-blue: #0099ff;
 }
 
 * {
@@ -16,9 +26,10 @@ body {
 
 body {
   margin: 0;
-  background: #f9fafb;
-  color: #1f2937;
-  font-family: var(--font-poppins), "Segoe UI", sans-serif;
+  background: var(--provisr-canvas);
+  color: var(--provisr-ink);
+  font-family: Inter, "Segoe UI", sans-serif;
+  font-feature-settings: "cv01", "cv05", "cv09", "cv11", "ss03", "ss07", "dlig", "tnum";
 }
 
 ::-webkit-scrollbar {
@@ -206,3 +217,81 @@ body {
 @media (min-width: 1024px) {
   .lg\:flex { display: flex; }
 }
+
+/* Provisr dark canvas theme, adapted from the supplied Framer-style design.md. */
+.font-sans { font-family: Inter, "Segoe UI", sans-serif; }
+.bg-gray-50 { background-color: var(--provisr-canvas); }
+.bg-white { background-color: var(--provisr-surface-1); }
+.bg-gray-100 { background-color: var(--provisr-surface-2); }
+.bg-slate-900 { background-color: var(--provisr-surface-2); }
+.bg-slate-800 { background-color: #2d2d2d; }
+.bg-blue-50 { background-color: rgba(0, 153, 255, .12); }
+.bg-amber-50 { background-color: rgba(245, 158, 11, .12); }
+.bg-green-50,
+.bg-green-100 { background-color: rgba(34, 197, 94, .12); }
+.bg-orange-50 { background: linear-gradient(135deg, #ff7a18 0%, #ff3d77 54%, #6d28d9 100%); }
+.bg-purple-50 { background: linear-gradient(135deg, #7c3aed 0%, #c026d3 50%, #fb7185 100%); }
+.bg-red-50 { background-color: rgba(239, 68, 68, .12); }
+
+.border-gray-50,
+.border-gray-100,
+.border-gray-200 { border-color: var(--provisr-hairline-soft); }
+.border-blue-100,
+.border-blue-200 { border-color: rgba(0, 153, 255, .28); }
+.border-amber-100,
+.border-amber-200 { border-color: rgba(245, 158, 11, .35); }
+.border-green-100,
+.border-green-200 { border-color: rgba(34, 197, 94, .32); }
+.border-red-200 { border-color: rgba(239, 68, 68, .35); }
+.divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--provisr-hairline-soft); }
+
+.text-white,
+.text-gray-900,
+.text-gray-800,
+.text-gray-700 { color: var(--provisr-ink); }
+.text-gray-600,
+.text-gray-500,
+.text-gray-400,
+.text-gray-300 { color: var(--provisr-ink-muted); }
+.text-blue-500,
+.text-blue-700 { color: var(--provisr-accent-blue); }
+.text-amber-700,
+.text-amber-900 { color: #fbbf24; }
+.text-green-700 { color: #86efac; }
+.text-red-900 { color: #fca5a5; }
+
+.shadow-sm { box-shadow: inset 0 .5px 0 rgba(255,255,255,.1), 0 10px 30px rgba(0,0,0,.25); }
+.hover\:bg-gray-50:hover,
+.hover\:bg-gray-100:hover { background-color: var(--provisr-surface-2); }
+.hover\:bg-slate-800:hover { background-color: #2d2d2d; }
+.hover\:text-gray-600:hover { color: var(--provisr-ink); }
+.focus-visible\:ring-blue-100:focus-visible,
+.focus-within\:ring-blue-100:focus-within {
+  box-shadow: 0 0 0 1px rgba(0, 153, 255, .35);
+}
+
+.provisr-button-primary {
+  background: var(--provisr-primary);
+  color: var(--provisr-on-primary);
+  box-shadow: none;
+}
+.provisr-button-primary:hover { background: #e8e8e8; }
+.provisr-button-secondary {
+  background: var(--provisr-surface-1);
+  border: 1px solid var(--provisr-hairline);
+  color: var(--provisr-ink);
+}
+.provisr-button-secondary:hover { background: var(--provisr-surface-2); }
+.provisr-button-ghost {
+  color: var(--provisr-ink-muted);
+}
+.provisr-button-ghost:hover {
+  background: var(--provisr-surface-2);
+  color: var(--provisr-ink);
+}
+
+.from-blue-400 {
+  --tw-gradient-from: #8b5cf6;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(139, 92, 246, 0));
+}
+.to-blue-600 { --tw-gradient-to: #ff4d8d; }

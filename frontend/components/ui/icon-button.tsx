@@ -21,7 +21,7 @@ export function IconButton({
       className={cn(
         "relative inline-flex size-9 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-100",
         active
-          ? "bg-slate-900 text-white"
+          ? "bg-gray-100 text-white"
           : "text-gray-400 hover:bg-gray-100 hover:text-gray-600",
         className,
       )}

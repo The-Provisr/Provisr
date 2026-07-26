@@ -55,6 +55,56 @@ export function LayoutGridIcon(props: IconProps) {
   );
 }
 
+export function GaugeIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 14a8 8 0 1 1 16 0" />
+      <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+      <path d="m12 14 3-4" />
+      <path d="M8 14h.01M16 14h.01" />
+    </IconBase>
+  );
+}
+
+export function ClipboardListIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect width="16" height="18" x="4" y="4" rx="2" />
+      <path d="M9 2h6a1 1 0 0 1 1 1v2H8V3a1 1 0 0 1 1-1Z" />
+      <path d="M8 10h.01M11 10h5M8 14h.01M11 14h5M8 18h.01M11 18h4" />
+    </IconBase>
+  );
+}
+
+export function ShieldCheckIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+      <path d="m9 12 2 2 4-5" />
+    </IconBase>
+  );
+}
+
+export function ServerStackIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect width="18" height="6" x="3" y="3" rx="2" />
+      <rect width="18" height="6" x="3" y="15" rx="2" />
+      <path d="M7 6h.01M7 18h.01M11 6h6M11 18h6" />
+    </IconBase>
+  );
+}
+
+export function ScrollTextIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M8 21h8a3 3 0 0 0 3-3V5a3 3 0 0 0-3-3H7a2 2 0 0 0-2 2v14a3 3 0 0 0 3 3Z" />
+      <path d="M5 18a3 3 0 0 1 3-3h11" />
+      <path d="M9 7h6M9 11h5" />
+    </IconBase>
+  );
+}
+
 export function FolderKanbanIcon(props: IconProps) {
   return (
     <IconBase {...props}>

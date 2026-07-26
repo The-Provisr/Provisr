@@ -43,7 +43,7 @@ export function NavigationRail() {
           alt=""
          
           height={40}
-          src="/logo.webp"
+          src="/logo.png"
           width={40}
         />
         <span className="sr-only">Provisr</span>

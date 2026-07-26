@@ -12,25 +12,26 @@ import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/cn";
 
 const savedItems = [
-  { title: "ChatrAI", initial: "C", tone: "blue" },
-  { title: "Image of sun", image: true, tone: "orange" },
-  { title: "Data Analyst", initial: "D", tone: "purple" },
+  { title: "Web App Stack", initial: "W", tone: "blue" },
+  { title: "Architecture Diagram", image: true, tone: "orange" },
+  { title: "Cost Review", initial: "C", tone: "purple" },
 ];
 
 const recentSections = [
   {
     title: "Today",
     items: [
-      "How can I improve my time management?",
-      "What's the best way to learn a new skill?",
-      "How do I start investing in stocks as a beginner?",
+      "Deploy ECS web app",
+      "Add Postgres read replica",
+      "Create private VPC",
     ],
   },
   {
     title: "Yesterday",
     items: [
-      "What are the benefits of daily exercise for focus?",
-      "What's the difference between a UI designer and UX designer?",
+      "Set up staging cluster",
+      "Review Terraform plan",
+      "Approve production change",
     ],
   },
 ];
@@ -45,8 +46,8 @@ export function ChatSidebar() {
   return (
     <aside className="hidden w-[260px] shrink-0 flex-col border-r border-gray-100 bg-white lg:flex">
       <div className="flex items-center justify-between p-4">
-        <h2 className="font-semibold text-gray-900">Chat</h2>
-        <IconButton className="size-8" label="Search chats">
+        <h2 className="font-semibold text-gray-900">Provisioning</h2>
+        <IconButton className="size-8" label="Search requests">
           <SearchIcon className="size-4" />
         </IconButton>
       </div>
@@ -54,7 +55,7 @@ export function ChatSidebar() {
       <div className="mb-6 px-4">
         <Button className="w-full py-2.5 text-sm" variant="primary">
           <PlusIcon className="size-4" />
-          New Chat
+          New Request
           <SparklesIcon className="ml-1 size-3" />
         </Button>
       </div>
@@ -111,9 +112,10 @@ export function ChatSidebar() {
       </div>
 
       <div className="border-t border-gray-100 p-4">
-        <Button className="w-full py-2.5 text-sm" variant="primary">
-          Upgrade to Pro
-        </Button>
+        <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+          <div className="text-sm font-semibold text-gray-900">Acme Platform</div>
+          <div className="mt-0.5 text-xs text-gray-500">Production workspace</div>
+        </div>
       </div>
     </aside>
   );

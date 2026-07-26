@@ -14,13 +14,15 @@ export function ChatComposer() {
         <div className="rounded-3xl border border-gray-200 bg-gray-50 p-4 shadow-sm transition-all focus-within:ring-2 focus-within:ring-blue-100">
           <label className="mb-3 ml-2 flex items-center gap-2 text-gray-400">
             <SparklesIcon className="size-4" />
-            <span className="text-sm">Ask me anything...</span>
+            <span className="text-sm">
+              Describe infrastructure or upload an architecture diagram...
+            </span>
             <input className="sr-only" aria-label="Message" />
           </label>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <Button className="bg-white px-3 py-1.5" variant="secondary">
-              Select Source
+              Cloud / Environment
               <ChevronDownIcon className="size-3.5" />
             </Button>
 
@@ -42,10 +44,8 @@ export function ChatComposer() {
         </div>
 
         <div className="mt-4 text-center text-[10px] text-gray-400">
-          Centra may display inaccurate info, so please double check the response.
-          <a className="ml-1 underline hover:text-gray-600" href="#">
-            Your Privacy &amp; Provisr GPT
-          </a>
+          Provisr drafts infrastructure plans for review. Execution requires
+          policy checks, confirmation, and approval when required.
         </div>
       </div>
     </footer>

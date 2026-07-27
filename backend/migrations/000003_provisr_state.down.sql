@@ -1,5 +1,5 @@
-DROP TABLE IF EXISTS provisr_state.provisioning_runs CASCADE;
-DROP TABLE IF EXISTS provisr_state.chat_sessions CASCADE;
+DROP TABLE IF EXISTS provisr_state.provisioning_runs;
+DROP TABLE IF EXISTS provisr_state.chat_sessions;
 
 DROP INDEX IF EXISTS provisr_state.idx_provisioning_runs_correlation_id;
 
@@ -9,4 +9,4 @@ DROP TYPE IF EXISTS provisr_state.policy_decision;
 DROP TYPE IF EXISTS provisr_state.run_state;
 DROP TYPE IF EXISTS provisr_state.session_status;
 
-DROP SCHEMA IF EXISTS provisr_state CASCADE;
+DROP SCHEMA IF EXISTS provisr_state;

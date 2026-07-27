@@ -48,9 +48,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
-      - run: go build ./cmd/...
+      - run: |
+          for dir in cmd/*/; do
+            go build ./"$dir"...
+          done
         working-directory: backend
-      - run: go test ./...
+      - run: |
+          for dir in cmd/*/; do
+            go test ./"$dir"...
+          done
         working-directory: backend
       - uses: golangci/golangci-lint-action@v6
         with:

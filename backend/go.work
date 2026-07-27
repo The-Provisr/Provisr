@@ -9,4 +9,5 @@ use (
 	./cmd/audit-service
 	./cmd/notification-service
 	./cmd/reconciler
+	./cmd/workspace-service
 )

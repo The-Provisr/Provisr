@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
@@ -86,8 +87,16 @@ func main() {
 	mux.HandleFunc("PATCH /workspaces/{id}", s.handleUpdate)
 	mux.HandleFunc("DELETE /workspaces/{id}", s.handleDelete)
 
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      recoveryMiddleware(logger, mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  30 * time.Second,
+	}
+
 	logger.Info().Str("port", port).Msg("workspace-service starting")
-	log.Fatal(http.ListenAndServe(":"+port, recoveryMiddleware(logger, mux)))
+	log.Fatal(srv.ListenAndServe())
 }
 
 type server struct {
@@ -96,6 +105,7 @@ type server struct {
 }
 
 func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
@@ -298,6 +308,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

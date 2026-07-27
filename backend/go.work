@@ -1,6 +1,7 @@
 go 1.23
 
 use (
+	.
 	./cmd/policy-service
 	./cmd/state-service
 	./cmd/provisioning-service

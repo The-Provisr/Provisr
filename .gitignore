@@ -18,7 +18,7 @@ $RECYCLE.BIN/
 .Trash-*
 
 # Go binaries built from workspace root
-/workspace-service
+/backend/workspace-service
 
 # Editors / IDEs
 .vscode/

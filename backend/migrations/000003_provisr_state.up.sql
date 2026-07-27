@@ -62,4 +62,5 @@ CREATE INDEX idx_chat_sessions_user_id ON provisr_state.chat_sessions(user_id);
 CREATE INDEX idx_provisioning_runs_session_id ON provisr_state.provisioning_runs(session_id);
 CREATE INDEX idx_provisioning_runs_workspace_id ON provisr_state.provisioning_runs(workspace_id);
 CREATE INDEX idx_provisioning_runs_state ON provisr_state.provisioning_runs(state);
+CREATE INDEX idx_provisioning_runs_correlation_id ON provisr_state.provisioning_runs(correlation_id);
 

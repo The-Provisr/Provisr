@@ -13,5 +13,4 @@ CREATE TABLE provisr_approval.approval_tickets (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_approval_tickets_run_id ON provisr_approval.approval_tickets(run_id);
 CREATE INDEX idx_approval_tickets_status ON provisr_approval.approval_tickets(status);

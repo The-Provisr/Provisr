@@ -1,5 +1,9 @@
 import { Button } from "@/components/ui/button";
 import {
+  CloudProviderLogo,
+  type CloudProviderId,
+} from "@/components/ui/cloud-provider-logo";
+import {
   AppShell,
   DataTable,
   PageBody,
@@ -15,6 +19,12 @@ const auditRows = [
   ["Terraform plan generated", "provisioning", "req-prod-web-042", "Plan ready"],
   ["Approval requested", "approval-service", "req-prod-web-041", "Pending"],
 ];
+
+const cloudProviders = [
+  { id: "aws", label: "AWS" },
+  { id: "azure", label: "Azure" },
+  { id: "gcp", label: "GCP" },
+] as const satisfies readonly { id: CloudProviderId; label: string }[];
 
 export default function WorkspaceDashboardPage() {
   return (
@@ -33,9 +43,12 @@ export default function WorkspaceDashboardPage() {
                 <div className="mt-1 text-xs text-gray-500">Environment: Production</div>
               </div>
               <div className="flex flex-wrap gap-2">
-                {["AWS", "Azure", "GCP"].map((provider) => (
-                  <StatusBadge key={provider} tone="blue">
-                    {provider}
+                {cloudProviders.map(({ id, label }) => (
+                  <StatusBadge key={id} tone="blue">
+                    <span className="flex items-center gap-2">
+                      <CloudProviderLogo provider={id} size="sm" />
+                      {label}
+                    </span>
                   </StatusBadge>
                 ))}
               </div>

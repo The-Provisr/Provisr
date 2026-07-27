@@ -681,7 +681,13 @@
   border-top: 1px solid rgba(255, 255, 255, 0.14);
 }
 
-.cloudMarks span {
+.cloudMark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.cloudMarkLabel {
   color: #bbb;
   font-size: 0.68rem;
   font-weight: 660;
@@ -996,10 +1002,10 @@
   animation: marquee 32s linear infinite;
 }
 
-.marqueeTrack span {
+.marqueeItem {
   display: inline-flex;
   align-items: center;
-  gap: 3rem;
+  gap: 0.8rem;
   padding-right: 3rem;
   color: #757575;
   font-size: clamp(1.3rem, 2.5vw, 2.2rem);
@@ -1008,7 +1014,8 @@
   white-space: nowrap;
 }
 
-.marqueeTrack i {
+.marqueeSeparator {
+  margin-left: 2.2rem;
   width: 0.35rem;
   height: 0.35rem;
   border-radius: 50%;

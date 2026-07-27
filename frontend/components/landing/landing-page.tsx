@@ -6,6 +6,10 @@ import Image from "next/image";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import {
+  CloudProviderLogo,
+  type CloudProviderId,
+} from "@/components/ui/cloud-provider-logo";
 import styles from "./landing-page.module.css";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -31,13 +35,19 @@ const flowSteps = [
   },
 ];
 
-const providers = [
-  "Amazon Web Services",
-  "Microsoft Azure",
-  "Google Cloud",
-  "Terraform",
-  "Open Policy Agent",
+const providers: readonly { label: string; provider?: CloudProviderId }[] = [
+  { label: "Amazon Web Services", provider: "aws" },
+  { label: "Microsoft Azure", provider: "azure" },
+  { label: "Google Cloud", provider: "gcp" },
+  { label: "Terraform" },
+  { label: "Open Policy Agent" },
 ];
+
+const cloudProviders = [
+  { label: "AWS", provider: "aws" },
+  { label: "Azure", provider: "azure" },
+  { label: "GCP", provider: "gcp" },
+] as const satisfies readonly { label: string; provider: CloudProviderId }[];
 
 function ArrowIcon() {
   return (
@@ -357,9 +367,12 @@ export function LandingPage() {
             <span className={styles.cardKicker}>Multi-cloud by design</span>
             <h3>Your intent, translated to the right provider.</h3>
             <div className={styles.cloudMarks} aria-label="Cloud providers">
-              <span>AWS</span>
-              <span>Azure</span>
-              <span>GCP</span>
+              {cloudProviders.map(({ label, provider }) => (
+                <span className={styles.cloudMark} key={provider}>
+                  <CloudProviderLogo provider={provider} size="sm" />
+                  <span className={styles.cloudMarkLabel}>{label}</span>
+                </span>
+              ))}
             </div>
           </article>
 
@@ -514,10 +527,11 @@ export function LandingPage() {
 
       <section className={styles.marquee} aria-label="Supported platform ecosystem">
         <div className={styles.marqueeTrack}>
-          {[...providers, ...providers].map((provider, index) => (
-            <span key={`${provider}-${index}`}>
-              {provider}
-              <i />
+          {[...providers, ...providers].map(({ label, provider }, index) => (
+            <span className={styles.marqueeItem} key={`${label}-${index}`}>
+              {provider ? <CloudProviderLogo provider={provider} size="sm" /> : null}
+              {label}
+              <i className={styles.marqueeSeparator} />
             </span>
           ))}
         </div>

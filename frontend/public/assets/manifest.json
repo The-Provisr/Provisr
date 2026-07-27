@@ -26,6 +26,21 @@
       "file": "approval-gates.png",
       "role": "Human confirmation and role-aware approval gates",
       "sections": ["platform-approval", "approver-control"]
+    },
+    {
+      "file": "aws-2.svg",
+      "role": "Amazon Web Services provider logo",
+      "sections": ["platform-multicloud", "onboarding-cloud", "workspace-cloud-accounts"]
+    },
+    {
+      "file": "azure-2.svg",
+      "role": "Microsoft Azure provider logo",
+      "sections": ["platform-multicloud", "onboarding-cloud", "workspace-cloud-accounts"]
+    },
+    {
+      "file": "google-cloud-1.svg",
+      "role": "Google Cloud provider logo",
+      "sections": ["platform-multicloud", "onboarding-cloud", "workspace-cloud-accounts"]
     }
   ]
 }

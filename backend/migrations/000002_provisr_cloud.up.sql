@@ -15,8 +15,8 @@ CREATE TABLE provisr_cloud.cloud_accounts (
     verified_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- PRD §7: one account per provider per workspace in MVP. Separate envs → separate workspaces.
     UNIQUE (workspace_id, provider)
 );
 
-CREATE INDEX idx_cloud_accounts_workspace_id ON provisr_cloud.cloud_accounts(workspace_id);
 CREATE INDEX idx_cloud_accounts_status ON provisr_cloud.cloud_accounts(status);

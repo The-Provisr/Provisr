@@ -29,6 +29,7 @@ CREATE TYPE provisr_state.execution_status AS ENUM ('pending', 'running', 'succe
 CREATE TABLE provisr_state.chat_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES provisr_identity.workspaces(id) ON DELETE CASCADE,
+    UNIQUE (id, workspace_id),
     user_id UUID NOT NULL REFERENCES provisr_identity.users(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     status provisr_state.session_status NOT NULL DEFAULT 'active',
@@ -38,8 +39,10 @@ CREATE TABLE provisr_state.chat_sessions (
 
 CREATE TABLE provisr_state.provisioning_runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID NOT NULL REFERENCES provisr_state.chat_sessions(id) ON DELETE CASCADE,
-    workspace_id UUID NOT NULL REFERENCES provisr_identity.workspaces(id) ON DELETE CASCADE,
+    session_id UUID NOT NULL,
+    workspace_id UUID NOT NULL,
+    FOREIGN KEY (session_id, workspace_id)
+      REFERENCES provisr_state.chat_sessions(id, workspace_id) ON DELETE CASCADE,
     requester_id UUID NOT NULL REFERENCES provisr_identity.users(id),
     state provisr_state.run_state NOT NULL DEFAULT 'received',
     state_version INTEGER NOT NULL DEFAULT 0,

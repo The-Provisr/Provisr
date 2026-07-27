@@ -22,7 +22,7 @@ CREATE TYPE provisr_audit.actor_type AS ENUM ('user', 'agent', 'system');
 
 CREATE TABLE provisr_audit.audit_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL REFERENCES provisr_identity.workspaces(id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL REFERENCES provisr_identity.workspaces(id) ON DELETE RESTRICT,
     event_type provisr_audit.event_type NOT NULL,
     actor_id VARCHAR(128) NOT NULL,
     actor_type provisr_audit.actor_type NOT NULL,

@@ -224,6 +224,11 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		}
 		workspaces = append(workspaces, ws)
 	}
+	if err := rows.Err(); err != nil {
+		s.log.Error().Err(err).Msg("failed to iterate workspace rows")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list workspaces")
+		return
+	}
 
 	if workspaces == nil {
 		workspaces = []workspaceWithRole{}
@@ -293,6 +298,11 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		members = append(members, m)
+	}
+	if err := mrows.Err(); err != nil {
+		s.log.Error().Err(err).Msg("failed to iterate member rows")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to get workspace")
+		return
 	}
 	if members == nil {
 		members = []member{}

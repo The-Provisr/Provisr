@@ -142,11 +142,11 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	var ws workspace
 	err = tx.QueryRow(
-		`INSERT INTO provisr_identity.workspaces (name, slug, environment, settings)
-		 VALUES ($1, $2, $3, '{}')
-		 RETURNING id, name, slug, environment, created_at, updated_at`,
-		req.Name, slug, req.Environment,
-	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.CreatedAt, &ws.UpdatedAt)
+		`INSERT INTO provisr_identity.workspaces (name, slug, environment, description, settings)
+		 VALUES ($1, $2, $3, $4, '{}')
+		 RETURNING id, name, slug, environment, description, created_at, updated_at`,
+		req.Name, slug, req.Environment, req.Description,
+	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err != nil {
 		s.log.Error().Err(err).Msg("failed to insert workspace")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
@@ -181,7 +181,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := s.db.Query(
-		`SELECT w.id, w.name, w.slug, w.environment, w.created_at, w.updated_at, m.role, m.joined_at
+		`SELECT w.id, w.name, w.slug, w.environment, w.description, w.created_at, w.updated_at, m.role, m.joined_at
 		 FROM provisr_identity.workspaces w
 		 JOIN provisr_identity.memberships m ON m.workspace_id = w.id
 		 WHERE m.user_id = $1 AND w.deleted_at IS NULL
@@ -205,7 +205,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var ws workspaceWithRole
 		if err := rows.Scan(
-			&ws.ID, &ws.Name, &ws.Slug, &ws.Environment,
+			&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description,
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.Role, &ws.JoinedAt,
 		); err != nil {
 			s.log.Error().Err(err).Msg("failed to scan workspace row")
@@ -228,18 +228,17 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	var ws workspace
 	err := s.db.QueryRow(
-		`SELECT id, name, slug, environment, created_at, updated_at
+		`SELECT id, name, slug, environment, description, created_at, updated_at
 		 FROM provisr_identity.workspaces
 		 WHERE id = $1 AND deleted_at IS NULL`,
 		id,
-	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.CreatedAt, &ws.UpdatedAt)
+	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err == sql.ErrNoRows {
 		writeError(w, http.StatusNotFound, "not_found", "workspace not found")
 		return
 	}
 	if err != nil {
 		s.log.Error().Err(err).Str("workspace_id", id).Msg("failed to get workspace")
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to get workspace")
 		return
 	}
 
@@ -308,11 +307,11 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	var ws workspace
 	err := s.db.QueryRow(
-		`SELECT id, name, slug, environment, created_at, updated_at
+		`SELECT id, name, slug, environment, description, created_at, updated_at
 		 FROM provisr_identity.workspaces
 		 WHERE id = $1 AND deleted_at IS NULL`,
 		id,
-	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.CreatedAt, &ws.UpdatedAt)
+	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err == sql.ErrNoRows {
 		writeError(w, http.StatusNotFound, "not_found", "workspace not found")
 		return
@@ -355,14 +354,17 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 		ws.Environment = *req.Environment
 	}
+	if req.Description != nil {
+		ws.Description = req.Description
+	}
 
 	err = s.db.QueryRow(
 		`UPDATE provisr_identity.workspaces
-		 SET name = $1, slug = $2, environment = $3, updated_at = now()
-		 WHERE id = $4 AND deleted_at IS NULL
-		 RETURNING id, name, slug, environment, created_at, updated_at`,
-		ws.Name, ws.Slug, ws.Environment, id,
-	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.CreatedAt, &ws.UpdatedAt)
+		 SET name = $1, slug = $2, environment = $3, description = $4, updated_at = now()
+		 WHERE id = $5 AND deleted_at IS NULL
+		 RETURNING id, name, slug, environment, description, created_at, updated_at`,
+		ws.Name, ws.Slug, ws.Environment, ws.Description, id,
+	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err != nil {
 		s.log.Error().Err(err).Str("workspace_id", id).Msg("failed to update workspace")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update workspace")

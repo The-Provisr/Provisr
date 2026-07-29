@@ -108,57 +108,7 @@ type errorResponse struct {
 	Status  int    `json:"status"`
 }
 
-var validRoles = map[string]bool{
-	"admin":    true,
-	"engineer": true,
-	"approver": true,
-	"auditor":  true,
-	"viewer":   true,
-}
-
 var terminalRunStates = []interface{}{"completed", "failed", "cancelled"}
-
-var rolePermissions = map[string]map[string]bool{
-	"engineer": {
-		"cloud_account.create":      true,
-		"cloud_account.view":        true,
-		"cloud_account.update":      true,
-		"cloud_account.delete":      true,
-		"chat_session.create":       true,
-		"chat_session.view":         true,
-		"chat_session.update":       true,
-		"chat_session.delete":       true,
-		"provisioning_run.create":   true,
-		"provisioning_run.view":     true,
-		"manifest.view":             true,
-		"artifact.view":             true,
-	},
-	"approver": {
-		"approval_ticket.decide":    true,
-		"provisioning_run.view":     true,
-	},
-	"auditor": {
-		"audit_event.view":          true,
-		"provisioning_run.view":     true,
-		"manifest.view":             true,
-		"artifact.view":             true,
-	},
-	"viewer": {
-		"chat_session.view":         true,
-		"provisioning_run.view":     true,
-	},
-}
-
-func isActionAllowed(role, resourceType, action string) bool {
-	if role == "admin" {
-		return true
-	}
-	perms, ok := rolePermissions[role]
-	if !ok {
-		return false
-	}
-	return perms[resourceType+"."+action]
-}
 
 func main() {
 	port := os.Getenv("PORT")
@@ -185,8 +135,28 @@ func main() {
 
 	s := &server{db: db, log: logger}
 
-	mux := http.NewServeMux()
+	mux := s.routes()
 	mux.Handle("/health/", health.Handler())
+
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      recoveryMiddleware(logger, mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  30 * time.Second,
+	}
+
+	logger.Info().Str("port", port).Msg("workspace-service starting")
+	log.Fatal(srv.ListenAndServe())
+}
+
+type server struct {
+	db  *sql.DB
+	log zerolog.Logger
+}
+
+func (s *server) routes() *http.ServeMux {
+	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /workspaces", s.handleCreate)
 	mux.HandleFunc("GET /workspaces", s.handleList)
@@ -209,21 +179,7 @@ func main() {
 	mux.HandleFunc("POST /permissions/check", s.handleCheckPermission)
 	mux.HandleFunc("POST /permissions/check-batch", s.handleCheckBatch)
 
-	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      recoveryMiddleware(logger, mux),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
-	}
-
-	logger.Info().Str("port", port).Msg("workspace-service starting")
-	log.Fatal(srv.ListenAndServe())
-}
-
-type server struct {
-	db  *sql.DB
-	log zerolog.Logger
+	return mux
 }
 
 func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -579,13 +535,27 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", "user_id is required")
 		return
 	}
-	if !validRoles[req.Role] {
+	if !validRole(req.Role) {
 		writeError(w, http.StatusBadRequest, "validation_error", "role must be admin, engineer, approver, auditor, or viewer")
 		return
 	}
 
+	key := r.Header.Get("Idempotency-Key")
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed to begin transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
+		return
+	}
+	defer tx.Rollback()
+
+	if err := claimIdempotencyKey(tx, key, workspaceID, "member_add"); err != nil {
+		writeIdempotencyError(w, err, s)
+		return
+	}
+
 	var exists bool
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL)",
 		workspaceID,
 	).Scan(&exists)
@@ -600,7 +570,7 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userExists bool
-	err = s.db.QueryRow(
+	err = tx.QueryRow(
 		"SELECT EXISTS(SELECT 1 FROM provisr_identity.users WHERE id = $1)",
 		req.UserID,
 	).Scan(&userExists)
@@ -615,7 +585,7 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var mr member
-	err = s.db.QueryRow(
+	err = tx.QueryRow(
 		`WITH ins AS (
 			INSERT INTO provisr_identity.memberships (user_id, workspace_id, role, invited_by)
 			VALUES ($1, $2, $3, NULL)
@@ -637,6 +607,12 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := tx.Commit(); err != nil {
+		s.log.Error().Err(err).Msg("failed to commit transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
+		return
+	}
+
 	writeJSON(w, http.StatusCreated, mr)
 }
 
@@ -644,7 +620,7 @@ func (s *server) handleListMembers(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspace_id")
 	roleFilter := r.URL.Query().Get("role")
 
-	if roleFilter != "" && !validRoles[roleFilter] {
+	if roleFilter != "" && !validRole(roleFilter) {
 		writeError(w, http.StatusBadRequest, "validation_error", "invalid role filter")
 		return
 	}
@@ -709,7 +685,7 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
 		return
 	}
-	if !validRoles[req.Role] {
+	if !validRole(req.Role) {
 		writeError(w, http.StatusBadRequest, "validation_error", "role must be admin, engineer, approver, auditor, or viewer")
 		return
 	}
@@ -721,6 +697,11 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "member_role_update"); err != nil {
+		writeIdempotencyError(w, err, s)
+		return
+	}
 
 	if err := s.requireLastAdminNotTarget(tx, workspaceID, userID); err != nil {
 		if err == errLastAdmin {
@@ -768,6 +749,11 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "member_remove"); err != nil {
+		writeIdempotencyError(w, err, s)
+		return
+	}
 
 	var exists bool
 	err = tx.QueryRow(
@@ -868,13 +854,26 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "validation_error", "email is required")
 		return
 	}
-	if !validRoles[req.Role] {
+	if !validRole(req.Role) {
 		writeError(w, http.StatusBadRequest, "validation_error", "role must be admin, engineer, approver, auditor, or viewer")
 		return
 	}
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed to begin transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
+		return
+	}
+	defer tx.Rollback()
+
+	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "invitation_create"); err != nil {
+		writeIdempotencyError(w, err, s)
+		return
+	}
+
 	var exists bool
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL)",
 		workspaceID,
 	).Scan(&exists)
@@ -896,7 +895,7 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var inv invitationResponse
-	err = s.db.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO provisr_identity.invitations (workspace_id, email, role, code, expires_at)
 		 VALUES ($1, $2, $3, $4, now() + interval '7 days')
 		 RETURNING id, workspace_id, email, role, code, expires_at, created_at`,
@@ -904,6 +903,12 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 	).Scan(&inv.ID, &inv.WorkspaceID, &inv.Email, &inv.Role, &inv.Code, &inv.ExpiresAt, &inv.CreatedAt)
 	if err != nil {
 		s.log.Error().Err(err).Msg("failed to insert invitation")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.log.Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
 		return
 	}
@@ -1084,6 +1089,14 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Claim the idempotency key before any state checks so a replay of an
+	// already-consumed mutation surfaces as duplicate_idempotency_key (409),
+	// not as a follow-on 410/403 result of the first application.
+	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), inv.WorkspaceID, "invitation_accept"); err != nil {
+		writeIdempotencyError(w, err, s)
+		return
+	}
+
 	if inv.RevokedAt != nil {
 		writeError(w, http.StatusGone, "revoked", "invitation has been revoked")
 		return
@@ -1111,7 +1124,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	if !userExists {
 		_, err = tx.Exec(
 			`INSERT INTO provisr_identity.users (id, clerk_id, name, email)
-			 VALUES ($1, $1, $2, $3)`,
+			 VALUES ($1::uuid, $1::text, $2, $3)`,
 			req.UserID, req.Name, req.Email,
 		)
 		if err != nil {
@@ -1259,7 +1272,7 @@ func (s *server) handleCheckBatch(w http.ResponseWriter, r *http.Request) {
 	var placeholders []string
 	var args []interface{}
 	for i, k := range keyList {
-		placeholders = append(placeholders, fmt.Sprintf("($%d::text, $%d::text)", 2*i+1, 2*i+2))
+		placeholders = append(placeholders, fmt.Sprintf("($%d::uuid, $%d::uuid)", 2*i+1, 2*i+2))
 		args = append(args, k[0], k[1])
 	}
 

@@ -9,7 +9,8 @@ RUN CGO_ENABLED=0 go build -o /services/policy-service ./cmd/policy-service && \
     CGO_ENABLED=0 go build -o /services/approval-service ./cmd/approval-service && \
     CGO_ENABLED=0 go build -o /services/audit-service ./cmd/audit-service && \
     CGO_ENABLED=0 go build -o /services/notification-service ./cmd/notification-service && \
-    CGO_ENABLED=0 go build -o /services/reconciler ./cmd/reconciler
+    CGO_ENABLED=0 go build -o /services/reconciler ./cmd/reconciler && \
+    CGO_ENABLED=0 go build -o /services/workspace-service ./cmd/workspace-service
 
 FROM alpine:3.20 AS service
 RUN apk add --no-cache ca-certificates tzdata

@@ -159,28 +159,20 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.db.QueryRow(
-		"SELECT EXISTS(SELECT 1 FROM provisr_identity.memberships WHERE user_id = $1 AND workspace_id = $2)",
-		req.UserID, workspaceID,
-	).Scan(&exists)
-	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check existing membership")
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
-		return
-	}
-	if exists {
-		writeError(w, http.StatusConflict, "already_member", "user is already a member of this workspace")
-		return
-	}
-
-	_, err = s.db.Exec(
+	result, err := s.db.Exec(
 		`INSERT INTO provisr_identity.memberships (user_id, workspace_id, role, invited_by)
-		 VALUES ($1, $2, $3, NULL)`,
+		 VALUES ($1, $2, $3, NULL)
+		 ON CONFLICT (user_id, workspace_id) DO NOTHING`,
 		req.UserID, workspaceID, req.Role,
 	)
 	if err != nil {
 		s.log.Error().Err(err).Msg("failed to insert membership")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		writeError(w, http.StatusConflict, "already_member", "user is already a member of this workspace")
 		return
 	}
 

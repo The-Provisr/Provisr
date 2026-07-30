@@ -827,9 +827,11 @@ var errLastAdmin = fmt.Errorf("last admin")
 func (s *server) requireLastAdminNotTarget(tx *sql.Tx, workspaceID, userID string) error {
 	var adminCount int
 	err := tx.QueryRow(
-		`SELECT COUNT(*) FROM provisr_identity.memberships
-		 WHERE workspace_id = $1 AND role = 'admin'
-		 FOR UPDATE`,
+		`SELECT COUNT(*) FROM (
+			SELECT 1 FROM provisr_identity.memberships
+			WHERE workspace_id = $1 AND role = 'admin'
+			FOR UPDATE
+		) AS locked`,
 		workspaceID,
 	).Scan(&adminCount)
 	if err != nil {

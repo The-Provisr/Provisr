@@ -259,7 +259,15 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.requireLastAdminNotTarget(workspaceID, userID); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed to begin transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
+		return
+	}
+	defer tx.Rollback()
+
+	if err := s.requireLastAdminNotTarget(tx, workspaceID, userID); err != nil {
 		if err == errLastAdmin {
 			writeError(w, http.StatusConflict, "last_admin", "cannot change role of the last admin")
 			return
@@ -269,7 +277,7 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.db.Exec(
+	result, err := tx.Exec(
 		`UPDATE provisr_identity.memberships SET role = $1
 		 WHERE user_id = $2 AND workspace_id = $3`,
 		req.Role, userID, workspaceID,
@@ -285,22 +293,18 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := tx.Commit(); err != nil {
+		s.log.Error().Err(err).Msg("failed to commit transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspace_id")
 	userID := r.PathValue("user_id")
-
-	if err := s.requireLastAdminNotTarget(workspaceID, userID); err != nil {
-		if err == errLastAdmin {
-			writeError(w, http.StatusConflict, "last_admin", "cannot remove the last admin")
-			return
-		}
-		s.log.Error().Err(err).Msg("failed to check last admin")
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
-		return
-	}
 
 	var exists bool
 	err := s.db.QueryRow(
@@ -320,7 +324,25 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed to begin transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
+		return
+	}
+	defer tx.Rollback()
+
+	if err := s.requireLastAdminNotTarget(tx, workspaceID, userID); err != nil {
+		if err == errLastAdmin {
+			writeError(w, http.StatusConflict, "last_admin", "cannot remove the last admin")
+			return
+		}
+		s.log.Error().Err(err).Msg("failed to check last admin")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
+		return
+	}
+
+	result, err := tx.Exec(
 		`DELETE FROM provisr_identity.memberships WHERE user_id = $1 AND workspace_id = $2`,
 		userID, workspaceID,
 	)
@@ -335,16 +357,23 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := tx.Commit(); err != nil {
+		s.log.Error().Err(err).Msg("failed to commit transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 var errLastAdmin = fmt.Errorf("last admin")
 
-func (s *server) requireLastAdminNotTarget(workspaceID, userID string) error {
+func (s *server) requireLastAdminNotTarget(tx *sql.Tx, workspaceID, userID string) error {
 	var adminCount int
-	err := s.db.QueryRow(
+	err := tx.QueryRow(
 		`SELECT COUNT(*) FROM provisr_identity.memberships
-		 WHERE workspace_id = $1 AND role = 'admin'`,
+		 WHERE workspace_id = $1 AND role = 'admin'
+		 FOR UPDATE`,
 		workspaceID,
 	).Scan(&adminCount)
 	if err != nil {
@@ -352,7 +381,7 @@ func (s *server) requireLastAdminNotTarget(workspaceID, userID string) error {
 	}
 	if adminCount <= 1 {
 		var isAdmin bool
-		err := s.db.QueryRow(
+		err := tx.QueryRow(
 			`SELECT EXISTS(
 				SELECT 1 FROM provisr_identity.memberships
 				WHERE workspace_id = $1 AND user_id = $2 AND role = 'admin'

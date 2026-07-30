@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -607,15 +608,16 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		ID          string
 		WorkspaceID string
 		Role        string
+		Email       string
 		ExpiresAt   time.Time
 		RevokedAt   *time.Time
 	}
 	err = tx.QueryRow(
-		`SELECT id, workspace_id, role, expires_at, revoked_at
+		`SELECT id, workspace_id, role, email, expires_at, revoked_at
 		 FROM provisr_identity.invitations
 		 WHERE code = $1 FOR UPDATE`,
 		code,
-	).Scan(&inv.ID, &inv.WorkspaceID, &inv.Role, &inv.ExpiresAt, &inv.RevokedAt)
+	).Scan(&inv.ID, &inv.WorkspaceID, &inv.Role, &inv.Email, &inv.ExpiresAt, &inv.RevokedAt)
 	if err == sql.ErrNoRows {
 		writeError(w, http.StatusNotFound, "not_found", "invitation not found")
 		return
@@ -632,6 +634,11 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 	if time.Now().After(inv.ExpiresAt) {
 		writeError(w, http.StatusGone, "expired", "invitation has expired")
+		return
+	}
+
+	if !strings.EqualFold(inv.Email, req.Email) {
+		writeError(w, http.StatusForbidden, "email_mismatch", "invitation is for a different email")
 		return
 	}
 

@@ -10,7 +10,7 @@ frontend/        Next.js (TypeScript) — Clerk auth, chat UI, 22x component reg
 orchestrator/    NestJS (TypeScript) — API gateway, state machine FSM, SSE
 agent/           FastAPI (Python) — ReAct loop, prompt registry, manifest drafting
 mcp/             FastAPI (Python) — MCP tool servers (policy, cloud, IaC, cost, approval, domains)
-backend/         Go (7 services) — policy, state, provisioning, approval, audit, notification, reconciler
+backend/         Go (7 services) — policy, state, provisioning, approval, audit, notification, reconciler, workspace (merged: members + invitations + permissions)
 packages/
   proto/         .proto source of truth (buf)
   shared-contracts/ TS types generated from proto + Zod schemas

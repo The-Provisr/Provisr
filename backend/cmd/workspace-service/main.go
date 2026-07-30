@@ -599,6 +599,21 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var userExists bool
+	err = s.db.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM provisr_identity.users WHERE id = $1)",
+		req.UserID,
+	).Scan(&userExists)
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed to check user existence")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
+		return
+	}
+	if !userExists {
+		writeError(w, http.StatusNotFound, "user_not_found", "user does not exist")
+		return
+	}
+
 	var mr member
 	err = s.db.QueryRow(
 		`WITH ins AS (

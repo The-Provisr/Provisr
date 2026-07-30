@@ -10,4 +10,5 @@ use (
 	./cmd/notification-service
 	./cmd/reconciler
 	./cmd/workspace-service
+	./cmd/membership-service
 )

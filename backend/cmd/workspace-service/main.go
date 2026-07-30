@@ -761,8 +761,16 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspace_id")
 	userID := r.PathValue("user_id")
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed to begin transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
+		return
+	}
+	defer tx.Rollback()
+
 	var exists bool
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		`SELECT EXISTS(
 			SELECT 1 FROM provisr_state.provisioning_runs
 			WHERE requester_id = $1 AND workspace_id = $2
@@ -779,14 +787,6 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "active_runs_exist", "cannot remove member with active provisioning runs")
 		return
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		s.log.Error().Err(err).Msg("failed to begin transaction")
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
-		return
-	}
-	defer tx.Rollback()
 
 	if err := s.requireLastAdminNotTarget(tx, workspaceID, userID); err != nil {
 		if err == errLastAdmin {

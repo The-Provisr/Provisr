@@ -159,33 +159,25 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.db.Exec(
-		`INSERT INTO provisr_identity.memberships (user_id, workspace_id, role, invited_by)
-		 VALUES ($1, $2, $3, NULL)
-		 ON CONFLICT (user_id, workspace_id) DO NOTHING`,
+	var mr memberResponse
+	err = s.db.QueryRow(
+		`WITH ins AS (
+			INSERT INTO provisr_identity.memberships (user_id, workspace_id, role, invited_by)
+			VALUES ($1, $2, $3, NULL)
+			ON CONFLICT (user_id, workspace_id) DO NOTHING
+			RETURNING user_id, workspace_id, role, joined_at
+		)
+		SELECT u.id, u.name, u.email, ins.role, ins.joined_at
+		FROM ins
+		JOIN provisr_identity.users u ON u.id = ins.user_id`,
 		req.UserID, workspaceID, req.Role,
-	)
-	if err != nil {
-		s.log.Error().Err(err).Msg("failed to insert membership")
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
-		return
-	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	).Scan(&mr.ID, &mr.Name, &mr.Email, &mr.Role, &mr.JoinedAt)
+	if err == sql.ErrNoRows {
 		writeError(w, http.StatusConflict, "already_member", "user is already a member of this workspace")
 		return
 	}
-
-	var mr memberResponse
-	err = s.db.QueryRow(
-		`SELECT u.id, u.name, u.email, m.role, m.joined_at
-		 FROM provisr_identity.memberships m
-		 JOIN provisr_identity.users u ON u.id = m.user_id
-		 WHERE m.user_id = $1 AND m.workspace_id = $2`,
-		req.UserID, workspaceID,
-	).Scan(&mr.ID, &mr.Name, &mr.Email, &mr.Role, &mr.JoinedAt)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to query new member")
+		s.log.Error().Err(err).Msg("failed to add member")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
 		return
 	}
@@ -675,14 +667,8 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
-		s.log.Error().Err(err).Msg("failed to commit transaction")
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
-		return
-	}
-
 	var mr memberResponse
-	err = s.db.QueryRow(
+	err = tx.QueryRow(
 		`SELECT u.id, u.name, u.email, m.role, m.joined_at
 		 FROM provisr_identity.memberships m
 		 JOIN provisr_identity.users u ON u.id = m.user_id
@@ -691,6 +677,12 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	).Scan(&mr.ID, &mr.Name, &mr.Email, &mr.Role, &mr.JoinedAt)
 	if err != nil {
 		s.log.Error().Err(err).Msg("failed to query new member")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.log.Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}

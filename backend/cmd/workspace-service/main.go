@@ -1234,25 +1234,78 @@ func (s *server) handleCheckBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Checks) == 0 || len(req.Checks) > 100 {
+		writeError(w, http.StatusBadRequest, "validation_error", "checks must contain between 1 and 100 items")
+		return
+	}
+
+	for _, check := range req.Checks {
+		if check.UserID == "" || check.WorkspaceID == "" || check.Action == "" || check.ResourceType == "" {
+			writeError(w, http.StatusBadRequest, "validation_error", "each check requires user_id, workspace_id, action, and resource_type")
+			return
+		}
+	}
+
+	keys := map[[2]string]struct{}{}
+	var keyList [][2]string
+	for _, check := range req.Checks {
+		k := [2]string{check.UserID, check.WorkspaceID}
+		if _, ok := keys[k]; !ok {
+			keys[k] = struct{}{}
+			keyList = append(keyList, k)
+		}
+	}
+
+	var placeholders []string
+	var args []interface{}
+	for i, k := range keyList {
+		placeholders = append(placeholders, fmt.Sprintf("($%d::text, $%d::text)", 2*i+1, 2*i+2))
+		args = append(args, k[0], k[1])
+	}
+
+	rows, err := s.db.Query(
+		fmt.Sprintf(
+			`SELECT m.user_id, m.workspace_id, m.role
+			 FROM provisr_identity.memberships m
+			 JOIN (VALUES %s) AS pairs(uid, wid)
+			 ON m.user_id = pairs.uid AND m.workspace_id = pairs.wid`,
+			strings.Join(placeholders, ", "),
+		),
+		args...,
+	)
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed to batch lookup memberships")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to check permissions")
+		return
+	}
+	defer rows.Close()
+
+	roleMap := map[[2]string]string{}
+	for rows.Next() {
+		var uid, wid, role string
+		if err := rows.Scan(&uid, &wid, &role); err != nil {
+			s.log.Error().Err(err).Msg("failed to scan membership row")
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to check permissions")
+			return
+		}
+		roleMap[[2]string{uid, wid}] = role
+	}
+	if err := rows.Err(); err != nil {
+		s.log.Error().Err(err).Msg("failed to iterate membership rows")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to check permissions")
+		return
+	}
+
 	results := make([]checkPermissionResponse, len(req.Checks))
 	for i, check := range req.Checks {
-		var role string
-		err := s.db.QueryRow(
-			`SELECT role FROM provisr_identity.memberships
-			 WHERE user_id = $1 AND workspace_id = $2`,
-			check.UserID, check.WorkspaceID,
-		).Scan(&role)
-		if err == sql.ErrNoRows {
+		k := [2]string{check.UserID, check.WorkspaceID}
+		role, ok := roleMap[k]
+		if !ok {
 			results[i] = checkPermissionResponse{
 				Allowed: false,
 				Reason:  "user is not a member of this workspace",
 			}
 			continue
-		}
-		if err != nil {
-			s.log.Error().Err(err).Msg("failed to lookup membership for batch permission check")
-			writeError(w, http.StatusInternalServerError, "internal_error", "failed to check permissions")
-			return
 		}
 
 		allowed := isActionAllowed(role, check.ResourceType, check.Action)

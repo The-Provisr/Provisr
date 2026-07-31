@@ -30,6 +30,7 @@ def create_app(membership_store: MembershipStore | None = None) -> FastAPI:
                 ),
                 min_size=1,
                 max_size=5,
+                command_timeout=5,
             )
             resolved_store = PostgresMembershipStore(pool)
 

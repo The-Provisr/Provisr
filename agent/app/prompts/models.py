@@ -12,12 +12,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 _PROFILE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _TOOL_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _SEMVER_PATTERN = re.compile(
-    r"^(?P<major>0|[1-9]\d*)\."
-    r"(?P<minor>0|[1-9]\d*)\."
-    r"(?P<patch>0|[1-9]\d*)"
+    r"^(?P<major>0|[1-9][0-9]*)\."
+    r"(?P<minor>0|[1-9][0-9]*)\."
+    r"(?P<patch>0|[1-9][0-9]*)"
     r"(?:-(?P<prerelease>"
-    r"(?:0|[1-9]\d*|[a-zA-Z-][0-9a-zA-Z-]*)"
-    r"(?:\.(?:0|[1-9]\d*|[a-zA-Z-][0-9a-zA-Z-]*))*"
+    r"(?:0|[1-9][0-9]*|[a-zA-Z-][0-9a-zA-Z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[a-zA-Z-][0-9a-zA-Z-]*))*"
     r"))?"
     r"(?:\+(?P<build>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
 )

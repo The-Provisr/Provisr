@@ -124,6 +124,12 @@ def test_rejects_invalid_semantic_version() -> None:
         PromptBundle.model_validate(payload)
 
 
+def test_rejects_unicode_digits_in_semantic_version() -> None:
+    for version in ("1٢.0.0", "1.0.0-1٢"):
+        with pytest.raises(ValidationError, match="semantic version"):
+            build_bundle(version)
+
+
 def test_rejects_duplicate_profile_version() -> None:
     bundle = build_bundle("1.0.0")
 

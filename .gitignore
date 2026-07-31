@@ -19,7 +19,6 @@ $RECYCLE.BIN/
 
 # Go binaries built from workspace root
 /backend/workspace-service
-/backend/membership-service
 
 # Editors / IDEs
 .vscode/

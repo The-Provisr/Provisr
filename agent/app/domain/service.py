@@ -10,7 +10,7 @@ from app.domain.models import (
 )
 from app.integrations.anthropic_model import LanguageModel
 from app.integrations.state import StateStore
-from app.prompts.errors import PromptIntegrityError
+from app.prompts.errors import ProfileNotFound, PromptIntegrityError, VersionNotFound
 from app.prompts.registry import PromptRegistry
 
 _PROVISIONING_PROFILE = "provisioning_agent"
@@ -53,10 +53,13 @@ class AgentService:
 
     async def run_turn(self, *, session_id: str, message: str) -> ModelTurnResult:
         session = await self._state.get_session(session_id)
-        prompt = self._prompt_registry.get_prompt(
-            session.prompt_profile,
-            session.prompt_version,
-        )
+        try:
+            prompt = self._prompt_registry.get_prompt(
+                session.prompt_profile,
+                session.prompt_version,
+            )
+        except (ProfileNotFound, VersionNotFound) as error:
+            raise PromptIntegrityError("Pinned prompt is no longer available") from error
         if prompt.prompt_id != session.prompt_id or prompt.content_hash != session.prompt_hash:
             raise PromptIntegrityError("Pinned prompt metadata failed integrity validation")
 

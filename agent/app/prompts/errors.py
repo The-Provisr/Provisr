@@ -7,3 +7,7 @@ class ProfileNotFound(DomainError):
 
 class VersionNotFound(DomainError):
     code = "PROMPT_VERSION_NOT_FOUND"
+
+
+class PromptIntegrityError(DomainError):
+    code = "PROMPT_INTEGRITY_ERROR"

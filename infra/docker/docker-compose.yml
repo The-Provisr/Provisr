@@ -195,7 +195,9 @@ services:
     environment:
       PORT: "5100"
       BACKEND_URL: http://provisioning-service:8083
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
+      postgres: { condition: service_healthy }
       provisioning-service:
         condition: service_started
         required: false

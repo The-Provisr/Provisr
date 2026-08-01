@@ -3,6 +3,7 @@ name = "provisr-mcp"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "asyncpg>=0.30.0",
     "fastapi>=0.115.0",
     "pydantic>=2.10.0",
     "httpx>=0.28.0",

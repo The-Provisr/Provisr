@@ -1,15 +1,16 @@
 import { Controller, Get } from "@nestjs/common";
+import { Public } from "../middleware/public.decorator";
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
-
-  @Get("/health/live")
+  @Public()
+  @Get("health/live")
   live(): { status: string } {
     return { status: "ok" };
   }
 
-  @Get("/health/ready")
+  @Public()
+  @Get("health/ready")
   ready(): { status: string } {
     return { status: "ok" };
   }

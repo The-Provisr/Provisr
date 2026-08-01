@@ -7,15 +7,13 @@ export class ZodValidationPipe<T> implements PipeTransform {
   constructor(private readonly schema: ZodSchema<T>) {}
 
   transform(value: unknown, metadata: ArgumentMetadata): T {
-    if (metadata.type !== "body") {
-      return value as T;
-    }
-
     const result = this.schema.safeParse(value);
 
     if (!result.success) {
       const details = result.error.issues.map((issue) => ({
-        field: issue.path.join("."),
+        // Body fields carry a path (e.g. "name"); scalar query/param values
+        // don't, so fall back to the parameter name from metadata.
+        field: issue.path.length > 0 ? issue.path.join(".") : String(metadata.data ?? ""),
         message: issue.message,
       }));
       throw new ValidationError("Request validation failed", details);

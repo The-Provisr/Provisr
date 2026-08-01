@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { APP_FILTER, APP_GUARD } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD, Reflector } from "@nestjs/core";
 import { AppController } from "./routes/app.controller";
 import { GlobalExceptionFilter } from "./common/filters/global-exception.filter";
 import { AuthGuard } from "./middleware/auth.guard";
@@ -23,12 +23,21 @@ import { SseController } from "./routes/sse.controller";
     SseController,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: AuthGuard },
+    {
+      // useFactory + inject instead of useClass so the guard works under
+      // esbuild (vitest) as well as tsc (nest build): esbuild emits no
+      // design:paramtypes metadata for constructor injection.
+      provide: APP_GUARD,
+      useFactory: (reflector: Reflector) => new AuthGuard(reflector),
+      inject: [Reflector],
+    },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
   ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(CorrelationIdMiddleware).forRoutes("*");
+    // "{*splat}" is the path-to-regexp v8 named wildcard for "all routes"
+    // (a bare "*" is deprecated and triggers a LegacyRouteConverter warning).
+    consumer.apply(CorrelationIdMiddleware).forRoutes("{*splat}");
   }
 }

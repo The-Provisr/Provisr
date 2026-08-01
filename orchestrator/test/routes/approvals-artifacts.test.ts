@@ -1,19 +1,19 @@
 import { INestApplication } from "@nestjs/common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestApp, http } from "../helpers/create-test-app";
+import { createTestApp, http, useDevAuth } from "../helpers/create-test-app";
 
 const UUID = "a3b8f0f2-2c4a-4d6e-8f0a-1b2c3d4e5f6a";
 
 describe("Approvals and artifacts routes", () => {
   let app: INestApplication;
 
+  useDevAuth();
+
   beforeAll(async () => {
     app = await createTestApp();
-    process.env.DEV_USER_ID = "test-user";
   });
 
   afterAll(async () => {
-    delete process.env.DEV_USER_ID;
     await app.close();
   });
 

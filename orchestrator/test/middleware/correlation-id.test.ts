@@ -34,6 +34,16 @@ describe("CorrelationIdMiddleware", () => {
     expect(res.headers[REQUEST_ID_HEADER]).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("falls back to a fresh id for malformed correlation ids", async () => {
+    const res = await http(app)
+      .get("/health/live")
+      .set(CORRELATION_ID_HEADER, "correlation id with spaces")
+      .expect(200);
+
+    expect(res.headers[CORRELATION_ID_HEADER]).not.toBe("correlation id with spaces");
+    expect(res.headers[CORRELATION_ID_HEADER]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   it("uses the same request id in error responses", async () => {
     const res = await http(app).get("/v1/workspaces").expect(401);
 

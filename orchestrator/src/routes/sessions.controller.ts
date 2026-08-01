@@ -9,7 +9,7 @@ import {
   Query,
 } from "@nestjs/common";
 import { z } from "zod";
-import { NotImplementedError, ValidationError } from "../common/errors/typed-errors";
+import { NotImplementedError } from "../common/errors/typed-errors";
 import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 import { CurrentUser } from "../middleware/current-user.decorator";
 import type { RequestUser } from "../middleware/auth.types";
@@ -27,13 +27,10 @@ const workspaceIdQuerySchema = z.string().uuid();
 export class SessionsController {
   @Get()
   list(
-    @Query("workspaceId") workspaceId: string,
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema))
+    _workspaceId: string,
     @CurrentUser() _user: RequestUser,
   ): never {
-    const parsed = workspaceIdQuerySchema.safeParse(workspaceId);
-    if (!parsed.success) {
-      throw new ValidationError("workspaceId must be a valid UUID");
-    }
     // TODO(OR-004): delegate to session service
     throw new NotImplementedError("Session listing");
   }

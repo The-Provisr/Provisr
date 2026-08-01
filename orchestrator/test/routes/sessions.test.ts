@@ -1,19 +1,19 @@
 import { INestApplication } from "@nestjs/common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestApp, http } from "../helpers/create-test-app";
+import { createTestApp, http, useDevAuth } from "../helpers/create-test-app";
 
 const UUID = "a3b8f0f2-2c4a-4d6e-8f0a-1b2c3d4e5f6a";
 
 describe("Sessions routes", () => {
   let app: INestApplication;
 
+  useDevAuth();
+
   beforeAll(async () => {
     app = await createTestApp();
-    process.env.DEV_USER_ID = "test-user";
   });
 
   afterAll(async () => {
-    delete process.env.DEV_USER_ID;
     await app.close();
   });
 
@@ -25,12 +25,17 @@ describe("Sessions routes", () => {
       status: 400,
       code: "VALIDATION_FAILED",
     });
-    expect(res.body.message).toBe("workspaceId must be a valid UUID");
+    expect(res.body.message).toBe("Request validation failed");
+    expect(res.body.details).toEqual([
+      { field: "workspaceId", message: "Required" },
+    ]);
   });
 
   it("rejects a non-UUID workspaceId filter", async () => {
     const res = await http(app).get("/v1/sessions?workspaceId=abc").expect(400);
-    expect(res.body.message).toBe("workspaceId must be a valid UUID");
+    expect(res.body.details).toEqual([
+      { field: "workspaceId", message: "Invalid uuid" },
+    ]);
   });
 
   it("returns 501 for listing with a valid workspaceId", async () => {

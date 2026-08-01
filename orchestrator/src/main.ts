@@ -8,4 +8,10 @@ async function bootstrap(): Promise<void> {
   new Logger("Bootstrap").log(`Orchestrator running on :${port}`);
 }
 
-void bootstrap();
+void bootstrap().catch((err: unknown) => {
+  new Logger("Bootstrap").error(
+    "Failed to start orchestrator",
+    err instanceof Error ? err.stack : String(err),
+  );
+  process.exit(1);
+});

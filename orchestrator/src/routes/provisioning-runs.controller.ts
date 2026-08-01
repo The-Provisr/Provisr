@@ -8,7 +8,7 @@ import {
   Query,
 } from "@nestjs/common";
 import { z } from "zod";
-import { NotImplementedError, ValidationError } from "../common/errors/typed-errors";
+import { NotImplementedError } from "../common/errors/typed-errors";
 import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 import { CurrentUser } from "../middleware/current-user.decorator";
 import type { RequestUser } from "../middleware/auth.types";
@@ -32,7 +32,8 @@ export type CreateRunDto = z.infer<typeof createRunSchema>;
 export type ConfirmRunDto = z.infer<typeof confirmRunSchema>;
 export type ClarifyRunDto = z.infer<typeof clarifyRunSchema>;
 
-const runStatusQuerySchema = z.enum(requestStatuses);
+const sessionIdQuerySchema = z.string().uuid().optional();
+const runStatusQuerySchema = z.enum(requestStatuses).optional();
 
 @Controller("runs")
 export class ProvisioningRunsController {
@@ -44,24 +45,12 @@ export class ProvisioningRunsController {
 
   @Get()
   list(
-    @Query("sessionId") sessionId: string | undefined,
-    @Query("status") status: string | undefined,
+    @Query("sessionId", new ZodValidationPipe(sessionIdQuerySchema))
+    _sessionId: string | undefined,
+    @Query("status", new ZodValidationPipe(runStatusQuerySchema))
+    _status: string | undefined,
     @CurrentUser() _user: RequestUser,
   ): never {
-    if (sessionId !== undefined) {
-      const parsed = z.string().uuid().safeParse(sessionId);
-      if (!parsed.success) {
-        throw new ValidationError("sessionId must be a valid UUID");
-      }
-    }
-    if (status !== undefined) {
-      const parsed = runStatusQuerySchema.safeParse(status);
-      if (!parsed.success) {
-        throw new ValidationError(
-          `status must be one of: ${requestStatuses.join(", ")}`,
-        );
-      }
-    }
     // TODO(OR-005): list runs filtered by sessionId/status
     throw new NotImplementedError("Run listing");
   }

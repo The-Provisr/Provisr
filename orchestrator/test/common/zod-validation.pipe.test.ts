@@ -12,12 +12,6 @@ describe("ZodValidationPipe", () => {
   });
   const pipe = new ZodValidationPipe(schema);
 
-  it("passes non-body values through untouched", () => {
-    const value = { id: "abc" };
-    expect(pipe.transform(value, { type: "query" })).toBe(value);
-    expect(pipe.transform(value, { type: "param" })).toBe(value);
-  });
-
   it("returns parsed data (with defaults) for a valid body", () => {
     expect(pipe.transform({ name: "prod" }, { type: "body" })).toEqual({
       name: "prod",
@@ -54,5 +48,27 @@ describe("ZodValidationPipe", () => {
         },
       ]);
     }
+  });
+
+  it("validates scalar query values using the parameter name as field", () => {
+    const uuidPipe = new ZodValidationPipe(z.string().uuid());
+
+    expect(uuidPipe.transform("a3b8f0f2-2c4a-4d6e-8f0a-1b2c3d4e5f6a", {
+      type: "query",
+      data: "workspaceId",
+    })).toBe("a3b8f0f2-2c4a-4d6e-8f0a-1b2c3d4e5f6a");
+
+    try {
+      uuidPipe.transform("not-a-uuid", { type: "query", data: "workspaceId" });
+      throw new Error("expected ValidationError to be thrown");
+    } catch (err) {
+      const e = err as ValidationError;
+      expect(e.details).toEqual([{ field: "workspaceId", message: "Invalid uuid" }]);
+    }
+  });
+
+  it("lets optional query values pass when absent", () => {
+    const optionalPipe = new ZodValidationPipe(z.string().uuid().optional());
+    expect(optionalPipe.transform(undefined, { type: "query", data: "sessionId" })).toBeUndefined();
   });
 });

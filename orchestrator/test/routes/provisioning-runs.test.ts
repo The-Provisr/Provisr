@@ -1,19 +1,19 @@
 import { INestApplication } from "@nestjs/common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestApp, http } from "../helpers/create-test-app";
+import { createTestApp, http, useDevAuth } from "../helpers/create-test-app";
 
 const UUID = "a3b8f0f2-2c4a-4d6e-8f0a-1b2c3d4e5f6a";
 
 describe("Provisioning runs routes", () => {
   let app: INestApplication;
 
+  useDevAuth();
+
   beforeAll(async () => {
     app = await createTestApp();
-    process.env.DEV_USER_ID = "test-user";
   });
 
   afterAll(async () => {
-    delete process.env.DEV_USER_ID;
     await app.close();
   });
 
@@ -60,14 +60,27 @@ describe("Provisioning runs routes", () => {
 
   it("rejects an invalid sessionId filter", async () => {
     const res = await http(app).get("/v1/runs?sessionId=abc").expect(400);
-    expect(res.body.message).toBe("sessionId must be a valid UUID");
+
+    expect(res.body).toMatchObject({
+      error: "ProvError",
+      status: 400,
+      code: "VALIDATION_FAILED",
+    });
+    expect(res.body.details).toEqual([
+      { field: "sessionId", message: "Invalid uuid" },
+    ]);
   });
 
   it("rejects an invalid status filter", async () => {
     const res = await http(app).get("/v1/runs?status=INVALID").expect(400);
-    expect(res.body.message).toBe(
-      "status must be one of: received, pending_agent, pending_clarification, policy_check, pending_confirmation, pending_approval, provisioning, live, failed, cancelled",
-    );
+
+    expect(res.body.details).toEqual([
+      {
+        field: "status",
+        message:
+          "Invalid enum value. Expected 'received' | 'pending_agent' | 'pending_clarification' | 'policy_check' | 'pending_confirmation' | 'pending_approval' | 'provisioning' | 'live' | 'failed' | 'cancelled', received 'INVALID'",
+      },
+    ]);
   });
 
   it("accepts a valid status filter", async () => {

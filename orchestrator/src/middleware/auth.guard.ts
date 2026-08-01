@@ -5,7 +5,18 @@ import { UnauthorizedError } from "../common/errors/typed-errors";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import type { RequestUser } from "./auth.types";
 
-const SSE_EVENTS_PATH = /\/workspaces\/[^/]+\/events$/;
+const SSE_EVENTS_PATH_PATTERN = /\/workspaces\/[^/]+\/events$/;
+
+export function isSseEventsPath(pathname: string): boolean {
+  return SSE_EVENTS_PATH_PATTERN.test(pathname);
+}
+
+// RFC 6750: the Bearer scheme is case-insensitive.
+export function extractBearerToken(header: string | undefined): string | undefined {
+  const match = header?.match(/^bearer\s+(.+)$/i);
+  const token = match?.[1]?.trim();
+  return token && token.length > 0 ? token : undefined;
+}
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -48,12 +59,9 @@ export class AuthGuard implements CanActivate {
   }
 
   private extractToken(req: Request): string | undefined {
-    const header = req.header("authorization");
-    if (header && header.startsWith("Bearer ")) {
-      const token = header.slice("Bearer ".length).trim();
-      if (token) {
-        return token;
-      }
+    const headerToken = extractBearerToken(req.header("authorization"));
+    if (headerToken) {
+      return headerToken;
     }
 
     // SSE via EventSource cannot set Authorization headers (browser limitation),
@@ -62,7 +70,7 @@ export class AuthGuard implements CanActivate {
     // proxies and browser history. The query string is deliberately not logged
     // by CorrelationIdMiddleware.
     const pathname = (req.originalUrl ?? "").split("?")[0] ?? "";
-    if (req.method === "GET" && SSE_EVENTS_PATH.test(pathname)) {
+    if (req.method === "GET" && isSseEventsPath(pathname)) {
       const queryToken = req.query["token"];
       if (typeof queryToken === "string" && queryToken.length > 0) {
         return queryToken;

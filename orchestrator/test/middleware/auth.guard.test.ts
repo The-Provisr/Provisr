@@ -3,7 +3,7 @@ import { ExecutionContext } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { IS_PUBLIC_KEY } from "../../src/middleware/public.decorator";
-import { AuthGuard } from "../../src/middleware/auth.guard";
+import { AuthGuard, extractBearerToken, isSseEventsPath } from "../../src/middleware/auth.guard";
 import { UnauthorizedError } from "../../src/common/errors/typed-errors";
 
 const handler = (): void => undefined;
@@ -115,8 +115,45 @@ describe("AuthGuard", () => {
       try {
         expect(() => guard.canActivate(mockContext({}))).toThrowError(UnauthorizedError);
       } finally {
-        process.env.NODE_ENV = previous;
+        if (previous === undefined) {
+          delete process.env.NODE_ENV;
+        } else {
+          process.env.NODE_ENV = previous;
+        }
+        delete process.env.DEV_USER_ID;
       }
     });
   });
+});
+
+describe("extractBearerToken", () => {
+  it.each([
+    ["Bearer abc.def", "abc.def"],
+    ["bearer abc.def", "abc.def"],
+    ["BEARER abc.def", "abc.def"],
+    ["Bearer   abc.def  ", "abc.def"],
+  ])("extracts the token from %j (case-insensitive scheme)", (header, expected) => {
+    expect(extractBearerToken(header)).toBe(expected);
+  });
+
+  it("rejects a missing header", () => {
+    expect(extractBearerToken(undefined)).toBeUndefined();
+  });
+
+  it.each(["Basic abc.def", "Bearer", "Bearer "])("rejects %j", (header) => {
+    expect(extractBearerToken(header)).toBeUndefined();
+  });
+});
+
+describe("isSseEventsPath", () => {
+  it("matches the SSE event-stream route", () => {
+    expect(isSseEventsPath("/v1/workspaces/f47ac10b-58cc-4372-a567-0e02b2c3d479/events")).toBe(true);
+  });
+
+  it.each(["/v1/workspaces", "/v1/workspaces/f47ac10b-58cc-4372-a567-0e02b2c3d479", "/v1/runs"])(
+    "rejects %j",
+    (path) => {
+      expect(isSseEventsPath(path)).toBe(false);
+    },
+  );
 });

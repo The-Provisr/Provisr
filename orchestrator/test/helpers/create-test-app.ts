@@ -14,10 +14,16 @@ export function http(app: INestApplication): ReturnType<typeof request> {
 }
 
 export function useDevAuth(userId = "test-user"): void {
+  let previous: string | undefined;
   beforeAll(() => {
+    previous = process.env.DEV_USER_ID;
     process.env.DEV_USER_ID = userId;
   });
   afterAll(() => {
-    delete process.env.DEV_USER_ID;
+    if (previous === undefined) {
+      delete process.env.DEV_USER_ID;
+    } else {
+      process.env.DEV_USER_ID = previous;
+    }
   });
 }

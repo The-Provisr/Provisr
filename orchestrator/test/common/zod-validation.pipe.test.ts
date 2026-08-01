@@ -71,4 +71,22 @@ describe("ZodValidationPipe", () => {
     const optionalPipe = new ZodValidationPipe(z.string().uuid().optional());
     expect(optionalPipe.transform(undefined, { type: "query", data: "sessionId" })).toBeUndefined();
   });
+
+  it("uses the metadata type as field for whole-value errors", () => {
+    try {
+      pipe.transform("not-an-object", { type: "body" });
+      throw new Error("expected ValidationError to be thrown");
+    } catch (err) {
+      const e = err as ValidationError;
+      expect(e.details).toEqual([{ field: "body", message: "Expected object, received string" }]);
+    }
+
+    try {
+      pipe.transform(undefined, { type: "body" });
+      throw new Error("expected ValidationError to be thrown");
+    } catch (err) {
+      const e = err as ValidationError;
+      expect(e.details).toEqual([{ field: "body", message: "Required" }]);
+    }
+  });
 });

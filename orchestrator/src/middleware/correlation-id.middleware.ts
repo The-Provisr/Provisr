@@ -19,8 +19,13 @@ export class CorrelationIdMiddleware implements NestMiddleware {
     res.setHeader(CORRELATION_ID_HEADER, correlationId);
     res.setHeader(REQUEST_ID_HEADER, requestId);
 
+    // `req.path` is stripped to "/" by the time route-level middleware runs,
+    // so use the original URL. Never log the query string: SSE tokens travel as
+    // a `?token=` query parameter and must not appear in logs.
+    const pathname = req.originalUrl.split("?")[0];
+
     this.logger.log(
-      { correlationId, requestId, method: req.method, path: req.path },
+      { correlationId, requestId, method: req.method, path: pathname },
       "incoming request",
     );
 

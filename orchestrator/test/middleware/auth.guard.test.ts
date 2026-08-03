@@ -109,18 +109,23 @@ describe("AuthGuard", () => {
     });
 
     it("disables the dev bypass when NODE_ENV is production", () => {
-      const previous = process.env.NODE_ENV;
+      const previousNodeEnv = process.env.NODE_ENV;
+      const previousDevUserId = process.env.DEV_USER_ID;
       process.env.DEV_USER_ID = "user-123";
       process.env.NODE_ENV = "production";
       try {
         expect(() => guard.canActivate(mockContext({}))).toThrowError(UnauthorizedError);
       } finally {
-        if (previous === undefined) {
+        if (previousNodeEnv === undefined) {
           delete process.env.NODE_ENV;
         } else {
-          process.env.NODE_ENV = previous;
+          process.env.NODE_ENV = previousNodeEnv;
         }
-        delete process.env.DEV_USER_ID;
+        if (previousDevUserId === undefined) {
+          delete process.env.DEV_USER_ID;
+        } else {
+          process.env.DEV_USER_ID = previousDevUserId;
+        }
       }
     });
   });

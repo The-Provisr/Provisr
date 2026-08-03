@@ -1,7 +1,9 @@
 import json
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.api.schemas import AgentDispatchResponse, AgentToolCall
 from app.config.settings import Settings
 from app.domain.service import AgentService
 from app.integrations.state import InMemoryStateStore
@@ -9,10 +11,9 @@ from app.main import Resources, create_app
 from app.profiles.catalog import build_profile_selector
 from app.prompts.catalog import build_prompt_registry
 from app.prompts.provisioning import PROVISIONING_AGENT_V1_1
-from tests.fakes import FakeLanguageModel
+from tests.fakes import FakeDispatcher, FakeLanguageModel
 
 REQUEST_ID = "8b8c64dc-6607-4a45-aa71-f51b2d381cdf"
-
 
 def clarification_output(request_id: str = REQUEST_ID) -> str:
     return json.dumps(
@@ -30,7 +31,10 @@ def clarification_output(request_id: str = REQUEST_ID) -> str:
     )
 
 
-def build_client(raw_output: str) -> TestClient:
+def build_client(
+    raw_output: str,
+    dispatcher: FakeDispatcher | None = None,
+) -> TestClient:
     state = InMemoryStateStore()
     model = FakeLanguageModel(raw_output)
     prompt_registry = build_prompt_registry()
@@ -44,6 +48,7 @@ def build_client(raw_output: str) -> TestClient:
             model=model,
             profile_selector=profile_selector,
         ),
+        dispatcher=dispatcher or FakeDispatcher(AgentDispatchResponse()),
     )
     app = create_app(settings=Settings(environment="test"), resources=resources)
     return TestClient(app)
@@ -169,3 +174,59 @@ def test_inactive_profile_uses_typed_not_available_error() -> None:
 
     assert response.status_code == 400
     assert response.json()["code"] == "AGENT_PROFILE_NOT_AVAILABLE"
+
+
+def test_dispatch_accepts_the_orchestrator_contract() -> None:
+    ids = {name: str(uuid4()) for name in ["run", "session", "workspace", "user", "correlation"]}
+    dispatcher = FakeDispatcher(
+        AgentDispatchResponse(
+            tool_calls=[
+                AgentToolCall(tool_name="get_policy_requirements", ok=True, summary="loaded")
+            ]
+        )
+    )
+    with build_client(clarification_output(), dispatcher) as client:
+        response = client.post(
+            f"/runs/{ids['run']}/dispatch",
+            json={
+                "run_id": ids["run"],
+                "session_id": ids["session"],
+                "workspace_id": ids["workspace"],
+                "user_id": ids["user"],
+                "correlation_id": ids["correlation"],
+                "phase": "pending_policy",
+                "prompt": "Create a production API",
+                "history": [],
+                "question_answer": None,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "messages": [],
+        "tool_calls": [
+            {"tool_name": "get_policy_requirements", "ok": True, "summary": "loaded"}
+        ],
+    }
+    assert str(dispatcher.requests[0].run_id) == ids["run"]
+
+
+def test_dispatch_rejects_a_mismatched_path_run_id() -> None:
+    body_ids = [str(uuid4()) for _ in range(5)]
+    with build_client(clarification_output()) as client:
+        response = client.post(
+            f"/runs/{uuid4()}/dispatch",
+            json={
+                "run_id": body_ids[0],
+                "session_id": body_ids[1],
+                "workspace_id": body_ids[2],
+                "user_id": body_ids[3],
+                "correlation_id": body_ids[4],
+                "phase": "pending_agent",
+                "prompt": "Create a production API",
+                "history": [],
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "DISPATCH_RUN_MISMATCH"

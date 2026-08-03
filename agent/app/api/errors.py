@@ -4,9 +4,11 @@ from fastapi.responses import JSONResponse
 from app.api.schemas import ProblemDetails
 from app.domain.errors import (
     DependencyUnavailableError,
+    DispatchRunMismatchError,
     DomainError,
     InvalidModelResponseError,
     ModelNotConfiguredError,
+    PhaseNotConfiguredError,
     SessionFailedError,
     SessionNotFoundError,
 )
@@ -34,10 +36,12 @@ def _status_for(error: DomainError) -> int:
         return status.HTTP_409_CONFLICT
     if isinstance(error, (InvalidModelResponseError, DependencyUnavailableError)):
         return status.HTTP_502_BAD_GATEWAY
-    if isinstance(error, ModelNotConfiguredError):
+    if isinstance(error, (ModelNotConfiguredError, PhaseNotConfiguredError)):
         return status.HTTP_503_SERVICE_UNAVAILABLE
     if isinstance(error, PromptIntegrityError):
         return status.HTTP_500_INTERNAL_SERVER_ERROR
+    if isinstance(error, DispatchRunMismatchError):
+        return status.HTTP_400_BAD_REQUEST
     return status.HTTP_400_BAD_REQUEST
 
 
@@ -54,4 +58,8 @@ def _title_for(error: DomainError) -> str:
         return "External dependency unavailable"
     if isinstance(error, PromptIntegrityError):
         return "Prompt integrity validation failed"
+    if isinstance(error, DispatchRunMismatchError):
+        return "Dispatch run mismatch"
+    if isinstance(error, PhaseNotConfiguredError):
+        return "Agent phase not configured"
     return "Request failed"

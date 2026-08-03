@@ -1,16 +1,24 @@
 import json
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 from fastapi import APIRouter, Query, status
 from fastapi.responses import StreamingResponse
 
-from app.api.dependencies import AgentServiceDependency, StateStoreDependency
+from app.api.dependencies import (
+    AgentDispatcherDependency,
+    AgentServiceDependency,
+    StateStoreDependency,
+)
 from app.api.schemas import (
+    AgentDispatchRequest,
+    AgentDispatchResponse,
     CreateSessionRequest,
     CreateSessionResponse,
     RunTurnRequest,
     RunTurnResponse,
 )
+from app.domain.errors import DispatchRunMismatchError
 from app.domain.models import AgentEvent
 
 router = APIRouter()
@@ -24,6 +32,22 @@ async def liveness() -> dict[str, str]:
 @router.get("/health/ready", tags=["health"])
 async def readiness(state: StateStoreDependency) -> dict[str, str]:
     return {"status": "ready" if await state.ready() else "not_ready"}
+
+
+@router.post(
+    "/runs/{run_id}/dispatch",
+    response_model=AgentDispatchResponse,
+    response_model_exclude_none=True,
+    tags=["orchestrator"],
+)
+async def dispatch_run(
+    run_id: UUID,
+    body: AgentDispatchRequest,
+    dispatcher: AgentDispatcherDependency,
+) -> AgentDispatchResponse:
+    if run_id != body.run_id:
+        raise DispatchRunMismatchError("path run_id must match body run_id")
+    return await dispatcher.dispatch(body)
 
 
 @router.post(

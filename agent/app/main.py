@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from app.api.errors import register_error_handlers
 from app.api.routes import router
 from app.config.settings import Settings, load_settings
+from app.domain.dispatch import AgentDispatcher, ModelAgentDispatcher
 from app.domain.service import AgentService
 from app.integrations.anthropic_model import ClaudeModel, LanguageModel
 from app.integrations.gemini_model import GeminiModel
@@ -27,6 +28,7 @@ class Resources:
     prompt_registry: PromptRegistry
     profile_selector: ProfileSelector
     agent_service: AgentService
+    dispatcher: AgentDispatcher
 
     async def aclose(self) -> None:
         await self.state.aclose()
@@ -47,15 +49,17 @@ def create_resources(
     language_model = model or _build_model(settings)
     resolved_prompt_registry = prompt_registry or build_prompt_registry()
     resolved_profile_selector = profile_selector or build_profile_selector(resolved_prompt_registry)
+    agent_service = AgentService(
+        state=state,
+        model=language_model,
+        profile_selector=resolved_profile_selector,
+    )
     return Resources(
         state=state,
         prompt_registry=resolved_prompt_registry,
         profile_selector=resolved_profile_selector,
-        agent_service=AgentService(
-            state=state,
-            model=language_model,
-            profile_selector=resolved_profile_selector,
-        ),
+        agent_service=agent_service,
+        dispatcher=ModelAgentDispatcher(agent_service),
     )
 
 

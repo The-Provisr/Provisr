@@ -1,13 +1,5 @@
-from fastapi import FastAPI
+"""Compatibility import for older deployments; the canonical app is app.main."""
 
-app = FastAPI(title="Provisr Agent")
+from app.main import app
 
-
-@app.get("/health/live")
-async def live():
-    return {"status": "ok"}
-
-
-@app.get("/health/ready")
-async def ready():
-    return {"status": "ok"}
+__all__ = ["app"]

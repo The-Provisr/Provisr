@@ -21,9 +21,6 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     session_ttl_seconds: int = Field(default=7200, ge=60, le=86400)
 
-    # Which language model backend to use for turns.
-    model_provider: Literal["anthropic", "gemini"] = "anthropic"
-
     # Claude via the Anthropic SDK targeting Claude Platform on AWS. These read the
     # unprefixed ANTHROPIC_* env vars (matching svc-agent), not the PROVISR_ prefix.
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
@@ -31,9 +28,6 @@ class Settings(BaseSettings):
     anthropic_workspace_id: str = Field(default="", validation_alias="ANTHROPIC_WORKSPACE_ID")
     anthropic_model: str = Field(default="claude-sonnet-4-5", validation_alias="ANTHROPIC_MODEL")
 
-    # Google Gemini via the google-genai SDK. Reads unprefixed GEMINI_* env vars.
-    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
 
 
 @lru_cache

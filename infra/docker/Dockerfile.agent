@@ -7,4 +7,4 @@ COPY agent/pyproject.toml agent/uv.lock ./
 RUN uv sync --frozen --no-dev
 COPY agent/ ./
 EXPOSE 5000
-CMD ["uv", "run", "uvicorn", "src.entrypoints.api:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]

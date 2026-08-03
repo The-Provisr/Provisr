@@ -20,3 +20,11 @@ class ModelNotConfiguredError(DomainError):
 
 class DependencyUnavailableError(DomainError):
     code = "DEPENDENCY_UNAVAILABLE"
+
+
+class DispatchRunMismatchError(DomainError):
+    code = "DISPATCH_RUN_MISMATCH"
+
+
+class PhaseNotConfiguredError(DomainError):
+    code = "PHASE_NOT_CONFIGURED"

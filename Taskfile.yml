@@ -64,7 +64,7 @@ tasks:
   build:py:
     desc: Check Python packages compile
     cmds:
-      - (cd agent && uv run python -m compileall src)
+      - (cd agent && uv run python -m compileall app)
       - (cd mcp && uv run python -m compileall src)
 
   # ── Test ──
@@ -112,7 +112,7 @@ tasks:
   lint:py:
     desc: Lint Python code
     cmds:
-      - (cd agent && uv run ruff check src)
+      - (cd agent && uv run ruff check app tests)
       - (cd mcp && uv run ruff check src)
 
   # ── Proto ──

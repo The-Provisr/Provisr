@@ -29,7 +29,7 @@ ORCH_PID=$!
 
 # Start agent + MCP
 echo "[4/5] Starting agent + MCP..."
-(cd "$ROOT/agent" && uv run uvicorn src.entrypoints.api:app --reload --port 5000) &
+(cd "$ROOT/agent" && uv run uvicorn app.main:app --reload --port 5000) &
 (cd "$ROOT/mcp" && uv run uvicorn src.servers.policy_server:app --reload --port 5100) &
 
 # Start frontend

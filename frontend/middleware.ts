@@ -1,33 +1,51 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import {
+  clerkMiddleware,
+  createRouteMatcher,
+} from "@clerk/nextjs/server";
 import type { NextFetchEvent, NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-const isProtectedRoute = createRouteMatcher([
-  "/approvals(.*)",
-  "/audit(.*)",
-  "/chat(.*)",
-  "/policy(.*)",
-  "/requests(.*)",
-  "/resources(.*)",
-  "/settings(.*)",
-  "/workspace(.*)",
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in/:path*",
+  "/sign-up/:path*",
+  "/api/webhooks/:path*",
 ]);
 
+const isOnboardingRoute = createRouteMatcher(["/onboarding/:path*", "/post-auth"]);
+
 const withClerk = clerkMiddleware(async (auth, request) => {
-  if (!isProtectedRoute(request)) {
-    return;
+  const isApi = request.nextUrl.pathname.startsWith("/api");
+
+  // Middleware performs no auth enforcement on /api/* by design. Every route
+  // handler carries its own check (auth.protect() or verifyToken).
+  if (isApi) {
+    return NextResponse.next();
   }
 
-  const session = await auth();
+  const { userId, sessionClaims, redirectToSignIn } = await auth();
 
-  if (!session.userId) {
-    await auth.protect();
-    return;
+  // Signed out on a protected route → Clerk sign-in, preserving return URL.
+  if (!userId && !isPublicRoute(request)) {
+    return redirectToSignIn({ returnBackUrl: request.url });
   }
 
-  if (!session.orgId) {
+  if (!userId) {
+    return NextResponse.next();
+  }
+
+  // Signed in but no workspace → onboarding.
+  const hasWorkspace = Boolean(sessionClaims?.metadata?.workspaceId);
+  if (userId && !hasWorkspace && !isOnboardingRoute(request) && !isPublicRoute(request)) {
     return NextResponse.redirect(new URL("/onboarding", request.url));
   }
+
+  // Onboarded user landing on /onboarding → bounce to dashboard.
+  if (hasWorkspace && request.nextUrl.pathname.startsWith("/onboarding")) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  return NextResponse.next();
 });
 
 export default function middleware(request: NextRequest, event: NextFetchEvent) {
@@ -43,7 +61,9 @@ export default function middleware(request: NextRequest, event: NextFetchEvent) 
 
 export const config = {
   matcher: [
+    // Skip Next.js internals and static files, unless found in search params
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Always run for API routes
     "/(api|trpc)(.*)",
   ],
 };

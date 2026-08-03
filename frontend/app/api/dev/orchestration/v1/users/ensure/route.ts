@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   const token = authHeader.slice("Bearer ".length);
 
   try {
-    await verifyToken(token, {});
+    await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
   } catch {
     return Response.json({ error: "invalid_token" }, { status: 401 });
   }
@@ -34,7 +34,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "invalid_body" }, { status: 400 });
   }
 
-  const { clerkId } = body as { clerkId?: string };
+  const { clerkId, workspaceId: bodyWorkspaceId } = body as {
+    clerkId?: string;
+    workspaceId?: string;
+  };
   if (!clerkId) {
     return Response.json({ error: "missing_clerk_id" }, { status: 400 });
   }
@@ -54,10 +57,18 @@ export async function POST(req: Request) {
 
   const existing = records.get(clerkId);
   if (existing) {
+    // A workspaceId in the body claims/updates the existing record — this is
+    // how a local onboarding run (create org → claim) reflects on later
+    // ensure calls without restarting the dev server.
+    if (bodyWorkspaceId && existing.workspaceId !== bodyWorkspaceId) {
+      const updated = { ...existing, workspaceId: bodyWorkspaceId };
+      records.set(clerkId, updated);
+      return Response.json(updated);
+    }
     return Response.json(existing);
   }
 
-  const record = { id: nextId(), workspaceId };
+  const record = { id: nextId(), workspaceId: bodyWorkspaceId ?? workspaceId };
   records.set(clerkId, record);
   return Response.json(record);
 }

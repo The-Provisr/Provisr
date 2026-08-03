@@ -2,7 +2,7 @@
 
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 type ClaimProbe = {
   refreshed: boolean;
@@ -33,19 +33,21 @@ export function PostAuthHandoff(props: {
   const { getToken, isLoaded } = useAuth();
   const { user } = useUser();
   const router = useRouter();
-  const attempted = useRef(false);
   const [status, setStatus] = useState<"refreshing" | "failed">("refreshing");
 
   useEffect(() => {
-    if (!isLoaded || attempted.current) return;
-    attempted.current = true;
+    if (!isLoaded) return;
 
     let cancelled = false;
 
     async function probe(): Promise<ClaimProbe> {
       const token = await getToken({ skipCache: true });
       if (!token) return { refreshed: false, matchesExpected: false };
-      const claimed = decodeWorkspaceId(token);
+      // Clerk's session token template omits a null-valued metadata field
+      // rather than emitting JSON null, so "no workspace" decodes as
+      // undefined. Normalize to null so it compares equal to
+      // expectedWorkspaceId for brand-new users who have never claimed one.
+      const claimed = decodeWorkspaceId(token) ?? null;
       return {
         refreshed: true,
         matchesExpected: claimed === expectedWorkspaceId,
@@ -53,21 +55,28 @@ export function PostAuthHandoff(props: {
     }
 
     async function run() {
-      let result = await probe();
+      try {
+        let result = await probe();
 
-      // One retry after reloading the user before giving up. The token may lag
-      // one refresh cycle behind the metadata write.
-      if (result.refreshed && !result.matchesExpected) {
-        await user?.reload();
-        result = await probe();
+        // One retry after reloading the user before giving up. The token may lag
+        // one refresh cycle behind the metadata write.
+        if (result.refreshed && !result.matchesExpected) {
+          await user?.reload();
+          result = await probe();
+        }
+
+        if (cancelled) return;
+
+        if (result.refreshed && result.matchesExpected) {
+          router.replace(target);
+          return;
+        }
+      } catch {
+        // Fall through to the failed state below — a thrown/rejected refresh
+        // (e.g. a transient network error) must surface, not hang silently.
       }
 
       if (cancelled) return;
-
-      if (result.refreshed && result.matchesExpected) {
-        router.replace(target);
-        return;
-      }
 
       // Surface the failure instead of silently replacing: a silent replace
       // with a stale claim would land the user on /onboarding via middleware

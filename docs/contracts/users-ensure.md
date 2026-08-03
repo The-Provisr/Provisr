@@ -107,10 +107,17 @@ include `{"metadata": "{{user.public_metadata}}"}`. Without it,
 `sessionClaims.metadata` is `undefined` on every request and routing falls back
 to onboarding for all users.
 
+**Claiming a workspace:** `ensureUser()`'s request body accepts an optional
+`workspaceId`. `POST /api/workspace/claim` (`auth.protect()`-guarded) calls
+`ensureUser` with the caller's newly created workspace id and then runs the
+same reconcile as `/post-auth`. Onboarding calls this route right after
+`createOrganization`/`setActive` so `publicMetadata.workspaceId` is set in the
+same request cycle, instead of waiting for a later `/post-auth` visit.
+
 ## Dev stub
 
 For local testing only (throwaway, never merge as a real backend):
-`frontend/app/api/dev/orchestration/users/ensure/route.ts`. The route is
+`frontend/app/api/dev/orchestration/v1/users/ensure/route.ts`. The route is
 guarded at the top of the handler — in a production build
 (`NODE_ENV === "production"`) it returns `404` before any auth logic runs.
 Set `ORCHESTRATION_API_URL=http://localhost:3000/api/dev/orchestration` in
@@ -120,5 +127,7 @@ Set `ORCHESTRATION_API_URL=http://localhost:3000/api/dev/orchestration` in
 - `?workspaceId=<value>` → routes to `/dashboard`
 - header `x-stub-workspace-id` → same behavior
 - default (no param/header) → `null` (brand-new user)
+- body `workspaceId` on a repeat call for an existing `clerkId` → updates
+  that record's stored `workspaceId` (used by the claim route above)
 
 Idempotency is tracked in a module-level `Map` keyed on `clerkId`.

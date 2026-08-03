@@ -11,6 +11,7 @@ import {
 } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { CloudProviderLogo } from "@/components/ui/cloud-provider-logo";
 import styles from "./onboarding-flow.module.css";
@@ -902,6 +903,7 @@ function FlowExperience({
   userEmail?: string;
   userName?: string;
 }) {
+  const router = useRouter();
   const [activeIndex, setActiveIndex] = useState(0);
   const [state, setState] = useState<FlowState>(() => ({
     ...initialState,
@@ -1063,10 +1065,14 @@ function FlowExperience({
               )}
 
               {activeStep === "review" ? (
-                <Link className={styles.primaryButton} href="/chat">
+                <button
+                  className={styles.primaryButton}
+                  onClick={() => router.push("/post-auth")}
+                  type="button"
+                >
                   Open provisioning chat
                   <span aria-hidden="true">→</span>
-                </Link>
+                </button>
               ) : (
                 <button
                   className={styles.primaryButton}
@@ -1097,6 +1103,16 @@ function ClerkOnboarding() {
 
     const organization = await createOrganization({ name, slug });
     await setActive({ organization });
+
+    const res = await fetch("/api/workspace/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: organization.id }),
+    });
+    if (!res.ok) {
+      throw new Error("We created your workspace but couldn't finish claiming it. Please try again.");
+    }
+
     return true;
   }
 

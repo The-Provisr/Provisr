@@ -5,6 +5,7 @@ type EnsureUserInput = {
   email: string | null;
   name: string | null;
   avatarUrl: string | null;
+  workspaceId?: string;
 };
 
 type EnsureUserResult = {

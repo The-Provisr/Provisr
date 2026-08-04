@@ -1067,10 +1067,11 @@ function FlowExperience({
               {activeStep === "review" ? (
                 <button
                   className={styles.primaryButton}
+                  disabled={!workspaceCreated || isCreating}
                   onClick={() => router.push("/post-auth")}
                   type="button"
                 >
-                  Open provisioning chat
+                  Open dashboard
                   <span aria-hidden="true">→</span>
                 </button>
               ) : (

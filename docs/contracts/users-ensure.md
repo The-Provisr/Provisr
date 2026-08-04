@@ -15,6 +15,10 @@ POST /v1/users/ensure
 - Header: `Authorization: Bearer <Clerk session JWT>`
 - The token is verified against Clerk's JWKS. No static orchestration API key
   is accepted at this endpoint.
+- The upsert key is **derived from the verified JWT `sub` claim**. The request
+  body must not carry a `clerkId` field: a valid token proves only its bearer's
+  identity, so a body-supplied `clerkId` would let one user target another
+  user's record. Any body `clerkId` is rejected as invalid.
 - Response shape: the caller's `workspaceId` (or `null`).
 
 ## Request
@@ -25,13 +29,12 @@ Headers:
 |---|---|---|
 | `Authorization` | yes | `Bearer <Clerk session JWT>` |
 | `Content-Type` | yes | `application/json` |
-| `Idempotency-Key` | yes | Set to the Clerk user ID (`clerkId`). Safe on every sign-in, safe to retry. |
+| `Idempotency-Key` | yes | Set to the JWT `sub` (the Clerk user ID). Safe on every sign-in, safe to retry. |
 
 Body:
 
 ```json
 {
-  "clerkId": "user_2abc…",
   "email": "user@example.com",
   "name": "Jane Doe",
   "avatarUrl": "https://img.clerk.com/…"
@@ -40,7 +43,6 @@ Body:
 
 | Field | Type | Notes |
 |---|---|---|
-| `clerkId` | string | Clerk user ID. Primary key / upsert key. |
 | `email` | string \| null | Primary email, may be absent. |
 | `name` | string \| null | First + last name joined, may be absent. |
 | `avatarUrl` | string \| null | User image URL, may be absent. |
@@ -58,8 +60,9 @@ Body:
 
 Semantics:
 
-- **Upsert** on `clerk_id`. A repeat call with the same `Idempotency-Key` /
-  `clerkId` returns the existing record — it must **never** return `409`.
+- **Upsert** on the verified JWT `sub` (Clerk user ID). A repeat call with the
+  same `Idempotency-Key` / `sub` returns the existing record — it must
+  **never** return `409`.
 - `workspaceId` is `null` for a brand-new user who has not created a workspace.
 - Same-user retries produce exactly one backend user record.
 
@@ -127,7 +130,7 @@ Set `ORCHESTRATION_API_URL=http://localhost:3000/api/dev/orchestration` in
 - `?workspaceId=<value>` → routes to `/dashboard`
 - header `x-stub-workspace-id` → same behavior
 - default (no param/header) → `null` (brand-new user)
-- body `workspaceId` on a repeat call for an existing `clerkId` → updates
+- body `workspaceId` on a repeat call for an existing `sub` → updates
   that record's stored `workspaceId` (used by the claim route above)
 
-Idempotency is tracked in a module-level `Map` keyed on `clerkId`.
+Idempotency is tracked in a module-level `Map` keyed on `sub`.

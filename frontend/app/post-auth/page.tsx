@@ -14,12 +14,15 @@ export default async function PostAuthPage() {
   const token = await getToken();
   if (!token) redirect("/sign-in");
 
-  const record = await ensureUser(token, {
-    clerkId: userId,
-    email: user.primaryEmailAddress?.emailAddress ?? null,
-    name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
-    avatarUrl: user.imageUrl ?? null,
-  });
+  const record = await ensureUser(
+    token,
+    {
+      email: user.primaryEmailAddress?.emailAddress ?? null,
+      name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
+      avatarUrl: user.imageUrl ?? null,
+    },
+    userId,
+  );
 
   await reconcileWorkspaceMetadata({
     userId,

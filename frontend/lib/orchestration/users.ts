@@ -1,7 +1,6 @@
 import "server-only";
 
 type EnsureUserInput = {
-  clerkId: string;
   email: string | null;
   name: string | null;
   avatarUrl: string | null;
@@ -16,14 +15,15 @@ type EnsureUserResult = {
 export async function ensureUser(
   token: string,
   input: EnsureUserInput,
+  idempotencyKey: string,
 ): Promise<EnsureUserResult> {
   const res = await fetch(`${process.env.ORCHESTRATION_API_URL}/v1/users/ensure`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      // Idempotency: safe to retry, safe on every sign-in.
-      "Idempotency-Key": input.clerkId,
+      // Idempotency: must equal the JWT sub; safe to retry, safe on every sign-in.
+      "Idempotency-Key": idempotencyKey,
     },
     body: JSON.stringify(input),
     cache: "no-store",

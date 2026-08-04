@@ -26,13 +26,16 @@ export async function POST(req: Request) {
     return Response.json({ error: "missing_workspace_id" }, { status: 400 });
   }
 
-  const record = await ensureUser(token, {
-    clerkId: userId,
-    email: user.primaryEmailAddress?.emailAddress ?? null,
-    name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
-    avatarUrl: user.imageUrl ?? null,
-    workspaceId,
-  });
+  const record = await ensureUser(
+    token,
+    {
+      email: user.primaryEmailAddress?.emailAddress ?? null,
+      name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
+      avatarUrl: user.imageUrl ?? null,
+      workspaceId,
+    },
+    userId,
+  );
 
   await reconcileWorkspaceMetadata({
     userId,

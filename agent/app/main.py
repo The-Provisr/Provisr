@@ -15,18 +15,25 @@ from app.domain.service import AgentService
 from app.integrations.anthropic_model import ClaudeModel, LanguageModel
 from app.integrations.gemini_model import GeminiModel
 from app.integrations.state import InMemoryStateStore, RedisStateStore, StateStore
+from app.prompts.catalog import build_prompt_registry
+from app.prompts.registry import PromptRegistry
 
 
 @dataclass(slots=True)
 class Resources:
     state: StateStore
+    prompt_registry: PromptRegistry
     agent_service: AgentService
 
     async def aclose(self) -> None:
         await self.state.aclose()
 
 
-def create_resources(settings: Settings, model: LanguageModel | None = None) -> Resources:
+def create_resources(
+    settings: Settings,
+    model: LanguageModel | None = None,
+    prompt_registry: PromptRegistry | None = None,
+) -> Resources:
     if settings.state_backend == "redis":
         redis = Redis.from_url(settings.redis_url, decode_responses=True)
         state: StateStore = RedisStateStore(redis, settings.session_ttl_seconds)
@@ -34,7 +41,16 @@ def create_resources(settings: Settings, model: LanguageModel | None = None) -> 
         state = InMemoryStateStore()
 
     language_model = model or _build_model(settings)
-    return Resources(state=state, agent_service=AgentService(state=state, model=language_model))
+    resolved_prompt_registry = prompt_registry or build_prompt_registry()
+    return Resources(
+        state=state,
+        prompt_registry=resolved_prompt_registry,
+        agent_service=AgentService(
+            state=state,
+            model=language_model,
+            prompt_registry=resolved_prompt_registry,
+        ),
+    )
 
 
 def _build_model(settings: Settings) -> LanguageModel:

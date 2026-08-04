@@ -39,6 +39,7 @@ async def create_session(
     session = await service.create_session(
         organization_id=body.organization_id,
         request_id=body.request_id,
+        prompt_version=body.prompt_version,
     )
     return CreateSessionResponse(session=session)
 

@@ -45,13 +45,3 @@ docker compose --profile all up
 
 Design specs live in the **docs-provisor** repository (architecture PDFs, ERD, SRS, PRD).
 
-## Team
-
-| Layer | Owner |
-|---|---|
-| frontend | @Shalitha |
-| orchestrator | @Hesanda |
-| agent + mcp | @Pasindu |
-| backend | @Hesanda |
-| infra | @Chethaka |
-| QA | @Malsha |

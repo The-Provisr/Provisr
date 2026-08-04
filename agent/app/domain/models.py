@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,6 +30,10 @@ class AgentSession(DomainModel):
     session_id: str
     organization_id: str
     request_id: str
+    prompt_id: UUID
+    prompt_profile: str
+    prompt_version: str
+    prompt_hash: str
     created_at: datetime
     updated_at: datetime
     messages: list[ConversationMessage] = Field(default_factory=list)

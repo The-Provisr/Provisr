@@ -9,6 +9,7 @@ from app.domain.errors import (
     ModelNotConfiguredError,
     SessionNotFoundError,
 )
+from app.prompts.errors import PromptIntegrityError
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -32,6 +33,8 @@ def _status_for(error: DomainError) -> int:
         return status.HTTP_502_BAD_GATEWAY
     if isinstance(error, ModelNotConfiguredError):
         return status.HTTP_503_SERVICE_UNAVAILABLE
+    if isinstance(error, PromptIntegrityError):
+        return status.HTTP_500_INTERNAL_SERVER_ERROR
     return status.HTTP_400_BAD_REQUEST
 
 
@@ -44,4 +47,6 @@ def _title_for(error: DomainError) -> str:
         return "Model not configured"
     if isinstance(error, DependencyUnavailableError):
         return "External dependency unavailable"
+    if isinstance(error, PromptIntegrityError):
+        return "Prompt integrity validation failed"
     return "Request failed"

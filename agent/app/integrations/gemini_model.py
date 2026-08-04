@@ -15,7 +15,8 @@ from app.domain.errors import (
     ModelNotConfiguredError,
 )
 from app.domain.models import AgentSession, ModelTurnResult
-from app.integrations.anthropic_model import _SYSTEM_PROMPT, _strip_code_fence
+from app.integrations.anthropic_model import _strip_code_fence
+from app.prompts.models import PromptBundle
 
 
 class GeminiModel:
@@ -43,7 +44,11 @@ class GeminiModel:
         else:
             self._client = None
 
-    async def complete_turn(self, session: AgentSession) -> ModelTurnResult:
+    async def complete_turn(
+        self,
+        session: AgentSession,
+        prompt: PromptBundle,
+    ) -> ModelTurnResult:
         if not self._model:
             raise ModelNotConfiguredError("Gemini model ID is not configured")
         if self._client is None:
@@ -61,7 +66,7 @@ class GeminiModel:
                 model=self._model,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=_SYSTEM_PROMPT,
+                    system_instruction=prompt.content,
                     max_output_tokens=self._max_tokens,
                     response_mime_type="application/json",
                     temperature=0.0,

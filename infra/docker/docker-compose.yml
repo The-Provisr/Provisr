@@ -152,6 +152,21 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  workspace-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./workspace-service"]
+    ports:
+      - "8088:8088"
+    environment:
+      PORT: "8088"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+
   # ── Agent layer (profile: agent) ──
   agent:
     profiles: [all, agent]
@@ -180,7 +195,9 @@ services:
     environment:
       PORT: "5100"
       BACKEND_URL: http://provisioning-service:8083
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
+      postgres: { condition: service_healthy }
       provisioning-service:
         condition: service_started
         required: false

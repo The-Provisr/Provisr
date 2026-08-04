@@ -1,14 +1,25 @@
 import "reflect-metadata";
 import { ExecutionContext } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IS_PUBLIC_KEY } from "../../src/middleware/public.decorator";
 import { AuthGuard, extractBearerToken, isSseEventsPath } from "../../src/middleware/auth.guard";
-import { UnauthorizedError } from "../../src/common/errors/typed-errors";
+import { UnauthorizedError, ForbiddenError } from "../../src/common/errors/typed-errors";
+import { ClerkAuthService } from "../../src/auth/clerk-auth.service";
+import { IdentityService } from "../../src/auth/identity.service";
 
 const handler = (): void => undefined;
 const clazz = class FakeController {};
 const SSE_PATH = "/v1/workspaces/f47ac10b-58cc-4372-a567-0e02b2c3d479/events";
+
+const VALID_CLAIMS = {
+  sub: "clerk_user_1",
+  sid: "sess_1",
+  email: "user@provisr.io",
+  exp: Math.floor(Date.now() / 1000) + 3600,
+  orgId: undefined,
+  orgRole: undefined,
+};
 
 function mockContext(
   opts: {
@@ -35,26 +46,122 @@ function mockContext(
   } as unknown as ExecutionContext;
 }
 
-describe("AuthGuard", () => {
-  let guard: AuthGuard;
+interface Harness {
+  guard: AuthGuard;
+  verify: ReturnType<typeof vi.fn>;
+  memberships: ReturnType<typeof vi.fn>;
+}
 
+function harness(opts: { verifyReturns?: unknown; memberships?: unknown[] } = {}): Harness {
+  const verify = vi.fn(async () => opts.verifyReturns === undefined ? VALID_CLAIMS : opts.verifyReturns);
+  const memberships = vi.fn(
+    async () => opts.memberships ?? [{ workspaceId: "org_1", role: "org:admin" }],
+  );
+  const clerk = {
+    verifyToken: verify,
+    getOrganizationMemberships: memberships,
+  } as unknown as ClerkAuthService;
+  const identity = {
+    getOrCreateUser: vi.fn(async () => ({
+      userId: "prov-user-1",
+      clerkId: "clerk_user_1",
+      email: "user@provisr.io",
+      createdAt: new Date().toISOString(),
+    })),
+    resolveMemberships: vi.fn(async () => memberships()),
+  } as unknown as IdentityService;
+
+  return { guard: new AuthGuard(new Reflector(), clerk, identity), verify, memberships };
+}
+
+describe("AuthGuard", () => {
   beforeEach(() => {
     delete process.env.DEV_USER_ID;
     Reflect.deleteMetadata(IS_PUBLIC_KEY, handler);
     Reflect.deleteMetadata(IS_PUBLIC_KEY, clazz);
-    guard = new AuthGuard(new Reflector());
   });
 
-  it("lets @Public handlers through without a user", () => {
+  it("lets @Public handlers through without a user", async () => {
     Reflect.defineMetadata(IS_PUBLIC_KEY, true, handler);
-    const context = mockContext({});
-    expect(guard.canActivate(context)).toBe(true);
+    const { guard } = harness();
+    expect(await guard.canActivate(mockContext({}))).toBe(true);
   });
 
-  it("lets @Public classes through without a user", () => {
+  it("lets @Public classes through without a user", async () => {
     Reflect.defineMetadata(IS_PUBLIC_KEY, true, clazz);
-    const context = mockContext({});
-    expect(guard.canActivate(context)).toBe(true);
+    const { guard } = harness();
+    expect(await guard.canActivate(mockContext({}))).toBe(true);
+  });
+
+  describe("real token verification", () => {
+    it("verifies a Bearer token and attaches the full user context", async () => {
+      const { guard } = harness();
+      const context = mockContext({ authHeader: "Bearer jwt.token.here" });
+      const req = context.switchToHttp().getRequest<{ user?: { userId: string; workspaceIds: string[]; roles: Record<string, string> } }>();
+
+      expect(await guard.canActivate(context)).toBe(true);
+      expect(req.user).toEqual({
+        userId: "prov-user-1",
+        clerkId: "clerk_user_1",
+        email: "user@provisr.io",
+        workspaceIds: ["org_1"],
+        roles: { org_1: "org:admin" },
+      });
+    });
+
+    it("rejects an invalid token with a generic 401", async () => {
+      const { guard } = harness({ verifyReturns: null });
+      await expect(guard.canActivate(mockContext({ authHeader: "Bearer bad.token" }))).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
+    });
+
+    it("rejects with 401 when no token is present (no reason revealed)", async () => {
+      const { guard } = harness();
+      await expect(guard.canActivate(mockContext({}))).rejects.toBeInstanceOf(UnauthorizedError);
+    });
+
+    it("rejects with 401 without revealing the reason in the message", async () => {
+      const { guard } = harness({ verifyReturns: null });
+      try {
+        await guard.canActivate(mockContext({ authHeader: "Bearer bad.token" }));
+        throw new Error("expected UnauthorizedError to be thrown");
+      } catch (err) {
+        const e = err as UnauthorizedError;
+        expect(e.message).toBe("Authentication required");
+      }
+    });
+
+    it("returns 403 for a valid token with no workspace membership", async () => {
+      const { guard } = harness({ memberships: [] });
+      await expect(guard.canActivate(mockContext({ authHeader: "Bearer jwt.token.here" }))).rejects.toBeInstanceOf(
+        ForbiddenError,
+      );
+    });
+
+    it("verifies a query token on the SSE event-stream route", async () => {
+      const { guard, verify } = harness();
+      const context = mockContext({
+        method: "GET",
+        query: { token: "sse-token" },
+        originalUrl: `${SSE_PATH}?token=sse-token`,
+      });
+
+      expect(await guard.canActivate(context)).toBe(true);
+      expect(verify).toHaveBeenCalledWith("sse-token");
+    });
+
+    it("never reads a query token on a non-SSE route", async () => {
+      const { guard, verify } = harness();
+      const context = mockContext({
+        method: "GET",
+        query: { token: "sneaky-token" },
+        originalUrl: "/v1/workspaces?token=sneaky-token",
+      });
+
+      await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedError);
+      expect(verify).not.toHaveBeenCalled();
+    });
   });
 
   describe("dev mode (DEV_USER_ID set, not production)", () => {
@@ -62,69 +169,41 @@ describe("AuthGuard", () => {
       process.env.DEV_USER_ID = "user-123";
     });
 
-    it("accepts a request with no token and populates the user", () => {
+    it("accepts a request with no token and populates the user", async () => {
+      const { guard } = harness();
       const context = mockContext({});
       const req = context.switchToHttp().getRequest<{ user?: { userId: string } }>();
 
-      expect(guard.canActivate(context)).toBe(true);
+      expect(await guard.canActivate(context)).toBe(true);
       expect(req.user?.userId).toBe("user-123");
     });
 
-    it("accepts a request with a Bearer token", () => {
-      expect(guard.canActivate(mockContext({ authHeader: "Bearer abc.def.ghi" }))).toBe(true);
-    });
-
-    it("accepts a GET with a query token on the SSE event stream", () => {
-      const context = mockContext({
-        method: "GET",
-        query: { token: "sse-token" },
-        originalUrl: `${SSE_PATH}?token=sse-token`,
-      });
-      expect(guard.canActivate(context)).toBe(true);
+    it("does not verify tokens in dev bypass mode", async () => {
+      const { guard, verify } = harness();
+      await guard.canActivate(mockContext({ authHeader: "Bearer abc.def.ghi" }));
+      expect(verify).not.toHaveBeenCalled();
     });
   });
 
   describe("production-like (no DEV_USER_ID)", () => {
-    it("rejects a request without a token", () => {
-      expect(() => guard.canActivate(mockContext({}))).toThrowError(UnauthorizedError);
-    });
-
-    it("throws UnauthorizedError with the OR-002 contract", () => {
-      try {
-        guard.canActivate(mockContext({}));
-        throw new Error("expected UnauthorizedError to be thrown");
-      } catch (err) {
-        expect(err).toBeInstanceOf(UnauthorizedError);
-        const e = err as UnauthorizedError;
-        expect(e.code).toBe("UNAUTHORIZED");
-        expect(e.status).toBe(401);
-        expect(e.message).toBe("Clerk JWT verification not implemented yet (OR-002)");
-      }
-    });
-
-    it("rejects even when a Bearer token is present (OR-002 stub ignores it)", () => {
-      expect(() =>
-        guard.canActivate(mockContext({ authHeader: "Bearer abc.def.ghi" })),
-      ).toThrowError(UnauthorizedError);
-    });
-
-    it("disables the dev bypass when NODE_ENV is production", () => {
-      const previousNodeEnv = process.env.NODE_ENV;
-      const previousDevUserId = process.env.DEV_USER_ID;
+    it("disables the dev bypass when NODE_ENV is production", async () => {
+      const { guard } = harness();
+      const previous = process.env.NODE_ENV;
+      const previousDevUser = process.env.DEV_USER_ID;
       process.env.DEV_USER_ID = "user-123";
       process.env.NODE_ENV = "production";
       try {
-        expect(() => guard.canActivate(mockContext({}))).toThrowError(UnauthorizedError);
+        await expect(guard.canActivate(mockContext({}))).rejects.toBeInstanceOf(UnauthorizedError);
       } finally {
-        if (previousNodeEnv === undefined) {
+        if (previous === undefined) {
           delete process.env.NODE_ENV;
         } else {
-          process.env.NODE_ENV = previousNodeEnv;
+          process.env.NODE_ENV = previous;
         }
-        if (previousDevUserId === undefined) {
+        if (previousDevUser === undefined) {
           delete process.env.DEV_USER_ID;
         } else {
-          process.env.DEV_USER_ID = previousDevUserId;
+          process.env.DEV_USER_ID = previousDevUser;
         }
       }
     });

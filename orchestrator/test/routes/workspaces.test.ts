@@ -30,7 +30,8 @@ describe("Workspaces routes", () => {
 
       expect(res.body).toMatchObject({
         error: "ProvError",
-        message: "Clerk JWT verification not implemented yet (OR-002)",
+        // Deliberately generic: invalid/expired tokens never reveal why.
+        message: "Authentication required",
         status: 401,
         code: "UNAUTHORIZED",
       });

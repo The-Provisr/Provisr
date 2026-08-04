@@ -1,7 +1,9 @@
 import { CanActivate, ExecutionContext, Injectable, Logger } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
-import { UnauthorizedError } from "../common/errors/typed-errors";
+import { ForbiddenError, UnauthorizedError } from "../common/errors/typed-errors";
+import { ClerkAuthService } from "../auth/clerk-auth.service";
+import { IdentityService } from "../auth/identity.service";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import type { RequestUser } from "./auth.types";
 
@@ -18,13 +20,35 @@ export function extractBearerToken(header: string | undefined): string | undefin
   return token && token.length > 0 ? token : undefined;
 }
 
+/**
+ * Authenticates every protected request (PRD §19):
+ *  1. extract a Clerk session JWT from the Authorization header, or from the
+ *     query string on SSE event-stream routes (EventSource cannot set headers);
+ *  2. verify it against the cached Clerk JWKS endpoint (ClerkAuthService);
+ *  3. map the Clerk identity to an internal Provisr user, creating it on the
+ *     fly if unknown, and resolve workspace memberships (IdentityService);
+ *  4. attach the resolved context to req.user for downstream handlers.
+ *
+ * Failures are deliberately opaque: invalid/expired tokens always yield one
+ * generic 401 with no reason. A valid token with no workspace membership
+ * yields 403.
+ *
+ * Development bypass: when NODE_ENV is not "production" and DEV_USER_ID is
+ * set, the request is authenticated as that user without any token. The
+ * bypass is never honored in production, so a stray DEV_USER_ID cannot
+ * authenticate anyone there.
+ */
 @Injectable()
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name);
 
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly clerk: ClerkAuthService,
+    private readonly identity: IdentityService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -36,11 +60,6 @@ export class AuthGuard implements CanActivate {
 
     const req = context.switchToHttp().getRequest<Request & { user?: RequestUser }>();
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- extracted now, consumed by OR-002
-    const token = this.extractToken(req);
-
-    // Dev bypass: only ever honored outside production, so a stray
-    // DEV_USER_ID in a production deployment cannot authenticate anyone.
     if (process.env.NODE_ENV !== "production" && process.env.DEV_USER_ID) {
       req.user = {
         userId: process.env.DEV_USER_ID,
@@ -52,10 +71,32 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
-    // TODO(OR-002): verify `token` against Clerk JWKS and map to a RequestUser.
-    // Until then, local development must set DEV_USER_ID.
-    this.logger.warn("Auth guard in stub mode: set DEV_USER_ID to authenticate requests");
-    throw new UnauthorizedError("Clerk JWT verification not implemented yet (OR-002)");
+    const token = this.extractToken(req);
+    if (!token) {
+      throw new UnauthorizedError();
+    }
+
+    const claims = await this.clerk.verifyToken(token);
+    if (!claims) {
+      // One generic message for every failure mode; never reveal the reason.
+      throw new UnauthorizedError();
+    }
+
+    const user = await this.identity.getOrCreateUser(claims);
+    const memberships = await this.identity.resolveMemberships(user.clerkId);
+
+    if (memberships.length === 0) {
+      throw new ForbiddenError("No workspace membership");
+    }
+
+    req.user = {
+      userId: user.userId,
+      clerkId: user.clerkId,
+      email: user.email,
+      workspaceIds: memberships.map((membership) => membership.workspaceId),
+      roles: Object.fromEntries(memberships.map((membership) => [membership.workspaceId, membership.role])),
+    };
+    return true;
   }
 
   private extractToken(req: Request): string | undefined {

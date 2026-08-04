@@ -37,7 +37,8 @@ Body:
 {
   "email": "user@example.com",
   "name": "Jane Doe",
-  "avatarUrl": "https://img.clerk.com/…"
+  "avatarUrl": "https://img.clerk.com/…",
+  "workspaceId": "uuid"
 }
 ```
 
@@ -46,6 +47,7 @@ Body:
 | `email` | string \| null | Primary email, may be absent. |
 | `name` | string \| null | First + last name joined, may be absent. |
 | `avatarUrl` | string \| null | User image URL, may be absent. |
+| `workspaceId` | string \| null | Optional. Claim target, sent after workspace creation (onboarding claim flow). Absent/null/empty = no claim; a non-empty value on a repeat call updates the stored record. |
 
 ## Response
 

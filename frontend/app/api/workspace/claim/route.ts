@@ -21,8 +21,12 @@ export async function POST(req: Request) {
     return Response.json({ error: "invalid_body" }, { status: 400 });
   }
 
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return Response.json({ error: "invalid_body" }, { status: 400 });
+  }
+
   const { workspaceId } = body as { workspaceId?: string };
-  if (!workspaceId) {
+  if (typeof workspaceId !== "string" || workspaceId.trim() === "") {
     return Response.json({ error: "missing_workspace_id" }, { status: 400 });
   }
 

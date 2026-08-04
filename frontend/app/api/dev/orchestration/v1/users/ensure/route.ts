@@ -32,7 +32,7 @@ export async function POST(req: Request) {
       throw new Error("token has no sub claim");
     }
   } catch {
-    return Response.json({ error: "invalid_token" }, { status: 401 });
+    return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
   let body: unknown;

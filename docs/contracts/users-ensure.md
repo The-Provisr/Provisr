@@ -6,7 +6,7 @@ to synchronously materialize a user record before the dashboard renders.
 
 ## Method & path
 
-```
+```http
 POST /v1/users/ensure
 ```
 

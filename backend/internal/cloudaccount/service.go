@@ -92,6 +92,7 @@ func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Hand
 	mux.HandleFunc("GET /v1/cloud-accounts/{id}", s.handleGet)
 	mux.HandleFunc("PATCH /v1/cloud-accounts/{id}/status", s.handleUpdateStatus)
 	mux.HandleFunc("DELETE /v1/cloud-accounts/{id}", s.handleDelete)
+	mux.HandleFunc("POST /v1/cloud-accounts/{id}/verify-external-id", s.handleVerifyExternalID)
 
 	// loggingMiddleware wraps recoveryMiddleware so panic handling runs inside
 	// the request-scoped logger and panic logs carry request_id and
@@ -183,6 +184,19 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		externalIDHash = &hash
 	}
 
+	var externalIDPlaintext string
+	var externalIDHashValue *string
+	if req.Provider == "aws" {
+		plain, hash, err := cloudcrypto.GenerateExternalID()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to generate external id")
+			s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to generate external id")
+			return
+		}
+		externalIDPlaintext = plain
+		externalIDHashValue = &hash
+	}
+
 	// PRD §7: one slot per provider per workspace. Retry semantics: a pending
 	// account may be re-submitted; its metadata is replaced. Any other state
 	// rejects the duplicate provider.
@@ -210,10 +224,10 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	err = tx.QueryRow(
 		`INSERT INTO provisr_cloud.cloud_accounts
-		   (workspace_id, provider, label, external_account_id_hash, metadata_encrypted, status)
-		 VALUES ($1, $2, $3, $4, $5, 'pending')
+		   (workspace_id, provider, label, external_account_id_hash, metadata_encrypted, status, external_id_hash)
+		 VALUES ($1, $2, $3, $4, $5, 'pending', $6)
 		 RETURNING id`,
-		req.WorkspaceID, req.Provider, strings.TrimSpace(req.Label), externalIDHash, encrypted,
+		req.WorkspaceID, req.Provider, strings.TrimSpace(req.Label), externalIDHash, encrypted, externalIDHashValue,
 	).Scan(&insertedID)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -222,7 +236,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 				s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
 				return
 			}
-			retryID, retried, retryErr := s.tryRetryPending(r.Context(), tx, req, encrypted, externalIDHash)
+			retryID, retried, retryErr := s.tryRetryPending(r.Context(), tx, req, encrypted, externalIDHash, externalIDHashValue)
 			if retryErr != nil {
 				log.Error().Err(retryErr).Msg("failed to retry pending account")
 				s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
@@ -236,10 +250,14 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 					s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
 					return
 				}
-				s.writeJSON(r.Context(), w, http.StatusOK, map[string]string{
+				resp := map[string]any{
 					"id": retryID, "workspace_id": req.WorkspaceID, "provider": req.Provider,
 					"label": strings.TrimSpace(req.Label), "status": "pending",
-				})
+				}
+				if req.Provider == "aws" && externalIDPlaintext != "" {
+					resp["external_id"] = externalIDPlaintext
+				}
+				s.writeJSON(r.Context(), w, http.StatusOK, resp)
 				return
 			}
 			s.writeError(r.Context(), w, http.StatusConflict, "provider_slot_taken",
@@ -270,10 +288,14 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(r.Context(), w, http.StatusCreated, map[string]string{
+	resp := map[string]any{
 		"id": insertedID, "workspace_id": req.WorkspaceID, "provider": req.Provider,
 		"label": strings.TrimSpace(req.Label), "status": "pending",
-	})
+	}
+	if req.Provider == "aws" && externalIDPlaintext != "" {
+		resp["external_id"] = externalIDPlaintext
+	}
+	s.writeJSON(r.Context(), w, http.StatusCreated, resp)
 }
 
 // tryRetryPending updates metadata of an existing pending account for the same
@@ -283,15 +305,15 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 // The status read and the guarded update are one atomic statement: a
 // concurrent status change between the two would otherwise make the retry
 // report success after updating zero rows.
-func (s *server) tryRetryPending(ctx context.Context, tx *sql.Tx, req createRequest, encrypted string, externalIDHash *string) (string, bool, error) {
+func (s *server) tryRetryPending(ctx context.Context, tx *sql.Tx, req createRequest, encrypted string, externalIDHash *string, externalIDHashValue *string) (string, bool, error) {
 	log := zerolog.Ctx(ctx)
 	var existingID string
 	err := tx.QueryRow(
 		`UPDATE provisr_cloud.cloud_accounts
-		 SET metadata_encrypted = $1, external_account_id_hash = $2, label = $3, updated_at = now()
+		 SET metadata_encrypted = $1, external_account_id_hash = $2, external_id_hash = $6, label = $3, updated_at = now()
 		 WHERE workspace_id = $4 AND provider = $5 AND status = 'pending'
 		 RETURNING id`,
-		encrypted, externalIDHash, strings.TrimSpace(req.Label), req.WorkspaceID, req.Provider,
+		encrypted, externalIDHash, strings.TrimSpace(req.Label), req.WorkspaceID, req.Provider, externalIDHashValue,
 	).Scan(&existingID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -614,6 +636,59 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type verifyExternalIDRequest struct {
+	ExternalID string `json:"external_id"`
+}
+
+func (s *server) handleVerifyExternalID(w http.ResponseWriter, r *http.Request) {
+	log := zerolog.Ctx(r.Context())
+	id := r.PathValue("id")
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+
+	var req verifyExternalIDRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
+		return
+	}
+	if strings.TrimSpace(req.ExternalID) == "" {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "external_id is required")
+		return
+	}
+
+	var storedHash sql.NullString
+	var provider string
+	err := s.db.QueryRow(
+		`SELECT provider, external_id_hash FROM provisr_cloud.cloud_accounts WHERE id = $1`,
+		id,
+	).Scan(&provider, &storedHash)
+	if err == sql.ErrNoRows {
+		s.writeError(r.Context(), w, http.StatusNotFound, "not_found", "cloud account not found")
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("failed to query cloud account")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to verify external id")
+		return
+	}
+
+	if !storedHash.Valid {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "no_external_id", "cloud account does not have an external id")
+		return
+	}
+
+	computedHash := cloudcrypto.HashExternalIDPlain(strings.TrimSpace(req.ExternalID))
+	if computedHash != storedHash.String {
+		s.writeError(r.Context(), w, http.StatusForbidden, "external_id_mismatch", "External ID does not match")
+		return
+	}
+
+	s.writeJSON(r.Context(), w, http.StatusOK, map[string]any{
+		"verified": true,
+		"account_id": id,
+		"provider": provider,
+	})
 }
 
 // PostgreSQL SQLSTATE codes are locale-independent, unlike the human-readable

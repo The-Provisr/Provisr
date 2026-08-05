@@ -324,11 +324,15 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	// Authorized consumers only: the endpoint intentionally decrypts. The
 	// caller is responsible for restricting access (see design discussion #26).
+	// An empty value (pre-encryption backfill or legacy row) returns {} instead
+	// of failing the request.
 	metadata := map[string]any{}
-	if err := cloudcrypto.DecryptJSON(workspaceKey, metadataEncrypted.String, &metadata); err != nil {
-		log.Error().Err(err).Str("account_id", id).Msg("failed to decrypt account metadata")
-		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to decrypt account metadata")
-		return
+	if metadataEncrypted.Valid && metadataEncrypted.String != "" {
+		if err := cloudcrypto.DecryptJSON(workspaceKey, metadataEncrypted.String, &metadata); err != nil {
+			log.Error().Err(err).Str("account_id", id).Msg("failed to decrypt account metadata")
+			s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to decrypt account metadata")
+			return
+		}
 	}
 
 	response := map[string]any{

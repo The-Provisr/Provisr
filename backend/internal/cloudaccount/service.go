@@ -446,9 +446,32 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.db.Exec(`DELETE FROM provisr_cloud.cloud_accounts WHERE id = $1 AND workspace_id = $2`, id, workspaceID); err != nil {
+	// The delete is conditional on no active runs so a run starting between
+	// the guard above and this statement cannot leave an account deleted
+	// while a run depends on it.
+	result, err := s.db.Exec(
+		`DELETE FROM provisr_cloud.cloud_accounts ca
+		 WHERE ca.id = $1 AND ca.workspace_id = $2
+		   AND NOT EXISTS (
+		     SELECT 1 FROM provisr_state.provisioning_runs pr
+		     WHERE pr.workspace_id = ca.workspace_id
+		       AND pr.state NOT IN ('completed', 'failed', 'cancelled')
+		   )`,
+		id, workspaceID,
+	)
+	if err != nil {
 		log.Error().Err(err).Msg("failed to delete cloud account")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to read affected rows")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
+		return
+	}
+	if affected == 0 {
+		s.writeError(r.Context(), w, http.StatusConflict, "active_runs_exist", "cannot delete cloud account with active provisioning runs")
 		return
 	}
 

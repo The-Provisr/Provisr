@@ -111,7 +111,8 @@ func DecryptJSON(key []byte, encoded string, target any) error {
 // account id under the workspace key. It is used for exact-match lookups
 // without ever storing or exposing the plaintext id.
 func HashExternalID(key []byte, externalID string) (string, error) {
-	if strings.TrimSpace(externalID) == "" {
+	externalID = strings.TrimSpace(externalID)
+	if externalID == "" {
 		return "", errors.New("external account id must not be empty")
 	}
 	mac := hmac.New(sha256.New, key)

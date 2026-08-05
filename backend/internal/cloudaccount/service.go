@@ -19,6 +19,13 @@ import (
 
 const maxBody = 1 << 20
 
+type contextKey string
+
+const (
+	requestIDKey     contextKey = "request_id"
+	correlationIDKey contextKey = "correlation_id"
+)
+
 type cloudAccount struct {
 	ID                    string  `json:"id"`
 	WorkspaceID           string  `json:"workspace_id"`
@@ -79,7 +86,7 @@ func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Hand
 	mux.HandleFunc("PATCH /v1/cloud-accounts/{id}/status", s.handleUpdateStatus)
 	mux.HandleFunc("DELETE /v1/cloud-accounts/{id}", s.handleDelete)
 
-	return s.recoveryMiddleware(mux)
+	return s.recoveryMiddleware(loggingMiddleware(log, mux))
 }
 
 type server struct {
@@ -88,16 +95,17 @@ type server struct {
 	master cloudcrypto.MasterKey
 }
 
-func (s *server) workspaceKey(workspaceID string) ([]byte, error) {
+func (s *server) workspaceKey(ctx context.Context, workspaceID string) ([]byte, error) {
 	key, err := cloudcrypto.DeriveWorkspaceKey(s.master, workspaceID)
 	if err != nil {
-		s.log.Error().Err(err).Str("workspace_id", workspaceID).Msg("failed to derive workspace key")
+		zerolog.Ctx(ctx).Error().Err(err).Str("workspace_id", workspaceID).Msg("failed to derive workspace key")
 		return nil, err
 	}
 	return key, nil
 }
 
 func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
+	log := zerolog.Ctx(r.Context())
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 
 	var req createRequest
@@ -126,7 +134,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceKey, err := s.workspaceKey(req.WorkspaceID)
+	workspaceKey, err := s.workspaceKey(r.Context(), req.WorkspaceID)
 	if err != nil {
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to derive encryption key")
 		return
@@ -134,7 +142,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	encrypted, err := cloudcrypto.EncryptJSON(workspaceKey, req.Metadata)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to encrypt metadata")
+		log.Error().Err(err).Msg("failed to encrypt metadata")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to encrypt account metadata")
 		return
 	}
@@ -143,7 +151,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if req.ExternalAccountID != "" {
 		hash, err := cloudcrypto.HashExternalID(workspaceKey, req.ExternalAccountID)
 		if err != nil {
-			s.log.Error().Err(err).Msg("failed to hash external account id")
+			log.Error().Err(err).Msg("failed to hash external account id")
 			s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to hash external account id")
 			return
 		}
@@ -174,7 +182,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			s.writeError(r.Context(), w, http.StatusBadRequest, "workspace_not_found", "workspace does not exist")
 			return
 		}
-		s.log.Error().Err(err).Msg("failed to insert cloud account")
+		log.Error().Err(err).Msg("failed to insert cloud account")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
 		return
 	}
@@ -188,6 +196,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 // tryRetryPending updates metadata of an existing pending account for the same
 // workspace/provider pair, returning true when the retry succeeded.
 func (s *server) tryRetryPending(w http.ResponseWriter, r *http.Request, req createRequest, encrypted string, externalIDHash *string) bool {
+	log := zerolog.Ctx(r.Context())
 	var existingID string
 	var existingStatus string
 	err := s.db.QueryRow(
@@ -196,7 +205,7 @@ func (s *server) tryRetryPending(w http.ResponseWriter, r *http.Request, req cre
 		req.WorkspaceID, req.Provider,
 	).Scan(&existingID, &existingStatus)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to read existing account for retry")
+		log.Error().Err(err).Msg("failed to read existing account for retry")
 		return false
 	}
 	if existingStatus != "pending" {
@@ -210,7 +219,7 @@ func (s *server) tryRetryPending(w http.ResponseWriter, r *http.Request, req cre
 		encrypted, externalIDHash, strings.TrimSpace(req.Label), existingID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to retry pending account")
+		log.Error().Err(err).Msg("failed to retry pending account")
 		return false
 	}
 
@@ -222,6 +231,7 @@ func (s *server) tryRetryPending(w http.ResponseWriter, r *http.Request, req cre
 }
 
 func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
+	log := zerolog.Ctx(r.Context())
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "workspace_id query parameter is required")
@@ -240,7 +250,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		workspaceID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to list cloud accounts")
+		log.Error().Err(err).Msg("failed to list cloud accounts")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to list cloud accounts")
 		return
 	}
@@ -251,7 +261,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		var a listCloudAccount
 		var verifiedAt sql.NullString
 		if err := rows.Scan(&a.ID, &a.WorkspaceID, &a.Provider, &a.Label, &a.Status, &verifiedAt, &a.CreatedAt, &a.UpdatedAt); err != nil {
-			s.log.Error().Err(err).Msg("failed to scan cloud account")
+			log.Error().Err(err).Msg("failed to scan cloud account")
 			s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to list cloud accounts")
 			return
 		}
@@ -261,7 +271,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		accounts = append(accounts, a)
 	}
 	if err := rows.Err(); err != nil {
-		s.log.Error().Err(err).Msg("failed to iterate cloud accounts")
+		log.Error().Err(err).Msg("failed to iterate cloud accounts")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to list cloud accounts")
 		return
 	}
@@ -270,6 +280,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
+	log := zerolog.Ctx(r.Context())
 	id := r.PathValue("id")
 	if _, err := uuid.Parse(id); err != nil {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
@@ -290,7 +301,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 			s.writeError(r.Context(), w, http.StatusNotFound, "not_found", "cloud account not found")
 			return
 		}
-		s.log.Error().Err(err).Msg("failed to get cloud account")
+		log.Error().Err(err).Msg("failed to get cloud account")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to get cloud account")
 		return
 	}
@@ -298,7 +309,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		account.VerifiedAt = &verifiedAt.String
 	}
 
-	workspaceKey, err := s.workspaceKey(account.WorkspaceID)
+	workspaceKey, err := s.workspaceKey(r.Context(), account.WorkspaceID)
 	if err != nil {
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to derive encryption key")
 		return
@@ -308,7 +319,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	// caller is responsible for restricting access (see design discussion #26).
 	metadata := map[string]any{}
 	if err := cloudcrypto.DecryptJSON(workspaceKey, metadataEncrypted.String, &metadata); err != nil {
-		s.log.Error().Err(err).Str("account_id", id).Msg("failed to decrypt account metadata")
+		log.Error().Err(err).Str("account_id", id).Msg("failed to decrypt account metadata")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to decrypt account metadata")
 		return
 	}
@@ -325,6 +336,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	log := zerolog.Ctx(r.Context())
 	id := r.PathValue("id")
 	if _, err := uuid.Parse(id); err != nil {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
@@ -352,13 +364,13 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		req.Status, id,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to update cloud account status")
+		log.Error().Err(err).Msg("failed to update cloud account status")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to update cloud account status")
 		return
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to read affected rows")
+		log.Error().Err(err).Msg("failed to read affected rows")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to update cloud account status")
 		return
 	}
@@ -371,6 +383,7 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	log := zerolog.Ctx(r.Context())
 	id := r.PathValue("id")
 	if _, err := uuid.Parse(id); err != nil {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
@@ -390,7 +403,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 			s.writeError(r.Context(), w, http.StatusNotFound, "not_found", "cloud account not found")
 			return
 		}
-		s.log.Error().Err(err).Msg("failed to read cloud account for deletion")
+		log.Error().Err(err).Msg("failed to read cloud account for deletion")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
 		return
 	}
@@ -405,7 +418,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		workspaceID,
 	).Scan(&activeRuns)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check active runs")
+		log.Error().Err(err).Msg("failed to check active runs")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
 		return
 	}
@@ -415,7 +428,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.db.Exec(`DELETE FROM provisr_cloud.cloud_accounts WHERE id = $1`, id); err != nil {
-		s.log.Error().Err(err).Msg("failed to delete cloud account")
+		log.Error().Err(err).Msg("failed to delete cloud account")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
 		return
 	}
@@ -435,7 +448,7 @@ func (s *server) recoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				s.log.Error().Interface("panic", rec).Str("path", r.URL.Path).Msg("panic recovered")
+				zerolog.Ctx(r.Context()).Error().Interface("panic", rec).Str("path", r.URL.Path).Msg("panic recovered")
 				s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "unexpected server error")
 			}
 		}()
@@ -443,11 +456,33 @@ func (s *server) recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// loggingMiddleware derives a request-scoped logger carrying request_id and
+// correlation_id, read from headers or generated when absent, so every log
+// line can be correlated across services.
+func loggingMiddleware(base zerolog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.NewString()
+		}
+		correlationID := r.Header.Get("X-Correlation-ID")
+		if _, err := uuid.Parse(correlationID); err != nil {
+			correlationID = requestID
+		}
+
+		l := base.With().Str("request_id", requestID).Str("correlation_id", correlationID).Logger()
+		ctx := l.WithContext(r.Context())
+		ctx = context.WithValue(ctx, requestIDKey, requestID)
+		ctx = context.WithValue(ctx, correlationIDKey, correlationID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func (s *server) writeJSON(ctx context.Context, w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		s.log.Error().Err(err).Msg("failed to encode response")
+		zerolog.Ctx(ctx).Error().Err(err).Msg("failed to encode response")
 	}
 }
 

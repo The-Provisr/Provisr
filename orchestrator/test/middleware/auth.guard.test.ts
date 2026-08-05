@@ -4,7 +4,7 @@ import { Reflector } from "@nestjs/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IS_PUBLIC_KEY } from "../../src/middleware/public.decorator";
 import { AuthGuard, extractBearerToken, isSseEventsPath } from "../../src/middleware/auth.guard";
-import { UnauthorizedError, ForbiddenError } from "../../src/common/errors/typed-errors";
+import { UnauthorizedError, ForbiddenError, DependencyError } from "../../src/common/errors/typed-errors";
 import { ClerkAuthService } from "../../src/auth/clerk-auth.service";
 import { IdentityService } from "../../src/auth/identity.service";
 
@@ -142,6 +142,15 @@ describe("AuthGuard", () => {
       await expect(guard.canActivate(mockContext({ authHeader: "Bearer jwt.token.here" }))).rejects.toBeInstanceOf(
         ForbiddenError,
       );
+    });
+
+    it("propagates a Clerk outage as a dependency error, not 403", async () => {
+      const { guard, resolveMemberships } = harness();
+      resolveMemberships.mockRejectedValueOnce(new DependencyError("Clerk membership service unavailable"));
+
+      await expect(
+        guard.canActivate(mockContext({ authHeader: "Bearer jwt.token.here" })),
+      ).rejects.toBeInstanceOf(DependencyError);
     });
 
     it("verifies a query token on the SSE event-stream route", async () => {

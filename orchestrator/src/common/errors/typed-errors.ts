@@ -6,6 +6,7 @@ export const ErrorCodes = {
   UNAUTHORIZED: "UNAUTHORIZED",
   FORBIDDEN: "FORBIDDEN",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+  DEPENDENCY_UNAVAILABLE: "DEPENDENCY_UNAVAILABLE",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -58,5 +59,11 @@ export class ValidationError extends ProvError {
 export class NotImplementedError extends ProvError {
   constructor(domain: string) {
     super(ErrorCodes.NOT_IMPLEMENTED, `${domain} is not implemented yet`, 501);
+  }
+}
+
+export class DependencyError extends ProvError {
+  constructor(message: string) {
+    super(ErrorCodes.DEPENDENCY_UNAVAILABLE, message, 502);
   }
 }

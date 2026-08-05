@@ -166,7 +166,7 @@ describe("ClerkAuthService.getOrganizationMemberships", () => {
     expect(client.users.getOrganizationMembershipList).toHaveBeenCalledTimes(1);
   });
 
-  it("returns [] when the Clerk API call fails", async () => {
+  it("throws a typed DependencyError when the Clerk API call fails", async () => {
     const client = fakeClient({
       users: {
         getOrganizationMembershipList: vi.fn(async () => {
@@ -176,7 +176,11 @@ describe("ClerkAuthService.getOrganizationMemberships", () => {
     });
     const service = new ClerkAuthService(config(), fakeVerify(), client);
 
-    expect(await service.getOrganizationMemberships("clerk_user_1")).toEqual([]);
+    await expect(service.getOrganizationMemberships("clerk_user_1")).rejects.toMatchObject({
+      code: "DEPENDENCY_UNAVAILABLE",
+      status: 502,
+      message: "Clerk membership service unavailable",
+    });
   });
 
   it("includes the correlation id when logging a membership failure", async () => {
@@ -190,7 +194,9 @@ describe("ClerkAuthService.getOrganizationMemberships", () => {
     const service = new ClerkAuthService(config(), fakeVerify(), client);
     const debug = vi.spyOn(Logger.prototype, "debug").mockImplementation(() => undefined);
 
-    await service.getOrganizationMemberships("clerk_user_1", "trace-abc-123");
+    await expect(
+      service.getOrganizationMemberships("clerk_user_1", "trace-abc-123"),
+    ).rejects.toThrow();
 
     expect(debug).toHaveBeenCalledWith(
       { correlationId: "trace-abc-123", userId: "clerk_user_1", err: "Error: rate limited" },

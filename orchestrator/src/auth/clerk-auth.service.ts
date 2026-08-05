@@ -1,6 +1,7 @@
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { Injectable, Logger } from "@nestjs/common";
 import type { AuthConfig } from "./auth.config";
+import { DependencyError } from "../common/errors/typed-errors";
 
 /** Claims extracted from a verified Clerk session JWT. */
 export interface ClerkSessionClaims {
@@ -43,8 +44,10 @@ export interface MembershipClient {
 /**
  * Thin gateway over the Clerk backend SDK. Owns token verification against
  * the (internally cached) Clerk JWKS endpoint and organization membership
- * resolution. Every failure path returns null/[] so the caller can answer
- * with one generic 401 and never reveal *why* a token was rejected.
+ * resolution. Verification failures return null so the caller can answer
+ * with one generic 401 and never reveal *why* a token was rejected; Clerk
+ * membership failures throw a typed DependencyError (502) so an outage is
+ * never misreported as an empty membership list.
  */
 @Injectable()
 export class ClerkAuthService {
@@ -140,7 +143,10 @@ export class ClerkAuthService {
         { correlationId: correlationId ?? "unknown", userId, err: String(err) },
         "Membership resolution failed",
       );
-      return [];
+      // A Clerk outage must never masquerade as "no membership": the guard
+      // turns [] into 403, which would wrongly blame a valid user. Surface
+      // the dependency failure as a typed 502 instead.
+      throw new DependencyError("Clerk membership service unavailable");
     }
   }
 

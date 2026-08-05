@@ -76,4 +76,20 @@ describe("IdentityService", () => {
 
     expect(await identity.resolveMemberships("clerk_user_1")).toEqual([]);
   });
+
+  it("propagates a Clerk outage as a typed dependency error", async () => {
+    const clerk = new ClerkAuthService(config, undefined, {
+      users: {
+        getOrganizationMembershipList: vi.fn(async () => {
+          throw new Error("rate limited");
+        }),
+      },
+    });
+    const identity = new IdentityService(clerk);
+
+    await expect(identity.resolveMemberships("clerk_user_1")).rejects.toMatchObject({
+      code: "DEPENDENCY_UNAVAILABLE",
+      status: 502,
+    });
+  });
 });

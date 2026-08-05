@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/provisr/backend/pkg/cloudcrypto"
 	"github.com/provisr/backend/pkg/health"
 	"github.com/rs/zerolog"
@@ -478,12 +479,21 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// PostgreSQL SQLSTATE codes are locale-independent, unlike the human-readable
+// error strings that lc_messages can localize.
+const (
+	sqlStateUniqueViolation     = "23505"
+	sqlStateForeignKeyViolation = "23503"
+)
+
 func isUniqueViolation(err error) bool {
-	return strings.Contains(err.Error(), "duplicate key value violates unique constraint")
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == sqlStateUniqueViolation
 }
 
 func isForeignKeyViolation(err error) bool {
-	return strings.Contains(err.Error(), "violates foreign key constraint")
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == sqlStateForeignKeyViolation
 }
 
 func (s *server) recoveryMiddleware(next http.Handler) http.Handler {

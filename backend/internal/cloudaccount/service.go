@@ -660,8 +660,17 @@ func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventTy
 	}
 
 	var previousHash sql.NullString
+	// Serialize chain appends with a transaction-scoped advisory lock so two
+	// concurrent mutations cannot read the same tail and fork the chain on the
+	// same previous_hash. The lock is released when the transaction commits or
+	// rolls back.
+	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('provisr_audit.chain'), 0)`); err != nil {
+		return fmt.Errorf("acquire audit chain lock: %w", err)
+	}
+	// The chain is global across workspaces (single previous_hash linkage);
+	// seq is the monotonic insertion order, unlike created_at which can tie.
 	if err := tx.QueryRow(
-		`SELECT hash FROM provisr_audit.audit_events ORDER BY created_at DESC, hash LIMIT 1`,
+		`SELECT hash FROM provisr_audit.audit_events ORDER BY seq DESC LIMIT 1`,
 	).Scan(&previousHash); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read previous audit hash: %w", err)
 	}

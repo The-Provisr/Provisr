@@ -82,7 +82,7 @@ jobs:
           version: "latest"
       - run: uv sync --frozen
         working-directory: agent
-      - run: uv run ruff check src
+      - run: uv run ruff check app
         working-directory: agent
       - run: uv sync --frozen
         working-directory: mcp

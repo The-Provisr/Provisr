@@ -16,10 +16,15 @@ from app.domain.errors import (
     ModelNotConfiguredError,
 )
 from app.domain.models import AgentSession, ModelTurnResult
+from app.prompts.models import PromptBundle
 
 
 class LanguageModel(Protocol):
-    async def complete_turn(self, session: AgentSession) -> ModelTurnResult: ...
+    async def complete_turn(
+        self,
+        session: AgentSession,
+        prompt: PromptBundle,
+    ) -> ModelTurnResult: ...
 
 
 class MessagesResource(Protocol):
@@ -69,7 +74,11 @@ class ClaudeModel:
         else:
             self._client = _UnconfiguredClient()
 
-    async def complete_turn(self, session: AgentSession) -> ModelTurnResult:
+    async def complete_turn(
+        self,
+        session: AgentSession,
+        prompt: PromptBundle,
+    ) -> ModelTurnResult:
         if not self._model:
             raise ModelNotConfiguredError("Anthropic model ID is not configured")
 
@@ -81,7 +90,7 @@ class ClaudeModel:
                 self._client.messages.create,
                 model=self._model,
                 max_tokens=self._max_tokens,
-                system=_SYSTEM_PROMPT,
+                system=prompt.content,
                 messages=messages,
             )
         except ModelNotConfiguredError:
@@ -153,37 +162,3 @@ def _strip_code_fence(text: str) -> str:
     if stripped.startswith("```") and stripped.endswith("```"):
         return stripped[3:-3].strip()
     return stripped
-
-
-_SYSTEM_PROMPT = """You are the Provisr manifest planning assistant.
-You may clarify infrastructure intent and propose an AWS ResourceManifest.
-You do not approve requests, run Terraform, claim deployment success, or expose private reasoning.
-Return exactly one JSON object and no markdown.
-
-For a clarification:
-{"outcome":"needs_clarification","message":"one focused question","manifest":null}
-
-For a complete proposal:
-{"outcome":"manifest_candidate","message":"short user-safe summary","manifest":{...}}
-
-The manifest object has exactly these fields:
-  "schema_version": "1.0"
-  "provider": "aws"
-  "region": a valid AWS region string, e.g. "us-east-1"
-  "environment": one of "development", "staging", "production", "sandbox"
-  "monthly_budget_usd": a positive number, or omit if unknown
-  "tags": an object mapping string keys to string values (may be empty {})
-  "resources": a non-empty array of resource objects
-
-Each resource object uses exactly the fields for its type and no others:
-  aws_ec2 fields: type="aws_ec2", name (slug), instance_type (string),
-    image (AMI id string), count (int 1-20, default 1)
-  aws_rds fields: type="aws_rds", name (slug), engine ("postgres" or "mysql"),
-    instance_class (string), allocated_storage_gb (int 20-16384)
-  aws_s3 fields: type="aws_s3", name (lowercase bucket name 3-63 chars),
-    versioning (bool)
-
-"name" for ec2/rds matches ^[a-zA-Z0-9_-]+$. Use the exact field names above; do not
-rename them (for example the EC2 AMI field is "image", never "ami").
-Never invent a missing requirement when it materially affects security, cost, region, or capacity.
-"""

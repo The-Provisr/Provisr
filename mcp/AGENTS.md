@@ -25,13 +25,24 @@ Every tool call receives validated context:
 {
   "workspace_id": "uuid",
   "user_id": "uuid",
-  "permissions": ["admin"],
+  "permissions": ["policy:read"],
   "request_id": "uuid",
-  "correlation_id": "string",
-  "idempotency_key": "string"
+  "correlation_id": "uuid",
+  "session_id": "uuid",
+  "idempotency_key": "optional-string"
 }
 ```
-Missing or invalid context → reject with 403.
+Permissions use `resource:action` names. Every handler applies `require_context(...)`
+before tool-specific processing. Membership is checked against the workspace, and
+mutations require an idempotency key. Missing, malformed, or unauthorized context
+returns HTTP 403:
+```json
+{
+  "error": "invalid_context",
+  "message": "user-safe validation message",
+  "request_id": "uuid-or-null"
+}
+```
 
 ## Critical rules
 - Tools are adapters + validators, NOT authority for privileged execution

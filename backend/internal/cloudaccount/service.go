@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -309,14 +310,18 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	accounts := []listCloudAccount{}
 	for rows.Next() {
 		var a listCloudAccount
-		var verifiedAt sql.NullString
-		if err := rows.Scan(&a.ID, &a.WorkspaceID, &a.Provider, &a.Label, &a.Status, &verifiedAt, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		var verifiedAt sql.NullTime
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&a.ID, &a.WorkspaceID, &a.Provider, &a.Label, &a.Status, &verifiedAt, &createdAt, &updatedAt); err != nil {
 			log.Error().Err(err).Msg("failed to scan cloud account")
 			s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to list cloud accounts")
 			return
 		}
+		a.CreatedAt = createdAt.Format(time.RFC3339Nano)
+		a.UpdatedAt = updatedAt.Format(time.RFC3339Nano)
 		if verifiedAt.Valid {
-			a.VerifiedAt = &verifiedAt.String
+			v := verifiedAt.Time.Format(time.RFC3339Nano)
+			a.VerifiedAt = &v
 		}
 		accounts = append(accounts, a)
 	}
@@ -342,14 +347,16 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var account cloudAccount
-	var verifiedAt, metadataEncrypted sql.NullString
+	var verifiedAt sql.NullTime
+	var createdAt, updatedAt time.Time
+	var metadataEncrypted sql.NullString
 	err := s.db.QueryRow(
 		`SELECT id, workspace_id, provider, label, status, verified_at, created_at, updated_at,
 		        metadata_encrypted
 		 FROM provisr_cloud.cloud_accounts WHERE id = $1 AND workspace_id = $2`,
 		id, workspaceID,
 	).Scan(&account.ID, &account.WorkspaceID, &account.Provider, &account.Label, &account.Status,
-		&verifiedAt, &account.CreatedAt, &account.UpdatedAt, &metadataEncrypted)
+		&verifiedAt, &createdAt, &updatedAt, &metadataEncrypted)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.writeError(r.Context(), w, http.StatusNotFound, "not_found", "cloud account not found")
@@ -359,8 +366,11 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to get cloud account")
 		return
 	}
+	account.CreatedAt = createdAt.Format(time.RFC3339Nano)
+	account.UpdatedAt = updatedAt.Format(time.RFC3339Nano)
 	if verifiedAt.Valid {
-		account.VerifiedAt = &verifiedAt.String
+		v := verifiedAt.Time.Format(time.RFC3339Nano)
+		account.VerifiedAt = &v
 	}
 
 	workspaceKey, err := s.workspaceKey(r.Context(), account.WorkspaceID)

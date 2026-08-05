@@ -209,11 +209,24 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	).Scan(&insertedID)
 	if err != nil {
 		if isUniqueViolation(err) {
-			if s.tryRetryPending(r.Context(), tx, w, r, req, encrypted, externalIDHash) {
+			retryID, retried, retryErr := s.tryRetryPending(r.Context(), tx, req, encrypted, externalIDHash)
+			if retryErr != nil {
+				log.Error().Err(retryErr).Msg("failed to retry pending account")
+				s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
+				return
+			}
+			if retried {
+				// Commit before writing the response: a failed commit must not
+				// present a success that was rolled back.
 				if err := tx.Commit(); err != nil {
 					log.Error().Err(err).Msg("failed to commit retry transaction")
 					s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
+					return
 				}
+				s.writeJSON(r.Context(), w, http.StatusOK, map[string]string{
+					"id": retryID, "workspace_id": req.WorkspaceID, "provider": req.Provider,
+					"label": strings.TrimSpace(req.Label), "status": "pending",
+				})
 				return
 			}
 			s.writeError(r.Context(), w, http.StatusConflict, "provider_slot_taken",
@@ -251,11 +264,13 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // tryRetryPending updates metadata of an existing pending account for the same
-// workspace/provider pair, returning true when the retry succeeded. The status
-// read and the guarded update are one atomic statement: a concurrent status
-// change between the two would otherwise make the retry report success after
-// updating zero rows.
-func (s *server) tryRetryPending(ctx context.Context, tx *sql.Tx, w http.ResponseWriter, r *http.Request, req createRequest, encrypted string, externalIDHash *string) bool {
+// workspace/provider pair. It performs only database work: it returns the
+// recovered account id and true when the retry succeeded, false when no
+// pending row matched, and an error for genuine database or audit failures.
+// The status read and the guarded update are one atomic statement: a
+// concurrent status change between the two would otherwise make the retry
+// report success after updating zero rows.
+func (s *server) tryRetryPending(ctx context.Context, tx *sql.Tx, req createRequest, encrypted string, externalIDHash *string) (string, bool, error) {
 	log := zerolog.Ctx(ctx)
 	var existingID string
 	err := tx.QueryRow(
@@ -267,10 +282,10 @@ func (s *server) tryRetryPending(ctx context.Context, tx *sql.Tx, w http.Respons
 	).Scan(&existingID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return false
+			return "", false, nil
 		}
 		log.Error().Err(err).Msg("failed to retry pending account")
-		return false
+		return "", false, err
 	}
 
 	if err := s.emitAudit(ctx, tx, req.WorkspaceID, "cloud_account_created", existingID, map[string]any{
@@ -279,14 +294,10 @@ func (s *server) tryRetryPending(ctx context.Context, tx *sql.Tx, w http.Respons
 		"retried":  true,
 	}); err != nil {
 		log.Error().Err(err).Msg("failed to emit audit event")
-		return false
+		return "", false, err
 	}
 
-	s.writeJSON(ctx, w, http.StatusOK, map[string]string{
-		"id": existingID, "workspace_id": req.WorkspaceID, "provider": req.Provider,
-		"label": strings.TrimSpace(req.Label), "status": "pending",
-	})
-	return true
+	return existingID, true, nil
 }
 
 func (s *server) handleList(w http.ResponseWriter, r *http.Request) {

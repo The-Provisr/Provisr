@@ -4,7 +4,9 @@ package cloudaccount
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,6 +75,11 @@ type errorResponse struct {
 
 var validProviders = map[string]bool{"aws": true, "azure": true, "gcp": true}
 var validStatuses = map[string]bool{"pending": true, "active": true, "failed": true, "disconnected": true}
+
+var (
+	errIdempotencyKeyMissing = errors.New("idempotency key missing")
+	errIdempotencyKeyUsed    = errors.New("idempotency key already used")
+)
 
 // New wires the routes and middleware for the cloud-account-service.
 func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Handler {
@@ -177,8 +184,21 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// PRD §7: one slot per provider per workspace. Retry semantics: a pending
 	// account may be re-submitted; its metadata is replaced. Any other state
 	// rejects the duplicate provider.
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to begin transaction")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
+		return
+	}
+	defer tx.Rollback()
+
+	if err := s.claimIdempotencyKey(r.Context(), tx, r, req.WorkspaceID, "cloud_account.create"); err != nil {
+		s.writeIdempotencyError(w, r, err)
+		return
+	}
+
 	insertedID := ""
-	err = s.db.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO provisr_cloud.cloud_accounts
 		   (workspace_id, provider, label, external_account_id_hash, metadata_encrypted, status)
 		 VALUES ($1, $2, $3, $4, $5, 'pending')
@@ -187,7 +207,11 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	).Scan(&insertedID)
 	if err != nil {
 		if isUniqueViolation(err) {
-			if s.tryRetryPending(w, r, req, encrypted, externalIDHash) {
+			if s.tryRetryPending(r.Context(), tx, w, r, req, encrypted, externalIDHash) {
+				if err := tx.Commit(); err != nil {
+					log.Error().Err(err).Msg("failed to commit retry transaction")
+					s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
+				}
 				return
 			}
 			s.writeError(r.Context(), w, http.StatusConflict, "provider_slot_taken",
@@ -203,6 +227,21 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.emitAudit(r.Context(), tx, req.WorkspaceID, "cloud_account_created", insertedID, map[string]any{
+		"provider": req.Provider,
+		"label":    strings.TrimSpace(req.Label),
+	}); err != nil {
+		log.Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Error().Err(err).Msg("failed to commit transaction")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
+		return
+	}
+
 	s.writeJSON(r.Context(), w, http.StatusCreated, map[string]string{
 		"id": insertedID, "workspace_id": req.WorkspaceID, "provider": req.Provider,
 		"label": strings.TrimSpace(req.Label), "status": "pending",
@@ -214,10 +253,10 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 // read and the guarded update are one atomic statement: a concurrent status
 // change between the two would otherwise make the retry report success after
 // updating zero rows.
-func (s *server) tryRetryPending(w http.ResponseWriter, r *http.Request, req createRequest, encrypted string, externalIDHash *string) bool {
-	log := zerolog.Ctx(r.Context())
+func (s *server) tryRetryPending(ctx context.Context, tx *sql.Tx, w http.ResponseWriter, r *http.Request, req createRequest, encrypted string, externalIDHash *string) bool {
+	log := zerolog.Ctx(ctx)
 	var existingID string
-	err := s.db.QueryRow(
+	err := tx.QueryRow(
 		`UPDATE provisr_cloud.cloud_accounts
 		 SET metadata_encrypted = $1, external_account_id_hash = $2, label = $3, updated_at = now()
 		 WHERE workspace_id = $4 AND provider = $5 AND status = 'pending'
@@ -232,7 +271,16 @@ func (s *server) tryRetryPending(w http.ResponseWriter, r *http.Request, req cre
 		return false
 	}
 
-	s.writeJSON(r.Context(), w, http.StatusOK, map[string]string{
+	if err := s.emitAudit(ctx, tx, req.WorkspaceID, "cloud_account_created", existingID, map[string]any{
+		"provider": req.Provider,
+		"label":    strings.TrimSpace(req.Label),
+		"retried":  true,
+	}); err != nil {
+		log.Error().Err(err).Msg("failed to emit audit event")
+		return false
+	}
+
+	s.writeJSON(ctx, w, http.StatusOK, map[string]string{
 		"id": existingID, "workspace_id": req.WorkspaceID, "provider": req.Provider,
 		"label": strings.TrimSpace(req.Label), "status": "pending",
 	})
@@ -371,7 +419,20 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// verified_at is set when an account transitions into active.
-	result, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to begin transaction")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to update cloud account status")
+		return
+	}
+	defer tx.Rollback()
+
+	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "cloud_account.update_status"); err != nil {
+		s.writeIdempotencyError(w, r, err)
+		return
+	}
+
+	result, err := tx.Exec(
 		`UPDATE provisr_cloud.cloud_accounts
 		 SET status = $1::provisr_cloud.account_status,
 		     verified_at = CASE WHEN $1 = 'active' THEN now() ELSE verified_at END,
@@ -395,6 +456,20 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.emitAudit(r.Context(), tx, workspaceID, "cloud_account_status_changed", id, map[string]any{
+		"status": req.Status,
+	}); err != nil {
+		log.Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to update cloud account status")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Error().Err(err).Msg("failed to commit transaction")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to update cloud account status")
+		return
+	}
+
 	s.writeJSON(r.Context(), w, http.StatusOK, map[string]string{"id": id, "status": req.Status})
 }
 
@@ -413,11 +488,24 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	// Block deletion while non-terminal provisioning runs exist in the
 	// workspace (provisioning_runs does not yet carry a cloud_account_id FK;
 	// see design discussion #26).
-	var accountWorkspaceID string
-	err := s.db.QueryRow(
-		`SELECT workspace_id FROM provisr_cloud.cloud_accounts WHERE id = $1 AND workspace_id = $2`,
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to begin transaction")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
+		return
+	}
+	defer tx.Rollback()
+
+	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "cloud_account.delete"); err != nil {
+		s.writeIdempotencyError(w, r, err)
+		return
+	}
+
+	var accountWorkspaceID, provider string
+	err = tx.QueryRow(
+		`SELECT workspace_id, provider FROM provisr_cloud.cloud_accounts WHERE id = $1 AND workspace_id = $2`,
 		id, workspaceID,
-	).Scan(&accountWorkspaceID)
+	).Scan(&accountWorkspaceID, &provider)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.writeError(r.Context(), w, http.StatusNotFound, "not_found", "cloud account not found")
@@ -429,7 +517,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var activeRuns bool
-	err = s.db.QueryRow(
+	err = tx.QueryRow(
 		`SELECT EXISTS (
 			SELECT 1 FROM provisr_state.provisioning_runs
 			WHERE workspace_id = $1 AND state NOT IN ('completed', 'failed', 'cancelled')
@@ -450,7 +538,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	// The delete is conditional on no active runs so a run starting between
 	// the guard above and this statement cannot leave an account deleted
 	// while a run depends on it.
-	result, err := s.db.Exec(
+	result, err := tx.Exec(
 		`DELETE FROM provisr_cloud.cloud_accounts ca
 		 WHERE ca.id = $1 AND ca.workspace_id = $2
 		   AND NOT EXISTS (
@@ -476,6 +564,20 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.emitAudit(r.Context(), tx, workspaceID, "cloud_account_deleted", id, map[string]any{
+		"provider": provider,
+	}); err != nil {
+		log.Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Error().Err(err).Msg("failed to commit transaction")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -485,6 +587,94 @@ const (
 	sqlStateUniqueViolation     = "23505"
 	sqlStateForeignKeyViolation = "23503"
 )
+
+// claimIdempotencyKey reserves the Idempotency-Key header for a mutation
+// within the transaction. A missing or oversized key is rejected before any
+// state change; a key that was already consumed by a previous mutation is
+// rejected so a mutation is never applied twice.
+func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Request, workspaceID, mutation string) error {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 128 {
+		return errIdempotencyKeyMissing
+	}
+	res, err := tx.Exec(
+		`INSERT INTO provisr_idempotency.keys (key, workspace_id, mutation)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (key) DO NOTHING`,
+		key, workspaceID, mutation,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errIdempotencyKeyUsed
+	}
+	return nil
+}
+
+func (s *server) writeIdempotencyError(w http.ResponseWriter, r *http.Request, err error) {
+	log := zerolog.Ctx(r.Context())
+	switch {
+	case errors.Is(err, errIdempotencyKeyMissing):
+		s.writeError(r.Context(), w, http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required for mutations")
+	case errors.Is(err, errIdempotencyKeyUsed):
+		s.writeError(r.Context(), w, http.StatusConflict, "duplicate_idempotency_key", "Idempotency-Key was already used for a mutation")
+	default:
+		log.Error().Err(err).Msg("failed to claim idempotency key")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to process mutation")
+	}
+}
+
+// emitAudit appends an immutable, hash-chained audit event for a mutation,
+// inside the same transaction as the mutation itself.
+func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventType, resourceID string, payload map[string]any) error {
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal audit payload: %w", err)
+	}
+
+	var previousHash sql.NullString
+	if err := tx.QueryRow(
+		`SELECT hash FROM provisr_audit.audit_events ORDER BY created_at DESC, hash LIMIT 1`,
+	).Scan(&previousHash); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read previous audit hash: %w", err)
+	}
+
+	correlationID := correlationID(ctx)
+	sum := sha256.New()
+	sum.Write([]byte(previousHash.String))
+	sum.Write([]byte(eventType))
+	sum.Write(payloadJSON)
+	sum.Write([]byte(correlationID))
+	eventHash := hex.EncodeToString(sum.Sum(nil))
+
+	var prev any
+	if previousHash.Valid {
+		prev = previousHash.String
+	}
+	_, err = tx.Exec(
+		`INSERT INTO provisr_audit.audit_events
+		   (workspace_id, event_type, actor_id, actor_type, resource_type, resource_id,
+		    payload, hash, previous_hash, correlation_id)
+		 VALUES ($1, $2::provisr_audit.event_type, $3, 'system', 'cloud_account', $4, $5, $6, $7, $8)`,
+		workspaceID, eventType, "cloud-account-service", resourceID, payloadJSON, eventHash, prev, correlationID,
+	)
+	if err != nil {
+		return fmt.Errorf("insert audit event: %w", err)
+	}
+	return nil
+}
+
+func correlationID(ctx context.Context) string {
+	if v, ok := ctx.Value(correlationIDKey).(string); ok && v != "" {
+		return v
+	}
+	return uuid.NewString()
+}
 
 func isUniqueViolation(err error) bool {
 	var pqErr *pq.Error

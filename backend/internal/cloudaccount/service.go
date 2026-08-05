@@ -104,6 +104,21 @@ func (s *server) workspaceKey(ctx context.Context, workspaceID string) ([]byte, 
 	return key, nil
 }
 
+// requireWorkspaceID validates the workspace_id query parameter every
+// cloud-account operation is scoped to, preventing cross-workspace access.
+func (s *server) requireWorkspaceID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "workspace_id query parameter is required")
+		return "", false
+	}
+	if _, err := uuid.Parse(workspaceID); err != nil {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
+		return "", false
+	}
+	return workspaceID, true
+}
+
 func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	log := zerolog.Ctx(r.Context())
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
@@ -225,13 +240,8 @@ func (s *server) tryRetryPending(w http.ResponseWriter, r *http.Request, req cre
 
 func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	log := zerolog.Ctx(r.Context())
-	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID == "" {
-		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "workspace_id query parameter is required")
-		return
-	}
-	if _, err := uuid.Parse(workspaceID); err != nil {
-		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
+	workspaceID, ok := s.requireWorkspaceID(w, r)
+	if !ok {
 		return
 	}
 
@@ -274,6 +284,10 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	log := zerolog.Ctx(r.Context())
+	workspaceID, ok := s.requireWorkspaceID(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
 	if _, err := uuid.Parse(id); err != nil {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
@@ -285,8 +299,8 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	err := s.db.QueryRow(
 		`SELECT id, workspace_id, provider, label, status, verified_at, created_at, updated_at,
 		        metadata_encrypted
-		 FROM provisr_cloud.cloud_accounts WHERE id = $1`,
-		id,
+		 FROM provisr_cloud.cloud_accounts WHERE id = $1 AND workspace_id = $2`,
+		id, workspaceID,
 	).Scan(&account.ID, &account.WorkspaceID, &account.Provider, &account.Label, &account.Status,
 		&verifiedAt, &account.CreatedAt, &account.UpdatedAt, &metadataEncrypted)
 	if err != nil {
@@ -330,6 +344,10 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	log := zerolog.Ctx(r.Context())
+	workspaceID, ok := s.requireWorkspaceID(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
 	if _, err := uuid.Parse(id); err != nil {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
@@ -353,8 +371,8 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		 SET status = $1::provisr_cloud.account_status,
 		     verified_at = CASE WHEN $1 = 'active' THEN now() ELSE verified_at END,
 		     updated_at = now()
-		 WHERE id = $2`,
-		req.Status, id,
+		 WHERE id = $2 AND workspace_id = $3`,
+		req.Status, id, workspaceID,
 	)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to update cloud account status")
@@ -377,6 +395,10 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	log := zerolog.Ctx(r.Context())
+	workspaceID, ok := s.requireWorkspaceID(w, r)
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
 	if _, err := uuid.Parse(id); err != nil {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
@@ -386,11 +408,11 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	// Block deletion while non-terminal provisioning runs exist in the
 	// workspace (provisioning_runs does not yet carry a cloud_account_id FK;
 	// see design discussion #26).
-	var workspaceID string
+	var accountWorkspaceID string
 	err := s.db.QueryRow(
-		`SELECT workspace_id FROM provisr_cloud.cloud_accounts WHERE id = $1`,
-		id,
-	).Scan(&workspaceID)
+		`SELECT workspace_id FROM provisr_cloud.cloud_accounts WHERE id = $1 AND workspace_id = $2`,
+		id, workspaceID,
+	).Scan(&accountWorkspaceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.writeError(r.Context(), w, http.StatusNotFound, "not_found", "cloud account not found")
@@ -408,7 +430,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 			WHERE workspace_id = $1 AND state NOT IN ('completed', 'failed', 'cancelled')
 			LIMIT 1
 		)`,
-		workspaceID,
+		accountWorkspaceID,
 	).Scan(&activeRuns)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to check active runs")
@@ -420,7 +442,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.db.Exec(`DELETE FROM provisr_cloud.cloud_accounts WHERE id = $1`, id); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM provisr_cloud.cloud_accounts WHERE id = $1 AND workspace_id = $2`, id, workspaceID); err != nil {
 		log.Error().Err(err).Msg("failed to delete cloud account")
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
 		return

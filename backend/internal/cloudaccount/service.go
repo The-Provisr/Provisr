@@ -30,16 +30,14 @@ const (
 )
 
 type cloudAccount struct {
-	ID                    string  `json:"id"`
-	WorkspaceID           string  `json:"workspace_id"`
-	Provider              string  `json:"provider"`
-	Label                 string  `json:"label"`
-	Status                string  `json:"status"`
-	VerifiedAt            *string `json:"verified_at,omitempty"`
-	CreatedAt             string  `json:"created_at"`
-	UpdatedAt             string  `json:"updated_at"`
-	MetadataEncrypted     bool    `json:"-"` // internal: used by create/list queries
-	ExternalAccountIDHash string  `json:"-"` // never surfaced
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Provider    string  `json:"provider"`
+	Label       string  `json:"label"`
+	Status      string  `json:"status"`
+	VerifiedAt  *string `json:"verified_at,omitempty"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 // listCloudAccount is the surface-only projection returned by the list

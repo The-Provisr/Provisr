@@ -175,7 +175,7 @@ services:
       target: service
     command: ["./cloud-account-service"]
     ports:
-      - "8089:8089"
+      - "127.0.0.1:8089:8089"
     environment:
       PORT: "8089"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable

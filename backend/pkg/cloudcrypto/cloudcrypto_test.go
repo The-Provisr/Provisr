@@ -2,6 +2,7 @@ package cloudcrypto
 
 import (
 	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -95,7 +96,12 @@ func TestDecryptRejectsTamperedBlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tampered := blob[:len(blob)-4] + "AAAA"
+	raw, err := base64.StdEncoding.DecodeString(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[len(raw)-1] ^= 0xFF
+	tampered := base64.StdEncoding.EncodeToString(raw)
 	var out map[string]any
 	if err := DecryptJSON(key, tampered, &out); err == nil {
 		t.Fatal("expected error for tampered blob")

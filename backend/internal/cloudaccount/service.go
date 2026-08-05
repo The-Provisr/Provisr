@@ -194,31 +194,24 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // tryRetryPending updates metadata of an existing pending account for the same
-// workspace/provider pair, returning true when the retry succeeded.
+// workspace/provider pair, returning true when the retry succeeded. The status
+// read and the guarded update are one atomic statement: a concurrent status
+// change between the two would otherwise make the retry report success after
+// updating zero rows.
 func (s *server) tryRetryPending(w http.ResponseWriter, r *http.Request, req createRequest, encrypted string, externalIDHash *string) bool {
 	log := zerolog.Ctx(r.Context())
 	var existingID string
-	var existingStatus string
 	err := s.db.QueryRow(
-		`SELECT id, status FROM provisr_cloud.cloud_accounts
-		 WHERE workspace_id = $1 AND provider = $2`,
-		req.WorkspaceID, req.Provider,
-	).Scan(&existingID, &existingStatus)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to read existing account for retry")
-		return false
-	}
-	if existingStatus != "pending" {
-		return false
-	}
-
-	_, err = s.db.Exec(
 		`UPDATE provisr_cloud.cloud_accounts
 		 SET metadata_encrypted = $1, external_account_id_hash = $2, label = $3, updated_at = now()
-		 WHERE id = $4 AND status = 'pending'`,
-		encrypted, externalIDHash, strings.TrimSpace(req.Label), existingID,
-	)
+		 WHERE workspace_id = $4 AND provider = $5 AND status = 'pending'
+		 RETURNING id`,
+		encrypted, externalIDHash, strings.TrimSpace(req.Label), req.WorkspaceID, req.Provider,
+	).Scan(&existingID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false
+		}
 		log.Error().Err(err).Msg("failed to retry pending account")
 		return false
 	}

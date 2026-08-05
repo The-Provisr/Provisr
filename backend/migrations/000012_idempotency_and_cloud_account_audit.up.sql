@@ -3,15 +3,16 @@
 
 CREATE SCHEMA IF NOT EXISTS provisr_idempotency;
 
+-- The key is scoped to its workspace: a key used by one workspace must not
+-- block another workspace's mutation (a global primary key would allow a
+-- cross-workspace mutation denial).
 CREATE TABLE provisr_idempotency.keys (
-    key          VARCHAR(128) PRIMARY KEY,
     workspace_id UUID NOT NULL REFERENCES provisr_identity.workspaces(id) ON DELETE CASCADE,
+    key          VARCHAR(128) NOT NULL,
     mutation     VARCHAR(64) NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (workspace_id, key)
 );
-
-CREATE INDEX idx_idempotency_keys_workspace_id
-    ON provisr_idempotency.keys(workspace_id);
 
 ALTER TYPE provisr_audit.event_type ADD VALUE IF NOT EXISTS 'cloud_account_created';
 ALTER TYPE provisr_audit.event_type ADD VALUE IF NOT EXISTS 'cloud_account_status_changed';

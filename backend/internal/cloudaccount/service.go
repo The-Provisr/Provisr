@@ -620,10 +620,10 @@ func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Re
 		return errIdempotencyKeyMissing
 	}
 	res, err := tx.Exec(
-		`INSERT INTO provisr_idempotency.keys (key, workspace_id, mutation)
+		`INSERT INTO provisr_idempotency.keys (workspace_id, key, mutation)
 		 VALUES ($1, $2, $3)
-		 ON CONFLICT (key) DO NOTHING`,
-		key, workspaceID, mutation,
+		 ON CONFLICT (workspace_id, key) DO NOTHING`,
+		workspaceID, key, mutation,
 	)
 	if err != nil {
 		return err

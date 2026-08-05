@@ -167,6 +167,24 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  cloud-account-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./cloud-account-service"]
+    ports:
+      - "127.0.0.1:8089:8089"
+    environment:
+      PORT: "8089"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      # Local dev only. Production must inject this via Vault/infra config.
+      # No fallback: an unset key must fail startup, never ship a known key.
+      CLOUD_ACCOUNT_MASTER_KEY: ${CLOUD_ACCOUNT_MASTER_KEY:?CLOUD_ACCOUNT_MASTER_KEY must be set}
+    depends_on:
+      postgres: { condition: service_healthy }
+
   # ── Agent layer (profile: agent) ──
   agent:
     profiles: [all, agent]

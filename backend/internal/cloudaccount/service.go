@@ -93,7 +93,10 @@ func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Hand
 	mux.HandleFunc("PATCH /v1/cloud-accounts/{id}/status", s.handleUpdateStatus)
 	mux.HandleFunc("DELETE /v1/cloud-accounts/{id}", s.handleDelete)
 
-	return s.recoveryMiddleware(loggingMiddleware(log, mux))
+	// loggingMiddleware wraps recoveryMiddleware so panic handling runs inside
+	// the request-scoped logger and panic logs carry request_id and
+	// correlation_id.
+	return loggingMiddleware(log, s.recoveryMiddleware(mux))
 }
 
 type server struct {

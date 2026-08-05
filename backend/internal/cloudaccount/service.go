@@ -189,7 +189,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := s.claimIdempotencyKey(r.Context(), tx, r, req.WorkspaceID, "cloud_account.create"); err != nil {
 		s.writeIdempotencyError(w, r, err)
@@ -433,7 +433,7 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to update cloud account status")
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "cloud_account.update_status"); err != nil {
 		s.writeIdempotencyError(w, r, err)
@@ -502,7 +502,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to delete cloud account")
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "cloud_account.delete"); err != nil {
 		s.writeIdempotencyError(w, r, err)

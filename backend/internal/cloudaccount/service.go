@@ -200,6 +200,14 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	insertedID := ""
+	// Savepoint around the INSERT: a unique-violation error aborts the
+	// transaction, so the pending-retry path rolls back to this savepoint
+	// before issuing its UPDATE in the same transaction.
+	if _, err := tx.Exec(`SAVEPOINT cloud_account_insert`); err != nil {
+		log.Error().Err(err).Msg("failed to create savepoint")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
+		return
+	}
 	err = tx.QueryRow(
 		`INSERT INTO provisr_cloud.cloud_accounts
 		   (workspace_id, provider, label, external_account_id_hash, metadata_encrypted, status)
@@ -209,6 +217,11 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	).Scan(&insertedID)
 	if err != nil {
 		if isUniqueViolation(err) {
+			if _, rbErr := tx.Exec(`ROLLBACK TO SAVEPOINT cloud_account_insert`); rbErr != nil {
+				log.Error().Err(rbErr).Msg("failed to roll back to savepoint")
+				s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to create cloud account")
+				return
+			}
 			retryID, retried, retryErr := s.tryRetryPending(r.Context(), tx, req, encrypted, externalIDHash)
 			if retryErr != nil {
 				log.Error().Err(retryErr).Msg("failed to retry pending account")

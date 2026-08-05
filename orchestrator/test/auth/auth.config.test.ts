@@ -41,6 +41,16 @@ describe("loadAuthConfig", () => {
     expect(loadAuthConfig().tokenCacheTtlMs).toBe(60_000);
   });
 
+  it("falls back to defaults for partially numeric TTLs", () => {
+    process.env.CLERK_TOKEN_CACHE_TTL_MS = "5000ms";
+    process.env.CLERK_MEMBERSHIP_CACHE_TTL_MS = "60 seconds";
+
+    const config = loadAuthConfig();
+
+    expect(config.tokenCacheTtlMs).toBe(60_000);
+    expect(config.membershipCacheTtlMs).toBe(60_000);
+  });
+
   it("fails fast in production without CLERK_SECRET_KEY", () => {
     process.env.NODE_ENV = "production";
     delete process.env.CLERK_SECRET_KEY;

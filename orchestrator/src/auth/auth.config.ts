@@ -53,6 +53,11 @@ export function loadAuthConfig(): AuthConfig {
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(raw ?? "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+  // parseInt("5000ms") would silently return 5000; require the whole value to
+  // be decimal digits so malformed config falls back instead.
+  if (raw === undefined || !/^\d+$/.test(raw)) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return parsed > 0 ? parsed : fallback;
 }

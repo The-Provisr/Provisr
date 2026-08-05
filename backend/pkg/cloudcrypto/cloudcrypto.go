@@ -27,8 +27,11 @@ const (
 // MasterKey is a parsed 256-bit master key.
 type MasterKey []byte
 
-// ParseMasterKey decodes a 64-character hex master key.
+// ParseMasterKey decodes a 64-character hex master key. Surrounding
+// whitespace is trimmed first: secrets injected from env files and CI vars
+// commonly carry a trailing newline.
 func ParseMasterKey(hexValue string) (MasterKey, error) {
+	hexValue = strings.TrimSpace(hexValue)
 	if len(hexValue) != MasterKeyHexLen {
 		return nil, fmt.Errorf("master key must be %d hex characters", MasterKeyHexLen)
 	}

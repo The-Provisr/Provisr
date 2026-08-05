@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -16,6 +15,8 @@ import (
 const defaultPort = "8089"
 
 func main() {
+	logger := zerolog.New(os.Stdout).With().Timestamp().Str("service", "cloud-account-service").Logger()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = defaultPort
@@ -23,19 +24,17 @@ func main() {
 
 	dbDSN := os.Getenv("DATABASE_URL")
 	if dbDSN == "" {
-		dbDSN = "postgres://localhost:5432/provisr?sslmode=disable"
+		logger.Fatal().Msg("DATABASE_URL is required")
 	}
 
 	masterKeyHex := os.Getenv("CLOUD_ACCOUNT_MASTER_KEY")
 	if masterKeyHex == "" {
-		log.Fatal("CLOUD_ACCOUNT_MASTER_KEY is required (64 hex characters)")
+		logger.Fatal().Msg("CLOUD_ACCOUNT_MASTER_KEY is required (64 hex characters)")
 	}
 	master, err := cloudcrypto.ParseMasterKey(masterKeyHex)
 	if err != nil {
-		log.Fatalf("invalid CLOUD_ACCOUNT_MASTER_KEY: %v", err)
+		logger.Fatal().Err(err).Msg("invalid CLOUD_ACCOUNT_MASTER_KEY")
 	}
-
-	logger := zerolog.New(os.Stdout).With().Timestamp().Str("service", "cloud-account-service").Logger()
 
 	db, err := sql.Open("postgres", dbDSN)
 	if err != nil {
@@ -56,5 +55,7 @@ func main() {
 	}
 
 	logger.Info().Str("port", port).Msg("cloud-account-service starting")
-	log.Fatal(srv.ListenAndServe())
+	if err := srv.ListenAndServe(); err != nil {
+		logger.Fatal().Err(err).Msg("server stopped")
+	}
 }

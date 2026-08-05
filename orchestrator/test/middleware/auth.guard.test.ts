@@ -27,6 +27,7 @@ function mockContext(
     method?: string;
     query?: Record<string, unknown>;
     originalUrl?: string;
+    correlationId?: string;
   } = {},
 ): ExecutionContext {
   const req = {
@@ -36,12 +37,14 @@ function mockContext(
     query: opts.query ?? {},
     originalUrl: opts.originalUrl ?? "/v1/workspaces",
   };
+  const res = { locals: { correlationId: opts.correlationId ?? "trace-abc-123" } };
 
   return {
     getHandler: () => handler,
     getClass: () => clazz,
     switchToHttp: () => ({
       getRequest: () => req,
+      getResponse: () => res,
     }),
   } as unknown as ExecutionContext;
 }
@@ -50,6 +53,7 @@ interface Harness {
   guard: AuthGuard;
   verify: ReturnType<typeof vi.fn>;
   memberships: ReturnType<typeof vi.fn>;
+  resolveMemberships: ReturnType<typeof vi.fn>;
 }
 
 function harness(opts: { verifyReturns?: unknown; memberships?: unknown[] } = {}): Harness {
@@ -57,6 +61,7 @@ function harness(opts: { verifyReturns?: unknown; memberships?: unknown[] } = {}
   const memberships = vi.fn(
     async () => opts.memberships ?? [{ workspaceId: "org_1", role: "org:admin" }],
   );
+  const resolveMemberships = vi.fn(async () => memberships());
   const clerk = {
     verifyToken: verify,
     getOrganizationMemberships: memberships,
@@ -68,10 +73,10 @@ function harness(opts: { verifyReturns?: unknown; memberships?: unknown[] } = {}
       email: "user@provisr.io",
       createdAt: new Date().toISOString(),
     })),
-    resolveMemberships: vi.fn(async () => memberships()),
+    resolveMemberships,
   } as unknown as IdentityService;
 
-  return { guard: new AuthGuard(new Reflector(), clerk, identity), verify, memberships };
+  return { guard: new AuthGuard(new Reflector(), clerk, identity), verify, memberships, resolveMemberships };
 }
 
 describe("AuthGuard", () => {
@@ -148,7 +153,19 @@ describe("AuthGuard", () => {
       });
 
       expect(await guard.canActivate(context)).toBe(true);
-      expect(verify).toHaveBeenCalledWith("sse-token");
+      expect(verify).toHaveBeenCalledWith("sse-token", "trace-abc-123");
+    });
+
+    it("passes the request correlation id into verification and membership resolution", async () => {
+      const { guard, verify, resolveMemberships } = harness();
+      const context = mockContext({
+        authHeader: "Bearer jwt.token.here",
+        correlationId: "trace-abc-123",
+      });
+
+      expect(await guard.canActivate(context)).toBe(true);
+      expect(verify).toHaveBeenCalledWith("jwt.token.here", "trace-abc-123");
+      expect(resolveMemberships).toHaveBeenCalledWith("clerk_user_1", "trace-abc-123");
     });
 
     it("never reads a query token on a non-SSE route", async () => {

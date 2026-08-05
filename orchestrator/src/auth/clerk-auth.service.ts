@@ -74,7 +74,7 @@ export class ClerkAuthService {
    * Verified tokens are cached for config.tokenCacheTtlMs to avoid
    * re-verifying on every request; the Clerk SDK additionally caches JWKS.
    */
-  async verifyToken(token: string): Promise<ClerkSessionClaims | null> {
+  async verifyToken(token: string, correlationId?: string): Promise<ClerkSessionClaims | null> {
     const cached = this.tokenCache.get(token);
     const now = Date.now();
     if (cached && now - cached.verifiedAt < this.config.tokenCacheTtlMs) {
@@ -99,7 +99,10 @@ export class ClerkAuthService {
       return extracted;
     } catch (err) {
       // Never log token contents; only that a verification failed.
-      this.logger.debug(`Token verification failed: ${String(err)}`);
+      this.logger.debug(
+        { correlationId: correlationId ?? "unknown", err: String(err) },
+        "Token verification failed",
+      );
       return null;
     }
   }
@@ -109,7 +112,10 @@ export class ClerkAuthService {
    * for config.membershipCacheTtlMs to avoid a Clerk API round-trip on every
    * request.
    */
-  async getOrganizationMemberships(userId: string): Promise<WorkspaceMembership[]> {
+  async getOrganizationMemberships(
+    userId: string,
+    correlationId?: string,
+  ): Promise<WorkspaceMembership[]> {
     const cached = this.membershipCache.get(userId);
     const now = Date.now();
     if (cached && now - cached.fetchedAt < this.config.membershipCacheTtlMs) {
@@ -130,7 +136,10 @@ export class ClerkAuthService {
       this.evictIfOversized(this.membershipCache);
       return memberships;
     } catch (err) {
-      this.logger.debug(`Membership resolution failed for user ${userId}: ${String(err)}`);
+      this.logger.debug(
+        { correlationId: correlationId ?? "unknown", userId, err: String(err) },
+        "Membership resolution failed",
+      );
       return [];
     }
   }

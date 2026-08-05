@@ -56,8 +56,8 @@ export class IdentityService {
    * Resolves the workspaces (Clerk organizations) a user belongs to with
    * their role in each. Returns [] when the user has no memberships.
    */
-  async resolveMemberships(clerkId: string): Promise<WorkspaceContext[]> {
-    const memberships = await this.clerk.getOrganizationMemberships(clerkId);
+  async resolveMemberships(clerkId: string, correlationId?: string): Promise<WorkspaceContext[]> {
+    const memberships = await this.clerk.getOrganizationMemberships(clerkId, correlationId);
     return memberships.map((membership: WorkspaceMembership) => ({
       workspaceId: membership.workspaceId,
       role: membership.role,

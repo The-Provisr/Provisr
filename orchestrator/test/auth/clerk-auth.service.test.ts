@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Logger } from "@nestjs/common";
 import { ClerkAuthService } from "../../src/auth/clerk-auth.service";
 import type { MembershipClient } from "../../src/auth/clerk-auth.service";
 import type { AuthConfig } from "../../src/auth/auth.config";
@@ -83,6 +84,22 @@ describe("ClerkAuthService.verifyToken", () => {
     expect(await service.verifyToken("bad.token")).toBeNull();
   });
 
+  it("includes the correlation id when logging a verification failure", async () => {
+    const verify = vi.fn(async () => {
+      throw new Error("JWT expired");
+    });
+    const service = new ClerkAuthService(config(), verify, fakeClient());
+    const debug = vi.spyOn(Logger.prototype, "debug").mockImplementation(() => undefined);
+
+    await service.verifyToken("bad.token", "trace-abc-123");
+
+    expect(debug).toHaveBeenCalledWith(
+      { correlationId: "trace-abc-123", err: "Error: JWT expired" },
+      "Token verification failed",
+    );
+    debug.mockRestore();
+  });
+
   it("returns null when verification yields no claims", async () => {
     const verify = vi.fn(async () => undefined);
     const service = new ClerkAuthService(config(), verify, fakeClient());
@@ -160,6 +177,26 @@ describe("ClerkAuthService.getOrganizationMemberships", () => {
     const service = new ClerkAuthService(config(), fakeVerify(), client);
 
     expect(await service.getOrganizationMemberships("clerk_user_1")).toEqual([]);
+  });
+
+  it("includes the correlation id when logging a membership failure", async () => {
+    const client = fakeClient({
+      users: {
+        getOrganizationMembershipList: vi.fn(async () => {
+          throw new Error("rate limited");
+        }),
+      },
+    });
+    const service = new ClerkAuthService(config(), fakeVerify(), client);
+    const debug = vi.spyOn(Logger.prototype, "debug").mockImplementation(() => undefined);
+
+    await service.getOrganizationMemberships("clerk_user_1", "trace-abc-123");
+
+    expect(debug).toHaveBeenCalledWith(
+      { correlationId: "trace-abc-123", userId: "clerk_user_1", err: "Error: rate limited" },
+      "Membership resolution failed",
+    );
+    debug.mockRestore();
   });
 
   it("returns [] without a secret key", async () => {

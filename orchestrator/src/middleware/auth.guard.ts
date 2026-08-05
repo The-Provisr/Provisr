@@ -58,10 +58,12 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
-    const req = context.switchToHttp().getRequest<Request & { user?: RequestUser }>();
+    const http = context.switchToHttp();
+    const req = http.getRequest<Request & { user?: RequestUser }>();
+    const res = typeof http.getResponse === "function" ? http.getResponse() : undefined;
+    const correlationId = res?.locals?.correlationId;
 
-    if (process.env.NODE_ENV !== "production" && process.env.DEV_USER_ID) {
-      req.user = {
+    if (process.env.NODE_ENV !== "production" && process.env.DEV_USER_ID) {      req.user = {
         userId: process.env.DEV_USER_ID,
         clerkId: process.env.DEV_USER_ID,
         email: "dev@provisr.local",
@@ -76,14 +78,14 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedError();
     }
 
-    const claims = await this.clerk.verifyToken(token);
+    const claims = await this.clerk.verifyToken(token, correlationId);
     if (!claims) {
       // One generic message for every failure mode; never reveal the reason.
       throw new UnauthorizedError();
     }
 
     const user = await this.identity.getOrCreateUser(claims);
-    const memberships = await this.identity.resolveMemberships(user.clerkId);
+    const memberships = await this.identity.resolveMemberships(user.clerkId, correlationId);
 
     if (memberships.length === 0) {
       throw new ForbiddenError("No workspace membership");

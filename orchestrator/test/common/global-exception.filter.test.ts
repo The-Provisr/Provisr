@@ -56,7 +56,7 @@ describe("GlobalExceptionFilter", () => {
       .expect(404);
 
     expect(res.body).toMatchObject({
-      error: "ProvError",
+      error: "NotFoundError",
       message: "The thing does not exist",
       status: 404,
       code: "NOT_FOUND",
@@ -65,7 +65,7 @@ describe("GlobalExceptionFilter", () => {
     expect(res.body.request_id).toBe(res.headers[REQUEST_ID_HEADER]);
   });
 
-  it("renders HttpException with a generic error name", async () => {
+  it("renders HttpException with a stable error code", async () => {
     const res = await request(app.getHttpServer())
       .get("/filter-test/nest-error")
       .expect(404);
@@ -74,8 +74,8 @@ describe("GlobalExceptionFilter", () => {
       error: "NOT_FOUND",
       message: "resource missing",
       status: 404,
+      code: "NOT_FOUND",
     });
-    expect(res.body.code).toBeUndefined();
   });
 
   it("never leaks internal error details", async () => {

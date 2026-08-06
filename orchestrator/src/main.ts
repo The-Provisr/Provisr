@@ -3,6 +3,7 @@ import { buildApp } from "./app.builder";
 
 async function bootstrap(): Promise<void> {
   const app = await buildApp();
+  app.enableShutdownHooks();
   const port = Number(process.env.PORT) || 4000;
   await app.listen(port);
   new Logger("Bootstrap").log(`Orchestrator running on :${port}`);

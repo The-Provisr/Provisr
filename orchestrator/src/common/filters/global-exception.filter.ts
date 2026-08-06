@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import type { Response } from "express";
 import { ZodError } from "zod";
-import { ProvError } from "../errors/typed-errors";
+import { ErrorCodes, ProvError, type ErrorCode } from "../errors/typed-errors";
 
 interface ErrorBody {
   error: string;
@@ -18,6 +18,17 @@ interface ErrorBody {
   code: string | undefined;
   details: unknown[] | undefined;
 }
+
+/** Maps a plain HTTP status to the stable application error code. */
+const STATUS_CODE: Record<number, ErrorCode> = {
+  [HttpStatus.BAD_REQUEST]: ErrorCodes.VALIDATION_FAILED,
+  [HttpStatus.UNAUTHORIZED]: ErrorCodes.UNAUTHORIZED,
+  [HttpStatus.FORBIDDEN]: ErrorCodes.FORBIDDEN,
+  [HttpStatus.NOT_FOUND]: ErrorCodes.NOT_FOUND,
+  [HttpStatus.CONFLICT]: ErrorCodes.CONFLICT,
+  [HttpStatus.NOT_IMPLEMENTED]: ErrorCodes.NOT_IMPLEMENTED,
+  [HttpStatus.INTERNAL_SERVER_ERROR]: ErrorCodes.INTERNAL_ERROR,
+};
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -33,9 +44,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const body = this.toErrorBody(exception, requestId);
 
     if (body.status >= 500) {
-      this.logger.error({ err: exception, correlationId, requestId }, "Unhandled error");
+      this.logger.error(
+        { err: exception, correlation_id: correlationId, request_id: requestId },
+        exception instanceof Error ? exception.stack : undefined,
+        "Unhandled error",
+      );
     } else {
-      this.logger.warn({ correlationId, requestId, status: body.status }, "Request failed");
+      this.logger.warn({ correlation_id: correlationId, request_id: requestId, status: body.status }, "Request failed");
     }
 
     res.status(body.status).json(body);
@@ -81,7 +96,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         error: HttpStatus[status] ?? "Error",
         message,
         status,
-        code: undefined,
+        code: STATUS_CODE[status] ?? (status >= 500 ? ErrorCodes.INTERNAL_ERROR : undefined),
         request_id: requestId,
         details: undefined,
       };

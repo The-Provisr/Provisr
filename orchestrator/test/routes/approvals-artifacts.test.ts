@@ -39,7 +39,7 @@ describe("Approvals and artifacts routes", () => {
         .expect(400);
 
       expect(res.body).toMatchObject({
-        error: "ProvError",
+        error: "ValidationError",
         status: 400,
         code: "VALIDATION_FAILED",
       });
@@ -49,6 +49,27 @@ describe("Approvals and artifacts routes", () => {
           message: "Reason is required when rejecting an approval",
         },
       ]);
+    });
+
+    it("rejects a whitespace-only rejection reason", async () => {
+      const res = await http(app)
+        .post(`/v1/approvals/${UUID}/decide`)
+        .send({ decision: "rejected", reason: "   " })
+        .expect(400);
+
+      expect(res.body).toMatchObject({
+        error: "ValidationError",
+        status: 400,
+        code: "VALIDATION_FAILED",
+      });
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          {
+            field: "reason",
+            message: "Reason is required when rejecting an approval",
+          },
+        ]),
+      );
     });
 
     it("accepts a rejected decision with a reason", async () => {

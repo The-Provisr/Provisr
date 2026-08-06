@@ -24,7 +24,7 @@ describe("Provisioning runs routes", () => {
       .expect(501);
 
     expect(res.body).toMatchObject({
-      error: "ProvError",
+      error: "NotImplementedError",
       status: 501,
       code: "NOT_IMPLEMENTED",
     });
@@ -62,7 +62,7 @@ describe("Provisioning runs routes", () => {
     const res = await http(app).get("/v1/runs?sessionId=abc").expect(400);
 
     expect(res.body).toMatchObject({
-      error: "ProvError",
+      error: "ValidationError",
       status: 400,
       code: "VALIDATION_FAILED",
     });

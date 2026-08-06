@@ -31,7 +31,7 @@ describe("Workspaces routes", () => {
       const res = await http(app).get("/v1/workspaces").expect(401);
 
       expect(res.body).toMatchObject({
-        error: "ProvError",
+        error: "UnauthorizedError",
         // Deliberately generic: invalid/expired tokens never reveal why.
         message: "Authentication required",
         status: 401,
@@ -45,7 +45,7 @@ describe("Workspaces routes", () => {
     const res = await http(app).get("/v1/workspaces").expect(501);
 
     expect(res.body).toMatchObject({
-      error: "ProvError",
+      error: "NotImplementedError",
       status: 501,
       code: "NOT_IMPLEMENTED",
     });
@@ -68,7 +68,7 @@ describe("Workspaces routes", () => {
       .expect(400);
 
     expect(res.body).toMatchObject({
-      error: "ProvError",
+      error: "ValidationError",
       status: 400,
       code: "VALIDATION_FAILED",
     });

@@ -21,7 +21,7 @@ describe("Sessions routes", () => {
     const res = await http(app).get("/v1/sessions").expect(400);
 
     expect(res.body).toMatchObject({
-      error: "ProvError",
+      error: "ValidationError",
       status: 400,
       code: "VALIDATION_FAILED",
     });

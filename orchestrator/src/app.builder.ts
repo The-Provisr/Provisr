@@ -6,8 +6,13 @@ export async function buildApp(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
 
   // Only origins explicitly configured may call the API gateway. Defaults to
-  // the local frontend dev server; production deployments set CORS_ORIGINS.
-  const corsOrigins = (process.env.CORS_ORIGINS ?? "http://localhost:3000")
+  // the local frontend dev server; production deployments MUST set
+  // CORS_ORIGINS or startup fails fast rather than silently opening the API.
+  const rawOrigins = process.env.CORS_ORIGINS;
+  if (process.env.NODE_ENV === "production" && !rawOrigins) {
+    throw new Error("CORS_ORIGINS must be set in production");
+  }
+  const corsOrigins = (rawOrigins ?? "http://localhost:3000")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);

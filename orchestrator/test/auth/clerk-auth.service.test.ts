@@ -31,6 +31,7 @@ function fakeClient(overrides: Partial<MembershipClient> = {}): MembershipClient
           { organization: { id: "org_1" }, role: "org:admin" },
           { organization: { id: "org_2" }, role: "org:member" },
         ],
+        totalCount: 2,
       })),
     },
     ...overrides,
@@ -164,6 +165,29 @@ describe("ClerkAuthService.getOrganizationMemberships", () => {
     await service.getOrganizationMemberships("clerk_user_1");
 
     expect(client.users.getOrganizationMembershipList).toHaveBeenCalledTimes(1);
+  });
+
+  it("paginates until totalCount is reached", async () => {
+    const pages = [
+      { data: [{ organization: { id: "org_1" }, role: "org:admin" }], totalCount: 3 },
+      { data: [{ organization: { id: "org_2" }, role: "org:member" }], totalCount: 3 },
+      { data: [{ organization: { id: "org_3" }, role: "org:admin" }], totalCount: 3 },
+    ];
+    const list = vi.fn(async (params: { limit?: number; offset?: number }) => pages[params.offset ?? 0]);
+    const client = fakeClient({ users: { getOrganizationMembershipList: list } });
+    const service = new ClerkAuthService(config(), fakeVerify(), client);
+
+    const memberships = await service.getOrganizationMemberships("clerk_user_1");
+
+    expect(list).toHaveBeenCalledTimes(3);
+    expect(list).toHaveBeenNthCalledWith(1, { userId: "clerk_user_1", limit: 100, offset: 0 });
+    expect(list).toHaveBeenNthCalledWith(2, { userId: "clerk_user_1", limit: 100, offset: 1 });
+    expect(list).toHaveBeenNthCalledWith(3, { userId: "clerk_user_1", limit: 100, offset: 2 });
+    expect(memberships).toEqual([
+      { workspaceId: "org_1", role: "org:admin" },
+      { workspaceId: "org_2", role: "org:member" },
+      { workspaceId: "org_3", role: "org:admin" },
+    ]);
   });
 
   it("throws a typed DependencyError when the Clerk API call fails", async () => {

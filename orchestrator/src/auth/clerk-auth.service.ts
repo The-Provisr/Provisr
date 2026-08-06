@@ -37,7 +37,9 @@ export interface MembershipClient {
   users: {
     getOrganizationMembershipList(params: {
       userId: string;
-    }): Promise<{ data: { organization: { id: string }; role: string }[] }>;
+      limit?: number;
+      offset?: number;
+    }): Promise<{ data: { organization: { id: string }; role: string }[]; totalCount: number }>;
   };
 }
 
@@ -113,7 +115,9 @@ export class ClerkAuthService {
   /**
    * Resolves the Clerk organizations a user belongs to. Results are cached
    * for config.membershipCacheTtlMs to avoid a Clerk API round-trip on every
-   * request.
+   * request. The Clerk API pages results (default 10 per page), so pages are
+   * fetched with limit/offset until totalCount is reached so a user with many
+   * workspaces is never silently truncated.
    */
   async getOrganizationMemberships(
     userId: string,
@@ -130,11 +134,22 @@ export class ClerkAuthService {
       if (!client) {
         return [];
       }
-      const res = await client.users.getOrganizationMembershipList({ userId });
-      const memberships: WorkspaceMembership[] = res.data.map((membership) => ({
-        workspaceId: membership.organization.id,
-        role: membership.role,
-      }));
+      const memberships: WorkspaceMembership[] = [];
+      const pageSize = 100;
+      let offset = 0;
+      let totalCount = Number.POSITIVE_INFINITY;
+      while (memberships.length < totalCount) {
+        const res = await client.users.getOrganizationMembershipList({ userId, limit: pageSize, offset });
+        totalCount = res.totalCount;
+        if (res.data.length === 0) {
+          break;
+        }
+        memberships.push(...res.data.map((membership) => ({
+          workspaceId: membership.organization.id,
+          role: membership.role,
+        })));
+        offset += res.data.length;
+      }
       this.membershipCache.set(userId, { memberships, fetchedAt: now });
       this.evictIfOversized(this.membershipCache);
       return memberships;

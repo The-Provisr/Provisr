@@ -30,6 +30,7 @@ function serviceWith(memberships: { workspaceId: string; role: string }[]): {
           organization: { id: membership.workspaceId },
           role: membership.role,
         })),
+        totalCount: memberships.length,
       })),
     },
   });

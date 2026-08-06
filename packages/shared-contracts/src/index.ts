@@ -1,17 +1,19 @@
 export const SCHEMA_VERSION = "manifest/v1.0";
 
 export type CloudProvider = "aws" | "azure" | "gcp";
-export type RequestStatus =
-  | "received"
-  | "pending_agent"
-  | "pending_clarification"
-  | "policy_check"
-  | "pending_confirmation"
-  | "pending_approval"
-  | "provisioning"
-  | "live"
-  | "failed"
-  | "cancelled";
+export const requestStatuses = [
+  "received",
+  "pending_agent",
+  "pending_clarification",
+  "policy_check",
+  "pending_confirmation",
+  "pending_approval",
+  "provisioning",
+  "live",
+  "failed",
+  "cancelled",
+] as const;
+export type RequestStatus = (typeof requestStatuses)[number];
 
 export interface ResourceManifest {
   schemaVersion: string;

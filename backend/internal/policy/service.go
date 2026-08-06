@@ -83,6 +83,7 @@ func New(db *sql.DB, log zerolog.Logger) http.Handler {
 	mux.HandleFunc("PUT /v1/workspaces/{workspace_id}/policy-settings", s.handleUpdateSettings)
 	mux.HandleFunc("GET /v1/policy-packs/{pack_id}", s.handleGetPack)
 	mux.HandleFunc("PATCH /v1/policy-rules/{rule_id}/parameters", s.handleUpdateRuleParameters)
+	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-requirements", s.handleGetPolicyRequirements)
 
 	return loggingMiddleware(log, s.recoveryMiddleware(mux))
 }
@@ -387,6 +388,23 @@ func (s *server) handleUpdateRuleParameters(w http.ResponseWriter, r *http.Reque
 	rule.RegoRule = regoRule // Returning updated rule back to admin
 	
 	s.writeJSON(w, http.StatusOK, rule)
+}
+
+func (s *server) handleGetPolicyRequirements(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspace_id")
+	if _, err := uuid.Parse(workspaceID); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
+		return
+	}
+
+	reqs, err := ProjectPolicyRequirements(r.Context(), s.db, workspaceID)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to project policy requirements")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to project policy requirements")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, reqs)
 }
 
 // --- Helpers ---

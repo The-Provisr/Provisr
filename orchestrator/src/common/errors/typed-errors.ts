@@ -17,7 +17,7 @@ export class ProvError extends Error {
 
   constructor(code: ErrorCode, message: string, status: number, details?: unknown[]) {
     super(message);
-    this.name = "ProvError";
+    this.name = new.target.name;
     this.code = code;
     this.status = status;
     this.details = details;

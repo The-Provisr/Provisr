@@ -2,7 +2,7 @@
   "name": "provisr",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.6.0",
+  "packageManager": "pnpm@11.18.0",
   "scripts": {
     "dev": "task dev",
     "build": "task build",
@@ -12,9 +12,8 @@
   "devDependencies": {
     "typescript": "^5.7.0"
   },
-  "packageManager": "pnpm@11.18.0",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=22.13.0",
     "pnpm": ">=9.0.0"
   }
 }

@@ -31,7 +31,7 @@ export class CorrelationIdMiddleware implements NestMiddleware {
     const pathname = req.originalUrl.split("?")[0];
 
     this.logger.log(
-      { correlationId, requestId, method: req.method, path: pathname },
+      { correlation_id: correlationId, request_id: requestId, method: req.method, path: pathname },
       "incoming request",
     );
 

@@ -6,7 +6,7 @@ import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 export const decideApprovalSchema = z
   .object({
     decision: z.enum(["approved", "rejected"]),
-    reason: z.string().min(1).max(1000).optional(),
+    reason: z.string().trim().min(1).max(1000).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.decision === "rejected" && !value.reason) {

@@ -43,6 +43,28 @@ type updateSettingsRequest struct {
 	Mode           *string  `json:"mode"`
 }
 
+type policyRule struct {
+	ID               string `json:"id"`
+	PackID           string `json:"pack_id"`
+	RuleKey          string `json:"rule_key"`
+	RegoRule         string `json:"rego_rule,omitempty"` // Omitted for non-admins
+	Severity         string `json:"severity"`
+	Description      string `json:"description"`
+	RemediationHint  string `json:"remediation_hint"`
+	IsEnabled        bool   `json:"is_enabled"`
+	ParametersSchema string `json:"parameters_schema"`
+	CreatedAt        string `json:"created_at"`
+}
+
+type policyPackWithRules struct {
+	policyPack
+	Rules []policyRule `json:"rules"`
+}
+
+type updateRuleParametersRequest struct {
+	ParametersSchema string `json:"parameters_schema"`
+}
+
 // --- Server ---
 
 type server struct {
@@ -59,6 +81,8 @@ func New(db *sql.DB, log zerolog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/policy-packs", s.handleListPacks)
 	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /v1/workspaces/{workspace_id}/policy-settings", s.handleUpdateSettings)
+	mux.HandleFunc("GET /v1/policy-packs/{pack_id}", s.handleGetPack)
+	mux.HandleFunc("PATCH /v1/policy-rules/{rule_id}/parameters", s.handleUpdateRuleParameters)
 
 	return loggingMiddleware(log, s.recoveryMiddleware(mux))
 }
@@ -233,6 +257,136 @@ func (s *server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *server) handleGetPack(w http.ResponseWriter, r *http.Request) {
+	packID := r.PathValue("pack_id")
+	if _, err := uuid.Parse(packID); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "pack_id must be a valid UUID")
+		return
+	}
+
+	role := r.Header.Get("X-User-Role")
+	isAdmin := role == "admin"
+
+	// Fetch pack
+	var pack policyPackWithRules
+	var wsID sql.NullString
+	err := s.db.QueryRow(
+		`SELECT id, workspace_id, name, description, category, is_system_pack, is_enabled, created_at, updated_at
+		 FROM provisr_policy.policy_packs
+		 WHERE id = $1`,
+		packID,
+	).Scan(&pack.ID, &wsID, &pack.Name, &pack.Description, &pack.Category, &pack.IsSystemPack, &pack.IsEnabled, &pack.CreatedAt, &pack.UpdatedAt)
+	
+	if err == sql.ErrNoRows {
+		s.writeError(r, w, http.StatusNotFound, "not_found", "policy pack not found")
+		return
+	}
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to get policy pack")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to get policy pack")
+		return
+	}
+	if wsID.Valid {
+		pack.WorkspaceID = &wsID.String
+	}
+
+	// Fetch rules
+	rows, err := s.db.Query(
+		`SELECT id, pack_id, rule_key, rego_rule, severity, description, remediation_hint, is_enabled, parameters_schema, created_at
+		 FROM provisr_policy.policy_rules
+		 WHERE pack_id = $1
+		 ORDER BY rule_key`,
+		packID,
+	)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to list policy rules")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to list policy rules")
+		return
+	}
+	defer rows.Close()
+
+	pack.Rules = []policyRule{}
+	for rows.Next() {
+		var rule policyRule
+		var paramsSchema []byte
+		var regoRule string
+		if err := rows.Scan(&rule.ID, &rule.PackID, &rule.RuleKey, &regoRule, &rule.Severity, &rule.Description, &rule.RemediationHint, &rule.IsEnabled, &paramsSchema, &rule.CreatedAt); err != nil {
+			zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to scan policy rule")
+			s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to get policy pack rules")
+			return
+		}
+		
+		rule.ParametersSchema = string(paramsSchema)
+		
+		// PRD §15: access control for raw Rego
+		if isAdmin {
+			rule.RegoRule = regoRule
+		}
+		
+		pack.Rules = append(pack.Rules, rule)
+	}
+
+	s.writeJSON(w, http.StatusOK, pack)
+}
+
+func (s *server) handleUpdateRuleParameters(w http.ResponseWriter, r *http.Request) {
+	ruleID := r.PathValue("rule_id")
+	if _, err := uuid.Parse(ruleID); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "rule_id must be a valid UUID")
+		return
+	}
+
+	role := r.Header.Get("X-User-Role")
+	if role != "admin" {
+		s.writeError(r, w, http.StatusForbidden, "forbidden", "only admins can update policy rule parameters")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	var req updateRuleParametersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
+		return
+	}
+
+	if req.ParametersSchema == "" {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "parameters_schema is required")
+		return
+	}
+	
+	// Validate JSON
+	if !json.Valid([]byte(req.ParametersSchema)) {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "parameters_schema must be valid JSON")
+		return
+	}
+
+	var rule policyRule
+	var paramsSchema []byte
+	var regoRule string
+	err := s.db.QueryRow(
+		`UPDATE provisr_policy.policy_rules
+		 SET parameters_schema = $1::jsonb
+		 WHERE id = $2
+		 RETURNING id, pack_id, rule_key, rego_rule, severity, description, remediation_hint, is_enabled, parameters_schema, created_at`,
+		req.ParametersSchema, ruleID,
+	).Scan(&rule.ID, &rule.PackID, &rule.RuleKey, &regoRule, &rule.Severity, &rule.Description, &rule.RemediationHint, &rule.IsEnabled, &paramsSchema, &rule.CreatedAt)
+	
+	if err == sql.ErrNoRows {
+		s.writeError(r, w, http.StatusNotFound, "not_found", "policy rule not found")
+		return
+	}
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to update policy rule")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+	
+	rule.ParametersSchema = string(paramsSchema)
+	rule.RegoRule = regoRule // Returning updated rule back to admin
+	
+	s.writeJSON(w, http.StatusOK, rule)
 }
 
 // --- Helpers ---

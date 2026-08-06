@@ -14,16 +14,24 @@ export function http(app: INestApplication): ReturnType<typeof request> {
 }
 
 export function useDevAuth(userId = "test-user"): void {
-  let previous: string | undefined;
+  let previousUserId: string | undefined;
+  let previousBypass: string | undefined;
   beforeAll(() => {
-    previous = process.env.DEV_USER_ID;
+    previousUserId = process.env.DEV_USER_ID;
+    previousBypass = process.env.AUTH_DEV_BYPASS;
     process.env.DEV_USER_ID = userId;
+    process.env.AUTH_DEV_BYPASS = "true";
   });
   afterAll(() => {
-    if (previous === undefined) {
+    if (previousUserId === undefined) {
       delete process.env.DEV_USER_ID;
     } else {
-      process.env.DEV_USER_ID = previous;
+      process.env.DEV_USER_ID = previousUserId;
+    }
+    if (previousBypass === undefined) {
+      delete process.env.AUTH_DEV_BYPASS;
+    } else {
+      process.env.AUTH_DEV_BYPASS = previousBypass;
     }
   });
 }

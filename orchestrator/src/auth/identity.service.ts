@@ -35,7 +35,7 @@ export class IdentityService {
   constructor(private readonly clerk: ClerkAuthService) {}
 
   /** Returns the internal user for a Clerk identity, creating it if new. */
-  async getOrCreateUser(claims: ClerkSessionClaims): Promise<ProvisionedUser> {
+  async getOrCreateUser(claims: ClerkSessionClaims, correlationId?: string): Promise<ProvisionedUser> {
     const existing = this.usersByClerkId.get(claims.sub);
     if (existing) {
       return existing;
@@ -48,7 +48,10 @@ export class IdentityService {
       createdAt: new Date().toISOString(),
     };
     this.usersByClerkId.set(user.clerkId, user);
-    this.logger.debug(`Provisioned Provisr user ${user.userId} for Clerk user ${user.clerkId}`);
+    this.logger.debug(
+      { correlation_id: correlationId ?? "unknown", userId: user.userId, clerkId: user.clerkId },
+      "Provisioned Provisr user",
+    );
     return user;
   }
 

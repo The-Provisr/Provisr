@@ -33,10 +33,11 @@ export function extractBearerToken(header: string | undefined): string | undefin
  * generic 401 with no reason. A valid token with no workspace membership
  * yields 403.
  *
- * Development bypass: when NODE_ENV is not "production" and DEV_USER_ID is
- * set, the request is authenticated as that user without any token. The
- * bypass is never honored in production, so a stray DEV_USER_ID cannot
- * authenticate anyone there.
+ * Development bypass: when AUTH_DEV_BYPASS is exactly "true", NODE_ENV is
+ * exactly "development" or "test", and DEV_USER_ID is set, the request is
+ * authenticated as that user without any token. The bypass is never honored
+ * in production or without the explicit opt-in flag, so a stray DEV_USER_ID
+ * cannot authenticate anyone there.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -63,9 +64,13 @@ export class AuthGuard implements CanActivate {
     const res = typeof http.getResponse === "function" ? http.getResponse() : undefined;
     const correlationId = res?.locals?.correlationId;
 
-    if (process.env.NODE_ENV !== "production" && process.env.DEV_USER_ID) {      req.user = {
-        userId: process.env.DEV_USER_ID,
-        clerkId: process.env.DEV_USER_ID,
+    const devBypass =
+      process.env.AUTH_DEV_BYPASS === "true" &&
+      (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") &&
+      Boolean(process.env.DEV_USER_ID);
+    if (devBypass) {      req.user = {
+        userId: process.env.DEV_USER_ID as string,
+        clerkId: process.env.DEV_USER_ID as string,
         email: "dev@provisr.local",
         workspaceIds: [],
         roles: {},
@@ -84,7 +89,7 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedError();
     }
 
-    const user = await this.identity.getOrCreateUser(claims);
+    const user = await this.identity.getOrCreateUser(claims, correlationId);
     const memberships = await this.identity.resolveMemberships(user.clerkId, correlationId);
 
     if (memberships.length === 0) {

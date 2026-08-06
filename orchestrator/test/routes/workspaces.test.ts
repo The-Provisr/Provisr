@@ -13,11 +13,13 @@ describe("Workspaces routes", () => {
 
   afterAll(async () => {
     delete process.env.DEV_USER_ID;
+    delete process.env.AUTH_DEV_BYPASS;
     await app.close();
   });
 
   beforeEach(() => {
     process.env.DEV_USER_ID = "test-user";
+    process.env.AUTH_DEV_BYPASS = "true";
   });
 
   describe("without credentials", () => {

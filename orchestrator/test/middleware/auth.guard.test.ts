@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { ExecutionContext } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { IS_PUBLIC_KEY } from "../../src/middleware/public.decorator";
 import { AuthGuard, extractBearerToken, isSseEventsPath } from "../../src/middleware/auth.guard";
 import { UnauthorizedError, ForbiddenError, DependencyError } from "../../src/common/errors/typed-errors";
@@ -82,6 +82,7 @@ function harness(opts: { verifyReturns?: unknown; memberships?: unknown[] } = {}
 describe("AuthGuard", () => {
   beforeEach(() => {
     delete process.env.DEV_USER_ID;
+    delete process.env.AUTH_DEV_BYPASS;
     Reflect.deleteMetadata(IS_PUBLIC_KEY, handler);
     Reflect.deleteMetadata(IS_PUBLIC_KEY, clazz);
   });
@@ -165,6 +166,18 @@ describe("AuthGuard", () => {
       expect(verify).toHaveBeenCalledWith("sse-token", "trace-abc-123");
     });
 
+    it("never reads a query token on a non-GET call to the SSE route", async () => {
+      const { guard, verify } = harness();
+      const context = mockContext({
+        method: "POST",
+        query: { token: "sse-token" },
+        originalUrl: `${SSE_PATH}?token=sse-token`,
+      });
+
+      await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedError);
+      expect(verify).not.toHaveBeenCalled();
+    });
+
     it("passes the request correlation id into verification and membership resolution", async () => {
       const { guard, verify, resolveMemberships } = harness();
       const context = mockContext({
@@ -190,9 +203,17 @@ describe("AuthGuard", () => {
     });
   });
 
-  describe("dev mode (DEV_USER_ID set, not production)", () => {
+  describe("dev mode (AUTH_DEV_BYPASS=true, DEV_USER_ID set, NODE_ENV=test)", () => {
     beforeEach(() => {
       process.env.DEV_USER_ID = "user-123";
+      process.env.AUTH_DEV_BYPASS = "true";
+      process.env.NODE_ENV = "test";
+    });
+
+    afterEach(() => {
+      delete process.env.DEV_USER_ID;
+      delete process.env.AUTH_DEV_BYPASS;
+      delete process.env.NODE_ENV;
     });
 
     it("accepts a request with no token and populates the user", async () => {
@@ -211,26 +232,47 @@ describe("AuthGuard", () => {
     });
   });
 
-  describe("production-like (no DEV_USER_ID)", () => {
-    it("disables the dev bypass when NODE_ENV is production", async () => {
+  describe("dev bypass disabled", () => {
+    const env = (overrides: Record<string, string | undefined>): void => {
+      delete process.env.DEV_USER_ID;
+      delete process.env.AUTH_DEV_BYPASS;
+      delete process.env.NODE_ENV;
+      for (const [key, value] of Object.entries(overrides)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    };
+
+    it("stays disabled in production even when DEV_USER_ID and AUTH_DEV_BYPASS are set", async () => {
       const { guard } = harness();
-      const previous = process.env.NODE_ENV;
-      const previousDevUser = process.env.DEV_USER_ID;
-      process.env.DEV_USER_ID = "user-123";
-      process.env.NODE_ENV = "production";
+      env({ DEV_USER_ID: "user-123", AUTH_DEV_BYPASS: "true", NODE_ENV: "production" });
       try {
         await expect(guard.canActivate(mockContext({}))).rejects.toBeInstanceOf(UnauthorizedError);
       } finally {
-        if (previous === undefined) {
-          delete process.env.NODE_ENV;
-        } else {
-          process.env.NODE_ENV = previous;
-        }
-        if (previousDevUser === undefined) {
-          delete process.env.DEV_USER_ID;
-        } else {
-          process.env.DEV_USER_ID = previousDevUser;
-        }
+        env({});
+      }
+    });
+
+    it("stays disabled in development without the explicit AUTH_DEV_BYPASS flag", async () => {
+      const { guard } = harness();
+      env({ DEV_USER_ID: "user-123", AUTH_DEV_BYPASS: undefined, NODE_ENV: "development" });
+      try {
+        await expect(guard.canActivate(mockContext({}))).rejects.toBeInstanceOf(UnauthorizedError);
+      } finally {
+        env({});
+      }
+    });
+
+    it("stays disabled in production when NODE_ENV is production and AUTH_DEV_BYPASS is set", async () => {
+      const { guard } = harness();
+      env({ AUTH_DEV_BYPASS: "true", NODE_ENV: "production" });
+      try {
+        await expect(guard.canActivate(mockContext({}))).rejects.toBeInstanceOf(UnauthorizedError);
+      } finally {
+        env({});
       }
     });
   });

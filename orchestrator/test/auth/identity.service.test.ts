@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Logger } from "@nestjs/common";
 import { IdentityService } from "../../src/auth/identity.service";
 import { ClerkAuthService } from "../../src/auth/clerk-auth.service";
 import type { AuthConfig } from "../../src/auth/auth.config";
@@ -56,6 +57,19 @@ describe("IdentityService", () => {
     const second = await identity.getOrCreateUser(claims);
 
     expect(second.userId).toBe(first.userId);
+  });
+
+  it("includes the correlation id in the provisioning log", async () => {
+    const { identity } = serviceWith([]);
+    const debug = vi.spyOn(Logger.prototype, "debug").mockImplementation(() => undefined);
+
+    const user = await identity.getOrCreateUser(claims, "trace-abc-123");
+
+    expect(debug).toHaveBeenCalledWith(
+      { correlation_id: "trace-abc-123", userId: user.userId, clerkId: "clerk_user_1" },
+      "Provisioned Provisr user",
+    );
+    debug.mockRestore();
   });
 
   it("resolves workspace memberships with roles", async () => {

@@ -1,10 +1,37 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadAuthConfig } from "../../src/auth/auth.config";
 
-const saved = { ...process.env };
+const CLERK_ENV_KEYS = [
+  "CLERK_SECRET_KEY",
+  "CLERK_AUTHORIZED_PARTIES",
+  "CLERK_TOKEN_CACHE_TTL_MS",
+  "CLERK_MEMBERSHIP_CACHE_TTL_MS",
+] as const;
+
+const saved: Partial<Record<(typeof CLERK_ENV_KEYS)[number] | "NODE_ENV", string | undefined>> = {};
+
+beforeEach(() => {
+  saved.NODE_ENV = process.env.NODE_ENV;
+  process.env.NODE_ENV = "test";
+  for (const key of CLERK_ENV_KEYS) {
+    saved[key] = process.env[key];
+    delete process.env[key];
+  }
+});
 
 afterEach(() => {
-  process.env = { ...saved };
+  if (saved.NODE_ENV === undefined) {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = saved.NODE_ENV;
+  }
+  for (const key of CLERK_ENV_KEYS) {
+    if (saved[key] === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = saved[key];
+    }
+  }
 });
 
 describe("loadAuthConfig", () => {

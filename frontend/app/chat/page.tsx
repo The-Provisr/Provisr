@@ -14,7 +14,7 @@ import {
   VolumeIcon,
 } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
-import { MessageBubble } from "@/components/ui/message-bubble";
+import { ChatMessage } from "@/components/ui/chat-message";
 import { NavigationRail } from "@/components/ui/navigation-rail";
 
 const progressSteps = [
@@ -70,17 +70,45 @@ export default function ChatPage() {
 
         <div className="flex-1 overflow-y-auto px-4 py-8 sm:px-6 sm:py-10">
           <div className="mx-auto max-w-[850px] space-y-10">
-            <MessageBubble>
-              Deploy a production web app on AWS with ECS, RDS Postgres, ALB,
-              and CloudWatch.
-            </MessageBubble>
+            <ChatMessage
+              message={{
+                id: "msg-1",
+                runId: "run-demo-001",
+                role: "user",
+                content:
+                  "Deploy a production web app on AWS with ECS, RDS Postgres, ALB, and CloudWatch.",
+                status: "sent",
+                createdAt: "2026-08-08T09:41:00Z",
+                senderName: "Malsha De Alwis",
+              }}
+            />
 
             <div className="space-y-5">
-              <p className="max-w-[680px] text-sm leading-relaxed text-gray-600">
-                I&apos;ll check your workspace policy, draft a manifest,
-                generate a Terraform plan, and ask for approval before
-                execution.
-              </p>
+              <ChatMessage
+                message={{
+                  id: "msg-2",
+                  runId: "run-demo-001",
+                  role: "assistant",
+                  content:
+                    "I'll check your workspace policy, draft a **manifest**, generate a Terraform plan, and ask for approval before execution.",
+                  status: "complete",
+                  createdAt: "2026-08-08T09:41:02Z",
+                  toolSummary: {
+                    toolName: "policy.check",
+                    durationMs: 1240,
+                    result:
+                      "3/3 policies satisfied. Public ALB requires workspace approval.",
+                  },
+                  components: [
+                    {
+                      type: "cost_estimate",
+                      version: "1.0.0",
+                      requestId: "req-prod-web-042",
+                      data: { estimatedMonthlyUsd: 482 },
+                    },
+                  ],
+                }}
+              />
 
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
                 {progressSteps.map((step, index) => (

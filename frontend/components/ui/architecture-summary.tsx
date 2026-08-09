@@ -86,10 +86,11 @@ export function ArchitectureSummary({
   }
 
   const isEmpty =
-    payload.resources.length === 0 &&
-    payload.assumptions.length === 0 &&
-    payload.unknowns.length === 0 &&
-    payload.warnings.length === 0;
+    state === "empty" ||
+    (payload.resources.length === 0 &&
+      payload.assumptions.length === 0 &&
+      payload.unknowns.length === 0 &&
+      payload.warnings.length === 0);
 
   if (isEmpty) {
     return (

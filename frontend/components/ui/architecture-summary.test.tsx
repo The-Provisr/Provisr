@@ -119,6 +119,15 @@ describe("ArchitectureSummary", () => {
     expect(screen.getAllByText("None identified")).toHaveLength(1);
   });
 
+  it("renders the empty card when state=empty even with a populated payload", () => {
+    render(<ArchitectureSummary payload={payload} state="empty" />);
+
+    expect(screen.getByText("Architecture summary")).toBeInTheDocument();
+    expect(screen.getAllByText("None identified")).toHaveLength(1);
+    expect(screen.queryByText("3x Compute")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clarify" })).toBeNull();
+  });
+
   it("renders a loading skeleton for state=loading and for missing payload", () => {
     const { rerender } = render(<ArchitectureSummary state="loading" />);
     expect(screen.getByTestId("architecture-summary-skeleton")).toBeInTheDocument();

@@ -1,9 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const MOCK_TOKEN = "mock-token";
 
+beforeEach(() => {
+  vi.stubEnv("NEXT_PUBLIC_ORCHESTRATION_API_URL", "http://localhost:4000");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("submitClarification", () => {
@@ -49,5 +54,23 @@ describe("submitClarification", () => {
         MOCK_TOKEN,
       ),
     ).rejects.toThrow("submitClarification failed: 501 Not implemented");
+  });
+
+  it("throws a configuration error when NEXT_PUBLIC_ORCHESTRATION_API_URL is missing", async () => {
+    vi.stubEnv("NEXT_PUBLIC_ORCHESTRATION_API_URL", undefined);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+
+    const { submitClarification } = await import("@/lib/clarification/submit");
+
+    await expect(
+      submitClarification(
+        "run-123",
+        "q-1",
+        { answers: { region: "us-east-1" } },
+        MOCK_TOKEN,
+      ),
+    ).rejects.toThrow(
+      "NEXT_PUBLIC_ORCHESTRATION_API_URL must be configured for client execution",
+    );
   });
 });

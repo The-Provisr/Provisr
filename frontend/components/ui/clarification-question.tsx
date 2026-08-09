@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { SignedIn, SignedOut, useAuth } from "@clerk/nextjs";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ClarificationInputs } from "@/components/ui/clarification-inputs";
@@ -64,6 +64,7 @@ export function ClarificationQuestion({
   const [touched, setTouched] = useState(false);
   const [phase, setPhase] = useState<Phase>("default");
   const [errorMessage, setErrorMessage] = useState("");
+  const [lastAnswer, setLastAnswer] = useState<ClarificationAnswer | null>(null);
 
   const invalid = !isAnswerValid(value, payload);
   const disabled = phase === "submitting";
@@ -77,6 +78,7 @@ export function ClarificationQuestion({
       setTouched(true);
       return;
     }
+    setLastAnswer(finalValue);
     setPhase("submitting");
     try {
       await onSubmit({ answers: { [payload.fieldMapping]: finalValue } });
@@ -119,7 +121,7 @@ export function ClarificationQuestion({
         <Button
           className="mt-3"
           variant="secondary"
-          onClick={() => submit(value)}
+          onClick={() => submit(lastAnswer)}
         >
           Retry
         </Button>
@@ -203,5 +205,21 @@ export function AuthenticatedClarificationQuestion({
     }
     await submitClarification(runId, payload.questionId, answers, token);
   };
-  return <ClarificationQuestion payload={payload} onSubmit={onSubmit} />;
+  return (
+    <>
+      <SignedIn>
+        <ClarificationQuestion payload={payload} onSubmit={onSubmit} />
+      </SignedIn>
+      <SignedOut>
+        <div className="max-w-[480px] rounded-lg border border-gray-100 bg-white p-4">
+          <p className="text-sm font-medium text-white">
+            {payload.questionText}
+          </p>
+          <p className="mt-2 text-xs text-gray-500">
+            Sign in to answer this question.
+          </p>
+        </div>
+      </SignedOut>
+    </>
+  );
 }

@@ -141,6 +141,33 @@ describe("ClarificationQuestion", () => {
     );
   });
 
+  it("confirmation: retry resubmits the original answer after a failed submit", async () => {
+    const onSubmit = vi.fn<ClarificationSubmitter>();
+    onSubmit
+      .mockRejectedValueOnce(new Error("submitClarification failed: 501"))
+      .mockResolvedValueOnce();
+
+    render(
+      <ClarificationQuestion
+        payload={makePayload({ inputType: "confirmation", options: undefined })}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(
+      await screen.findByText("submitClarification failed: 501"),
+    ).toBeInTheDocument();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(
+      await screen.findByText("Answer saved — resuming run…"),
+    ).toBeInTheDocument();
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenLastCalledWith({ answers: { region: true } });
+  });
+
   it("submitting: shows spinner and disables inputs while pending", () => {
     renderQuestion(makePayload({ inputType: "text", options: undefined }));
     const submit = screen.getByRole("button", { name: "Submit" });

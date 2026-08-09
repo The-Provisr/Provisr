@@ -79,6 +79,7 @@ function SelectInput({
   payload,
   value,
   onChange,
+  onBlur,
   disabled,
   invalid,
   inputId,
@@ -91,6 +92,7 @@ function SelectInput({
         id={inputId}
         value={selected}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
         disabled={disabled}
         aria-label={payload.questionText}
         aria-invalid={invalid || undefined}
@@ -115,6 +117,7 @@ function MultiSelectInput({
   payload,
   value,
   onChange,
+  onBlur,
   disabled,
   invalid,
   inputId,
@@ -137,6 +140,7 @@ function MultiSelectInput({
               type="button"
               aria-pressed={active}
               disabled={disabled}
+              onBlur={onBlur}
               onClick={() =>
                 onChange(
                   active
@@ -160,6 +164,7 @@ function BooleanInput({
   payload,
   value,
   onChange,
+  onBlur,
   disabled,
   invalid,
   inputId,
@@ -181,6 +186,7 @@ function BooleanInput({
               type="button"
               aria-pressed={active}
               disabled={disabled}
+              onBlur={onBlur}
               onClick={() => onChange(choice)}
               className={`${chipBase} ${active ? chipActive : chipIdle}`}
             >

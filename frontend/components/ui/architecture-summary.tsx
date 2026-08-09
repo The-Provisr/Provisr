@@ -94,7 +94,7 @@ export function ArchitectureSummary({
   if (isEmpty) {
     return (
       <div className="max-w-[480px] rounded-lg border border-gray-100 bg-white p-4">
-        <p className="text-sm font-medium text-white">Architecture summary</p>
+        <p className="text-sm font-medium text-gray-900">Architecture summary</p>
         <p className="mt-2 text-xs text-gray-500">None identified</p>
       </div>
     );
@@ -122,7 +122,7 @@ export function ArchitectureSummary({
           <ul className="mt-2 space-y-2">
             {payload.resources.map((resource) => (
               <li
-                className="flex items-center gap-2 text-sm text-white"
+                className="flex items-center gap-2 text-sm text-gray-900"
                 key={`${resource.type}-${resource.count}`}
               >
                 <ResourceIcon type={resource.type} />
@@ -156,7 +156,7 @@ export function ArchitectureSummary({
           <ul className="mt-2 space-y-2">
             {payload.unknowns.map((unknown) => (
               <li
-                className="flex items-center justify-between gap-3 text-sm text-white"
+                className="flex items-center justify-between gap-3 text-sm text-gray-900"
                 key={unknown}
               >
                 <span className="min-w-0 truncate">{unknown}</span>

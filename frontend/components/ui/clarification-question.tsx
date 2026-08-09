@@ -212,7 +212,7 @@ export function AuthenticatedClarificationQuestion({
       </SignedIn>
       <SignedOut>
         <div className="max-w-[480px] rounded-lg border border-gray-100 bg-white p-4">
-          <p className="text-sm font-medium text-white">
+          <p className="text-sm font-medium text-gray-900">
             {payload.questionText}
           </p>
           <p className="mt-2 text-xs text-gray-500">

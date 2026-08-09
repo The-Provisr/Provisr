@@ -29,11 +29,17 @@ const markdownComponents = {
   ),
 };
 
-function Attachments({ items }: { items: ChatAttachment[] }) {
+function Attachments({
+  messageId,
+  items,
+}: {
+  messageId: string;
+  items: ChatAttachment[];
+}) {
   return (
     <ul className="mt-2 space-y-1 border-t border-blue-200 pt-2 text-xs text-gray-400">
-      {items.map((attachment) => (
-        <li className="truncate" key={attachment.name}>
+      {items.map((attachment, index) => (
+        <li className="truncate" key={`${messageId}-attachment-${index}`}>
           {attachment.name}
           {attachment.sizeBytes !== undefined
             ? ` · ${formatBytes(attachment.sizeBytes)}`
@@ -90,7 +96,7 @@ function UserMessage({
         <div className="rounded-3xl border border-blue-200 bg-blue-50 px-6 py-3 text-sm leading-relaxed text-white">
           {message.content}
           {message.attachments?.length ? (
-            <Attachments items={message.attachments} />
+            <Attachments messageId={message.id} items={message.attachments} />
           ) : null}
         </div>
         <MetaTime createdAt={message.createdAt} />
@@ -135,9 +141,9 @@ function AssistantMessage({
         {message.toolSummary ? (
           <ToolSummary summary={message.toolSummary} />
         ) : null}
-        {message.components?.map((payload) => (
+        {message.components?.map((payload, index) => (
           <ComponentCard
-            key={`${payload.type}-${payload.version}`}
+            key={`${message.id}-${payload.type}-${payload.version}-${index}`}
             payload={payload}
             renderComponent={renderComponent}
           />

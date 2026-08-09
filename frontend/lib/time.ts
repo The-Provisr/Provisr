@@ -4,7 +4,7 @@ export function formatRelativeTime(iso: string, now: Date = new Date()): string 
     return "";
   }
   const diffMs = now.getTime() - then.getTime();
-  if (diffMs < 30_000) {
+  if (diffMs < 60_000) {
     return "just now";
   }
   const minutes = Math.floor(diffMs / 60_000);

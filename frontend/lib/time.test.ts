@@ -4,9 +4,15 @@ import { formatRelativeTime } from "@/lib/time";
 const NOW = new Date(2026, 7, 8, 12, 0, 0);
 
 describe("formatRelativeTime", () => {
-  it("returns just now within 30 seconds", () => {
+  it("returns just now within a minute", () => {
     expect(
       formatRelativeTime(new Date(2026, 7, 8, 11, 59, 50).toISOString(), NOW),
+    ).toBe("just now");
+  });
+
+  it("does not show zero minutes at the 30 second boundary", () => {
+    expect(
+      formatRelativeTime(new Date(2026, 7, 8, 11, 59, 30).toISOString(), NOW),
     ).toBe("just now");
   });
 

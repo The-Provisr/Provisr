@@ -37,6 +37,9 @@ The interface language is:
 | Hairline soft | `rgba(255,255,255,.07)` | Dividers |
 | Accent blue | `#0099ff` | Focus rings, links, selection only |
 | Primary CTA | `#ffffff` on `#050505` | Main action pills |
+| Warning | `#f59e0b` at 12% bg / 35% border, `#fbbf24` text | Warning cards, non-blocking caveats (FE-C04) |
+| Danger | `#ef4444` at 12% bg / 35% border, `#fca5a5` text | Destructive or blocked states |
+| Success | `#22c94f` at 12% bg / 32% border, `#86efac` text | Approval, healthy status |
 
 ## Typography
 

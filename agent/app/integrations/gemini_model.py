@@ -16,7 +16,7 @@ from app.domain.errors import (
 )
 from app.domain.models import AgentSession, ModelTurnResult
 from app.integrations.anthropic_model import _strip_code_fence
-from app.prompts.models import PromptBundle
+from app.profiles.models import ProfileBundle
 
 
 class GeminiModel:
@@ -32,11 +32,9 @@ class GeminiModel:
         *,
         api_key: str,
         model: str,
-        max_tokens: int,
         client: genai.Client | None = None,
     ) -> None:
         self._model = model
-        self._max_tokens = max_tokens
         if client is not None:
             self._client: genai.Client | None = client
         elif api_key:
@@ -47,7 +45,7 @@ class GeminiModel:
     async def complete_turn(
         self,
         session: AgentSession,
-        prompt: PromptBundle,
+        profile: ProfileBundle,
     ) -> ModelTurnResult:
         if not self._model:
             raise ModelNotConfiguredError("Gemini model ID is not configured")
@@ -66,10 +64,10 @@ class GeminiModel:
                 model=self._model,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=prompt.content,
-                    max_output_tokens=self._max_tokens,
+                    system_instruction=profile.system_prompt,
+                    max_output_tokens=profile.llm_config.max_tokens,
                     response_mime_type="application/json",
-                    temperature=0.0,
+                    temperature=profile.llm_config.temperature,
                 ),
             )
         except errors.APIError as error:

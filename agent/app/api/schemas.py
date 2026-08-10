@@ -10,6 +10,7 @@ class ApiModel(BaseModel):
 class CreateSessionRequest(ApiModel):
     organization_id: str = Field(min_length=1, max_length=128)
     request_id: str = Field(min_length=1, max_length=128)
+    profile_id: str = Field(default="provisioning", min_length=1, max_length=64)
     prompt_version: str | None = Field(default=None, min_length=1, max_length=64)
 
 

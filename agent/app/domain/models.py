@@ -30,10 +30,13 @@ class AgentSession(DomainModel):
     session_id: str
     organization_id: str
     request_id: str
+    profile_id: str
     prompt_id: UUID
     prompt_profile: str
     prompt_version: str
     prompt_hash: str
+    temperature: float
+    max_tokens: int
     created_at: datetime
     updated_at: datetime
     messages: list[ConversationMessage] = Field(default_factory=list)

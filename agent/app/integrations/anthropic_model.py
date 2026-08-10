@@ -16,14 +16,14 @@ from app.domain.errors import (
     ModelNotConfiguredError,
 )
 from app.domain.models import AgentSession, ModelTurnResult
-from app.prompts.models import PromptBundle
+from app.profiles.models import ProfileBundle
 
 
 class LanguageModel(Protocol):
     async def complete_turn(
         self,
         session: AgentSession,
-        prompt: PromptBundle,
+        profile: ProfileBundle,
     ) -> ModelTurnResult: ...
 
 
@@ -49,13 +49,11 @@ class ClaudeModel:
         *,
         api_key: str,
         model: str,
-        max_tokens: int,
         base_url: str = "",
         workspace_id: str = "",
         client: AnthropicClient | None = None,
     ) -> None:
         self._model = model
-        self._max_tokens = max_tokens
         if client is not None:
             self._client: AnthropicClient = client
         elif api_key:
@@ -77,7 +75,7 @@ class ClaudeModel:
     async def complete_turn(
         self,
         session: AgentSession,
-        prompt: PromptBundle,
+        profile: ProfileBundle,
     ) -> ModelTurnResult:
         if not self._model:
             raise ModelNotConfiguredError("Anthropic model ID is not configured")
@@ -89,8 +87,9 @@ class ClaudeModel:
             response = await asyncio.to_thread(
                 self._client.messages.create,
                 model=self._model,
-                max_tokens=self._max_tokens,
-                system=prompt.content,
+                max_tokens=profile.llm_config.max_tokens,
+                temperature=profile.llm_config.temperature,
+                system=profile.system_prompt,
                 messages=messages,
             )
         except ModelNotConfiguredError:

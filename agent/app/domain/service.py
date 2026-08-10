@@ -10,10 +10,14 @@ from app.domain.models import (
 )
 from app.integrations.anthropic_model import LanguageModel
 from app.integrations.state import StateStore
-from app.prompts.errors import ProfileNotFound, PromptIntegrityError, VersionNotFound
-from app.prompts.registry import PromptRegistry
-
-_PROVISIONING_PROFILE = "provisioning_agent"
+from app.profiles.errors import ProfileNotAvailable
+from app.profiles.errors import ProfileNotFound as AgentProfileNotFound
+from app.profiles.registry import ProfileSelector
+from app.prompts.errors import ProfileNotFound as PromptProfileNotFound
+from app.prompts.errors import (
+    PromptIntegrityError,
+    VersionNotFound,
+)
 
 
 class AgentService:
@@ -22,29 +26,34 @@ class AgentService:
         *,
         state: StateStore,
         model: LanguageModel,
-        prompt_registry: PromptRegistry,
+        profile_selector: ProfileSelector,
     ) -> None:
         self._state = state
         self._model = model
-        self._prompt_registry = prompt_registry
+        self._profile_selector = profile_selector
 
     async def create_session(
         self,
         *,
         organization_id: str,
         request_id: str,
+        profile_id: str = "provisioning",
         prompt_version: str | None = None,
     ) -> AgentSession:
-        prompt = self._prompt_registry.get_prompt(_PROVISIONING_PROFILE, prompt_version)
+        profile = self._profile_selector.select_profile(profile_id, prompt_version)
+        prompt = profile.prompt
         now = datetime.now(UTC)
         session = AgentSession(
             session_id=str(uuid4()),
             organization_id=organization_id,
             request_id=request_id,
+            profile_id=profile.profile_id,
             prompt_id=prompt.prompt_id,
             prompt_profile=prompt.profile,
             prompt_version=prompt.version,
             prompt_hash=prompt.content_hash,
+            temperature=profile.llm_config.temperature,
+            max_tokens=profile.llm_config.max_tokens,
             created_at=now,
             updated_at=now,
         )
@@ -54,14 +63,25 @@ class AgentService:
     async def run_turn(self, *, session_id: str, message: str) -> ModelTurnResult:
         session = await self._state.get_session(session_id)
         try:
-            prompt = self._prompt_registry.get_prompt(
-                session.prompt_profile,
+            profile = self._profile_selector.select_profile(
+                session.profile_id,
                 session.prompt_version,
             )
-        except (ProfileNotFound, VersionNotFound) as error:
-            raise PromptIntegrityError("Pinned prompt is no longer available") from error
+        except (
+            AgentProfileNotFound,
+            ProfileNotAvailable,
+            PromptProfileNotFound,
+            VersionNotFound,
+        ) as error:
+            raise PromptIntegrityError("Pinned agent profile is no longer available") from error
+        prompt = profile.prompt
         if prompt.prompt_id != session.prompt_id or prompt.content_hash != session.prompt_hash:
             raise PromptIntegrityError("Pinned prompt metadata failed integrity validation")
+        if (
+            profile.llm_config.temperature != session.temperature
+            or profile.llm_config.max_tokens != session.max_tokens
+        ):
+            raise PromptIntegrityError("Pinned agent profile configuration changed")
 
         now = datetime.now(UTC)
         session.messages.append(ConversationMessage(role="user", content=message, created_at=now))
@@ -72,14 +92,17 @@ class AgentService:
             "turn.started",
             {
                 "messageAccepted": True,
+                "profileId": profile.profile_id,
                 "promptId": str(prompt.prompt_id),
                 "promptProfile": prompt.profile,
                 "promptVersion": prompt.version,
                 "promptHash": prompt.content_hash,
+                "temperature": profile.llm_config.temperature,
+                "maxTokens": profile.llm_config.max_tokens,
             },
         )
 
-        result = await self._model.complete_turn(session, prompt)
+        result = await self._model.complete_turn(session, profile)
         completed_at = datetime.now(UTC)
         session.messages.append(
             ConversationMessage(role="assistant", content=result.message, created_at=completed_at)

@@ -99,14 +99,6 @@ export default function ChatPage() {
                     result:
                       "3/3 policies satisfied. Public ALB requires workspace approval.",
                   },
-                  components: [
-                    {
-                      type: "cost_estimate",
-                      version: "1.0.0",
-                      requestId: "req-prod-web-042",
-                      data: { estimatedMonthlyUsd: 482 },
-                    },
-                  ],
                 }}
               />
 

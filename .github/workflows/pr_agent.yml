@@ -26,8 +26,11 @@ jobs:
           config.model: "gemini/gemini-2.5-pro"
           config.fallback_models: '["gemini/gemini-2.5-flash"]'
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # auto-run full review+describe on PR events; /improve on demand
+          # auto-run full review on PR events; /describe and /improve on demand
+          # (fewer automatic calls = stays under free-tier 5 req/min quota)
           github_action_config.auto_review: "true"
-          github_action_config.auto_describe: "true"
+          github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "false"
           github_action_config.pr_actions: '["opened", "reopened", "synchronize", "ready_for_review"]'
+          # retry transient 429/quota errors instead of dying silently
+          config.retry_ai_call: "true"

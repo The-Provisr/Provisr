@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-import json
 import os
 import ssl
 
 import certifi
 from google import genai
 from google.genai import errors, types
-from pydantic import ValidationError
 
 from app.domain.errors import (
     DependencyUnavailableError,
     InvalidModelResponseError,
     ModelNotConfiguredError,
 )
-from app.domain.models import AgentSession, ModelTurnResult
+from app.domain.models import AgentSession
 from app.integrations.anthropic_model import _strip_code_fence
+from app.outputs.runtime import render_runtime_system_prompt
 from app.profiles.models import ProfileBundle
 
 
@@ -46,7 +45,7 @@ class GeminiModel:
         self,
         session: AgentSession,
         profile: ProfileBundle,
-    ) -> ModelTurnResult:
+    ) -> str:
         if not self._model:
             raise ModelNotConfiguredError("Gemini model ID is not configured")
         if self._client is None:
@@ -64,7 +63,7 @@ class GeminiModel:
                 model=self._model,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=profile.system_prompt,
+                    system_instruction=render_runtime_system_prompt(profile, session.request_id),
                     max_output_tokens=profile.llm_config.max_tokens,
                     response_mime_type="application/json",
                     temperature=profile.llm_config.temperature,
@@ -77,19 +76,7 @@ class GeminiModel:
         if not text:
             raise InvalidModelResponseError("Gemini returned an empty response")
 
-        try:
-            payload = json.loads(_strip_code_fence(text))
-            result = ModelTurnResult.model_validate(payload)
-        except (json.JSONDecodeError, ValidationError) as error:
-            raise InvalidModelResponseError("Gemini returned an invalid agent result") from error
-
-        if result.outcome == "manifest_candidate" and result.manifest is None:
-            raise InvalidModelResponseError("Manifest candidate did not contain a manifest")
-        if result.outcome == "needs_clarification" and result.manifest is not None:
-            raise InvalidModelResponseError(
-                "Clarification result unexpectedly contained a manifest"
-            )
-        return result
+        return _strip_code_fence(text)
 
 
 def _build_http_options() -> types.HttpOptions | None:

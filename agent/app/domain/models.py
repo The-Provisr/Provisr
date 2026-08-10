@@ -4,8 +4,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.manifest import ResourceManifest
-
 type AgentEventType = Literal[
     "turn.started",
     "message.completed",
@@ -29,7 +27,8 @@ class ConversationMessage(DomainModel):
 class AgentSession(DomainModel):
     session_id: str
     organization_id: str
-    request_id: str
+    request_id: UUID
+    status: Literal["ACTIVE", "FAILED"] = "ACTIVE"
     profile_id: str
     prompt_id: UUID
     prompt_profile: str
@@ -46,15 +45,9 @@ class AgentEvent(DomainModel):
     schema_version: Literal["1.0"] = "1.0"
     event_id: str
     session_id: str
-    request_id: str
+    request_id: UUID
     organization_id: str
     sequence: int = Field(ge=1)
     occurred_at: datetime
     type: AgentEventType
     data: dict[str, object] = Field(default_factory=dict)
-
-
-class ModelTurnResult(DomainModel):
-    outcome: Literal["needs_clarification", "manifest_candidate"]
-    message: str = Field(min_length=1, max_length=10000)
-    manifest: ResourceManifest | None = None

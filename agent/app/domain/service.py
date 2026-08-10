@@ -1,15 +1,25 @@
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+from app.domain.errors import InvalidModelResponseError, SessionFailedError
 from app.domain.models import (
     AgentEvent,
     AgentEventType,
     AgentSession,
     ConversationMessage,
-    ModelTurnResult,
 )
 from app.integrations.anthropic_model import LanguageModel
 from app.integrations.state import StateStore
+from app.outputs.models import (
+    AgentOutputEnvelope,
+    AssistantMessageEnvelope,
+    ClarificationQuestionEnvelope,
+    ComponentPayloadEnvelope,
+    ErrorEnvelope,
+    ManifestDraftEnvelope,
+    ToolSummaryEnvelope,
+)
+from app.outputs.validation import validate_envelope
 from app.profiles.errors import ProfileNotAvailable
 from app.profiles.errors import ProfileNotFound as AgentProfileNotFound
 from app.profiles.registry import ProfileSelector
@@ -36,7 +46,7 @@ class AgentService:
         self,
         *,
         organization_id: str,
-        request_id: str,
+        request_id: UUID,
         profile_id: str = "provisioning",
         prompt_version: str | None = None,
     ) -> AgentSession:
@@ -60,8 +70,10 @@ class AgentService:
         await self._state.save_session(session)
         return session
 
-    async def run_turn(self, *, session_id: str, message: str) -> ModelTurnResult:
+    async def run_turn(self, *, session_id: str, message: str) -> AgentOutputEnvelope:
         session = await self._state.get_session(session_id)
+        if session.status == "FAILED":
+            raise SessionFailedError("Failed agent sessions cannot process additional turns")
         try:
             profile = self._profile_selector.select_profile(
                 session.profile_id,
@@ -102,22 +114,60 @@ class AgentService:
             },
         )
 
-        result = await self._model.complete_turn(session, profile)
+        try:
+            raw_output = await self._model.complete_turn(session, profile)
+            validation = validate_envelope(raw_output)
+            if not validation.valid or validation.parsed is None:
+                details = validation.errors or ("unknown envelope validation error",)
+                raise InvalidModelResponseError(
+                    f"Agent output failed envelope validation: {'; '.join(details)}"
+                )
+            result = validation.parsed
+            if result.request_id != session.request_id:
+                raise InvalidModelResponseError(
+                    "Agent output request_id did not match the active request"
+                )
+        except InvalidModelResponseError as error:
+            await self._fail_turn(session, str(error))
+            raise
+
         completed_at = datetime.now(UTC)
         session.messages.append(
-            ConversationMessage(role="assistant", content=result.message, created_at=completed_at)
+            ConversationMessage(
+                role="assistant",
+                content=_message_for(result),
+                created_at=completed_at,
+            )
         )
+        if isinstance(result, ErrorEnvelope):
+            session.status = "FAILED"
         session.updated_at = completed_at
         await self._state.save_session(session)
         await self._append_event(
             session,
-            "clarification.required"
-            if result.outcome == "needs_clarification"
-            else "manifest.proposed",
-            result.model_dump(mode="json", exclude_none=True),
+            _event_type_for(result),
+            result.model_dump(mode="json"),
         )
-        await self._append_event(session, "stream.completed", {"outcome": result.outcome})
+        await self._append_event(
+            session,
+            "stream.completed",
+            {"outputType": result.type, "sessionStatus": session.status},
+        )
         return result
+
+    async def _fail_turn(self, session: AgentSession, validation_error: str) -> None:
+        session.status = "FAILED"
+        session.updated_at = datetime.now(UTC)
+        await self._state.save_session(session)
+        await self._append_event(
+            session,
+            "turn.failed",
+            {
+                "code": "INVALID_AGENT_OUTPUT",
+                "message": "Agent output failed structured envelope validation",
+                "validationError": validation_error,
+            },
+        )
 
     async def _append_event(
         self,
@@ -139,3 +189,29 @@ class AgentService:
                 data=data,
             )
         )
+
+
+def _message_for(envelope: AgentOutputEnvelope) -> str:
+    if isinstance(envelope, AssistantMessageEnvelope):
+        return envelope.data.message
+    if isinstance(envelope, ClarificationQuestionEnvelope):
+        return envelope.data.question
+    if isinstance(envelope, ManifestDraftEnvelope):
+        return envelope.data.message
+    if isinstance(envelope, ToolSummaryEnvelope):
+        return envelope.data.summary
+    if isinstance(envelope, ErrorEnvelope):
+        return envelope.data.message
+    if isinstance(envelope, ComponentPayloadEnvelope):
+        return f"Generated component {envelope.data.component_id}."
+    raise TypeError("Unsupported agent output envelope")
+
+
+def _event_type_for(envelope: AgentOutputEnvelope) -> AgentEventType:
+    if isinstance(envelope, ClarificationQuestionEnvelope):
+        return "clarification.required"
+    if isinstance(envelope, ManifestDraftEnvelope):
+        return "manifest.proposed"
+    if isinstance(envelope, ErrorEnvelope):
+        return "turn.failed"
+    return "message.completed"

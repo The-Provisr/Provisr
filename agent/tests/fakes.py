@@ -1,10 +1,10 @@
-from app.domain.models import AgentSession, ModelTurnResult
+from app.domain.models import AgentSession
 from app.profiles.models import ProfileBundle
 
 
 class FakeLanguageModel:
-    def __init__(self, result: ModelTurnResult) -> None:
-        self.result = result
+    def __init__(self, raw_output: str) -> None:
+        self.raw_output = raw_output
         self.sessions: list[AgentSession] = []
         self.profiles: list[ProfileBundle] = []
 
@@ -12,7 +12,7 @@ class FakeLanguageModel:
         self,
         session: AgentSession,
         profile: ProfileBundle,
-    ) -> ModelTurnResult:
+    ) -> str:
         self.sessions.append(session.model_copy(deep=True))
         self.profiles.append(profile)
-        return self.result
+        return self.raw_output

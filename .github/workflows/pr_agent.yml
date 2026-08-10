@@ -37,3 +37,5 @@ jobs:
           # one LLM call at a time avoids 429 bursts; timeout fits slow quota windows
           pr_code_suggestions.parallel_calls: "false"
           config.ai_timeout: "300"
+          # flash context is 1M tokens; 32k default prunes big PRs to empty
+          config.max_model_tokens: "131072"

@@ -211,6 +211,8 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	slug := generateSlug(req.Name)
 
+	key := r.Header.Get("Idempotency-Key")
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
@@ -247,6 +249,11 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := claimIdempotencyKey(tx, key, ws.ID, "workspace_create"); err != nil {
+		writeIdempotencyError(w, r, err, s)
+		return
+	}
+
 	_, err = tx.Exec(
 		`INSERT INTO provisr_identity.memberships (user_id, workspace_id, role, invited_by)
 		 VALUES ($1, $2, 'admin', $1)`,
@@ -254,6 +261,16 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		s.reqLog(r).Error().Err(err).Msg("failed to create owner membership")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
+		return
+	}
+
+	if err := appendAuditEvent(r, tx, ws.ID, "workspace_created", req.CreatorID, "workspace", ws.ID, map[string]any{
+		"name":            ws.Name,
+		"environment":     ws.Environment,
+		"idempotency_key": key,
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
 		return
 	}
@@ -402,6 +419,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	key := r.Header.Get("Idempotency-Key")
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req updateRequest
@@ -410,11 +428,19 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update workspace")
+		return
+	}
+	defer tx.Rollback()
+
 	var ws workspace
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		`SELECT id, name, slug, environment, description, created_at, updated_at
 		 FROM provisr_identity.workspaces
-		 WHERE id = $1 AND deleted_at IS NULL`,
+		 WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
 		id,
 	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -427,6 +453,11 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := claimIdempotencyKey(tx, key, id, "workspace_update"); err != nil {
+		writeIdempotencyError(w, r, err, s)
+		return
+	}
+
 	if req.Name != nil {
 		if len(*req.Name) < 3 || len(*req.Name) > 64 {
 			writeError(w, http.StatusBadRequest, "validation_error", "name must be between 3 and 64 characters")
@@ -436,7 +467,7 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		newSlug := generateSlug(*req.Name)
 		if newSlug != ws.Slug {
 			var exists bool
-			err := s.db.QueryRow(
+			err := tx.QueryRow(
 				"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE slug = $1 AND id != $2 AND deleted_at IS NULL)",
 				newSlug, id,
 			).Scan(&exists)
@@ -463,7 +494,7 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		ws.Description = req.Description
 	}
 
-	err = s.db.QueryRow(
+	err = tx.QueryRow(
 		`UPDATE provisr_identity.workspaces
 		 SET name = $1, slug = $2, environment = $3, description = $4, updated_at = now()
 		 WHERE id = $5 AND deleted_at IS NULL
@@ -476,15 +507,38 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := appendAuditEvent(r, tx, id, "workspace_updated", "", "workspace", id, map[string]any{
+		"idempotency_key": key,
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update workspace")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update workspace")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, ws)
 }
 
 func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	key := r.Header.Get("Idempotency-Key")
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to delete workspace")
+		return
+	}
+	defer tx.Rollback()
 
 	var exists bool
-	err := s.db.QueryRow(
-		`SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL)`,
+	err = tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE)`,
 		id,
 	).Scan(&exists)
 	if err != nil {
@@ -497,7 +551,12 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.db.QueryRow(
+	if err := claimIdempotencyKey(tx, key, id, "workspace_delete"); err != nil {
+		writeIdempotencyError(w, r, err, s)
+		return
+	}
+
+	err = tx.QueryRow(
 		`SELECT EXISTS(
 			SELECT 1 FROM provisr_state.provisioning_runs
 			WHERE workspace_id = $1 AND state NOT IN ('completed', 'failed', 'cancelled')
@@ -515,12 +574,26 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = s.db.Exec(
+	_, err = tx.Exec(
 		`UPDATE provisr_identity.workspaces SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`,
 		id,
 	)
 	if err != nil {
 		s.reqLog(r).Error().Err(err).Str("workspace_id", id).Msg("failed to soft-delete workspace")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to delete workspace")
+		return
+	}
+
+	if err := appendAuditEvent(r, tx, id, "workspace_deleted", "", "workspace", id, map[string]any{
+		"idempotency_key": key,
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to delete workspace")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to delete workspace")
 		return
 	}
@@ -1054,8 +1127,37 @@ func (s *server) handleGetInvitation(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleRevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspace_id")
 	invitationID := r.PathValue("invitation_id")
+	key := r.Header.Get("Idempotency-Key")
 
-	result, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to revoke invitation")
+		return
+	}
+	defer tx.Rollback()
+
+	var wsExists bool
+	err = tx.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL)",
+		workspaceID,
+	).Scan(&wsExists)
+	if err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to check workspace existence")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to revoke invitation")
+		return
+	}
+	if !wsExists {
+		writeError(w, http.StatusNotFound, "not_found", "workspace not found")
+		return
+	}
+
+	if err := claimIdempotencyKey(tx, key, workspaceID, "invitation_revoke"); err != nil {
+		writeIdempotencyError(w, r, err, s)
+		return
+	}
+
+	result, err := tx.Exec(
 		`UPDATE provisr_identity.invitations SET revoked_at = now()
 		 WHERE id = $1 AND workspace_id = $2 AND revoked_at IS NULL`,
 		invitationID, workspaceID,
@@ -1068,6 +1170,20 @@ func (s *server) handleRevokeInvitation(w http.ResponseWriter, r *http.Request) 
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		writeError(w, http.StatusNotFound, "not_found", "invitation not found or already revoked")
+		return
+	}
+
+	if err := appendAuditEvent(r, tx, workspaceID, "invitation_revoked", "", "invitation", invitationID, map[string]any{
+		"idempotency_key": key,
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to revoke invitation")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to revoke invitation")
 		return
 	}
 

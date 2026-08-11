@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -147,7 +147,9 @@ func main() {
 	}
 
 	logger.Info().Str("port", port).Msg("workspace-service starting")
-	log.Fatal(srv.ListenAndServe())
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Fatal().Err(err).Msg("workspace-service stopped unexpectedly")
+	}
 }
 
 type server struct {

@@ -143,10 +143,20 @@ class AgentService:
             session.status = "FAILED"
         session.updated_at = completed_at
         await self._state.save_session(session)
+        event_data = (
+            {
+                "code": result.data.code,
+                "message": result.data.message,
+                "validationError": None,
+                "retryable": result.data.retryable,
+            }
+            if isinstance(result, ErrorEnvelope)
+            else result.model_dump(mode="json")
+        )
         await self._append_event(
             session,
             _event_type_for(result),
-            result.model_dump(mode="json"),
+            event_data,
         )
         await self._append_event(
             session,

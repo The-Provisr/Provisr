@@ -46,14 +46,14 @@ func claimIdempotencyKey(tx *sql.Tx, key, workspaceID, mutation string) error {
 	return nil
 }
 
-func writeIdempotencyError(w http.ResponseWriter, err error, s *server) {
+func writeIdempotencyError(w http.ResponseWriter, r *http.Request, err error, s *server) {
 	switch {
 	case errors.Is(err, errIdempotencyKeyMissing):
 		writeError(w, http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required for mutations")
 	case errors.Is(err, errIdempotencyKeyUsed):
 		writeError(w, http.StatusConflict, "duplicate_idempotency_key", "Idempotency-Key was already used for a mutation")
 	default:
-		s.log.Error().Err(err).Msg("failed to claim idempotency key")
+		s.reqLog(r).Error().Err(err).Msg("failed to claim idempotency key")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to process mutation")
 	}
 }

@@ -140,7 +140,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      recoveryMiddleware(logger, mux),
+		Handler:      recoveryMiddleware(logger, requestLoggingMiddleware(logger, mux)),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,
@@ -153,6 +153,10 @@ func main() {
 type server struct {
 	db  *sql.DB
 	log zerolog.Logger
+}
+
+func (s *server) reqLog(r *http.Request) *zerolog.Logger {
+	return zerolog.Ctx(r.Context())
 }
 
 func (s *server) routes() *http.ServeMux {
@@ -207,7 +211,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to begin transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
 		return
 	}
@@ -219,7 +223,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		slug,
 	).Scan(&exists)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check slug uniqueness")
+		s.reqLog(r).Error().Err(err).Msg("failed to check slug uniqueness")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
 		return
 	}
@@ -236,7 +240,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		req.Name, slug, req.Environment, req.Description,
 	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to insert workspace")
+		s.reqLog(r).Error().Err(err).Msg("failed to insert workspace")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
 		return
 	}
@@ -247,13 +251,13 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		req.CreatorID, ws.ID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to create owner membership")
+		s.reqLog(r).Error().Err(err).Msg("failed to create owner membership")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.log.Error().Err(err).Msg("failed to commit transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
 		return
 	}
@@ -277,7 +281,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		userID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to list workspaces")
+		s.reqLog(r).Error().Err(err).Msg("failed to list workspaces")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list workspaces")
 		return
 	}
@@ -296,14 +300,14 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 			&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description,
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.Role, &ws.JoinedAt,
 		); err != nil {
-			s.log.Error().Err(err).Msg("failed to scan workspace row")
+			s.reqLog(r).Error().Err(err).Msg("failed to scan workspace row")
 			writeError(w, http.StatusInternalServerError, "internal_error", "failed to list workspaces")
 			return
 		}
 		workspaces = append(workspaces, ws)
 	}
 	if err := rows.Err(); err != nil {
-		s.log.Error().Err(err).Msg("failed to iterate workspace rows")
+		s.reqLog(r).Error().Err(err).Msg("failed to iterate workspace rows")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list workspaces")
 		return
 	}
@@ -331,7 +335,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.log.Error().Err(err).Str("workspace_id", id).Msg("failed to get workspace")
+		s.reqLog(r).Error().Err(err).Str("workspace_id", id).Msg("failed to get workspace")
 		return
 	}
 
@@ -346,7 +350,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			s.log.Error().Err(err).Msg("failed to check membership")
+			s.reqLog(r).Error().Err(err).Msg("failed to check membership")
 			writeError(w, http.StatusInternalServerError, "internal_error", "failed to get workspace")
 			return
 		}
@@ -361,7 +365,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		id,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to query members")
+		s.reqLog(r).Error().Err(err).Msg("failed to query members")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to get workspace")
 		return
 	}
@@ -371,14 +375,14 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 	for mrows.Next() {
 		var m member
 		if err := mrows.Scan(&m.ID, &m.Name, &m.Email, &m.Role, &m.JoinedAt); err != nil {
-			s.log.Error().Err(err).Msg("failed to scan member row")
+			s.reqLog(r).Error().Err(err).Msg("failed to scan member row")
 			writeError(w, http.StatusInternalServerError, "internal_error", "failed to get workspace")
 			return
 		}
 		members = append(members, m)
 	}
 	if err := mrows.Err(); err != nil {
-		s.log.Error().Err(err).Msg("failed to iterate member rows")
+		s.reqLog(r).Error().Err(err).Msg("failed to iterate member rows")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to get workspace")
 		return
 	}
@@ -416,7 +420,7 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.log.Error().Err(err).Str("workspace_id", id).Msg("failed to get workspace for update")
+		s.reqLog(r).Error().Err(err).Str("workspace_id", id).Msg("failed to get workspace for update")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update workspace")
 		return
 	}
@@ -435,7 +439,7 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 				newSlug, id,
 			).Scan(&exists)
 			if err != nil {
-				s.log.Error().Err(err).Msg("failed to check slug uniqueness")
+				s.reqLog(r).Error().Err(err).Msg("failed to check slug uniqueness")
 				writeError(w, http.StatusInternalServerError, "internal_error", "failed to update workspace")
 				return
 			}
@@ -465,7 +469,7 @@ func (s *server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		ws.Name, ws.Slug, ws.Environment, ws.Description, id,
 	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err != nil {
-		s.log.Error().Err(err).Str("workspace_id", id).Msg("failed to update workspace")
+		s.reqLog(r).Error().Err(err).Str("workspace_id", id).Msg("failed to update workspace")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update workspace")
 		return
 	}
@@ -482,7 +486,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		id,
 	).Scan(&exists)
 	if err != nil {
-		s.log.Error().Err(err).Str("workspace_id", id).Msg("failed to check workspace existence")
+		s.reqLog(r).Error().Err(err).Str("workspace_id", id).Msg("failed to check workspace existence")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to delete workspace")
 		return
 	}
@@ -500,7 +504,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		id,
 	).Scan(&exists)
 	if err != nil {
-		s.log.Error().Err(err).Str("workspace_id", id).Msg("failed to check active runs")
+		s.reqLog(r).Error().Err(err).Str("workspace_id", id).Msg("failed to check active runs")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to delete workspace")
 		return
 	}
@@ -514,7 +518,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		id,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Str("workspace_id", id).Msg("failed to soft-delete workspace")
+		s.reqLog(r).Error().Err(err).Str("workspace_id", id).Msg("failed to soft-delete workspace")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to delete workspace")
 		return
 	}
@@ -543,14 +547,14 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	key := r.Header.Get("Idempotency-Key")
 	tx, err := s.db.Begin()
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to begin transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
 		return
 	}
 	defer tx.Rollback()
 
 	if err := claimIdempotencyKey(tx, key, workspaceID, "member_add"); err != nil {
-		writeIdempotencyError(w, err, s)
+		writeIdempotencyError(w, r, err, s)
 		return
 	}
 
@@ -560,7 +564,7 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		workspaceID,
 	).Scan(&exists)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check workspace existence")
+		s.reqLog(r).Error().Err(err).Msg("failed to check workspace existence")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
 		return
 	}
@@ -575,7 +579,7 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		req.UserID,
 	).Scan(&userExists)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check user existence")
+		s.reqLog(r).Error().Err(err).Msg("failed to check user existence")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
 		return
 	}
@@ -602,13 +606,13 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to add member")
+		s.reqLog(r).Error().Err(err).Msg("failed to add member")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.log.Error().Err(err).Msg("failed to commit transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
 		return
 	}
@@ -647,7 +651,7 @@ func (s *server) handleListMembers(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to list members")
+		s.reqLog(r).Error().Err(err).Msg("failed to list members")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list members")
 		return
 	}
@@ -657,14 +661,14 @@ func (s *server) handleListMembers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m member
 		if err := rows.Scan(&m.ID, &m.Name, &m.Email, &m.Role, &m.JoinedAt); err != nil {
-			s.log.Error().Err(err).Msg("failed to scan member row")
+			s.reqLog(r).Error().Err(err).Msg("failed to scan member row")
 			writeError(w, http.StatusInternalServerError, "internal_error", "failed to list members")
 			return
 		}
 		members = append(members, m)
 	}
 	if err := rows.Err(); err != nil {
-		s.log.Error().Err(err).Msg("failed to iterate member rows")
+		s.reqLog(r).Error().Err(err).Msg("failed to iterate member rows")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list members")
 		return
 	}
@@ -692,14 +696,14 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to begin transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
 		return
 	}
 	defer tx.Rollback()
 
 	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "member_role_update"); err != nil {
-		writeIdempotencyError(w, err, s)
+		writeIdempotencyError(w, r, err, s)
 		return
 	}
 
@@ -708,7 +712,7 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "last_admin", "cannot change role of the last admin")
 			return
 		}
-		s.log.Error().Err(err).Msg("failed to check last admin")
+		s.reqLog(r).Error().Err(err).Msg("failed to check last admin")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
 		return
 	}
@@ -719,7 +723,7 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		req.Role, userID, workspaceID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to update role")
+		s.reqLog(r).Error().Err(err).Msg("failed to update role")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
 		return
 	}
@@ -730,7 +734,7 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.log.Error().Err(err).Msg("failed to commit transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
 		return
 	}
@@ -744,14 +748,14 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to begin transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
 		return
 	}
 	defer tx.Rollback()
 
 	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "member_remove"); err != nil {
-		writeIdempotencyError(w, err, s)
+		writeIdempotencyError(w, r, err, s)
 		return
 	}
 
@@ -765,7 +769,7 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		userID, workspaceID,
 	).Scan(&exists)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check active runs")
+		s.reqLog(r).Error().Err(err).Msg("failed to check active runs")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
 		return
 	}
@@ -779,7 +783,7 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "last_admin", "cannot remove the last admin")
 			return
 		}
-		s.log.Error().Err(err).Msg("failed to check last admin")
+		s.reqLog(r).Error().Err(err).Msg("failed to check last admin")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
 		return
 	}
@@ -789,7 +793,7 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		userID, workspaceID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to remove member")
+		s.reqLog(r).Error().Err(err).Msg("failed to remove member")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
 		return
 	}
@@ -800,7 +804,7 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.log.Error().Err(err).Msg("failed to commit transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
 		return
 	}
@@ -861,14 +865,14 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to begin transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
 		return
 	}
 	defer tx.Rollback()
 
 	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "invitation_create"); err != nil {
-		writeIdempotencyError(w, err, s)
+		writeIdempotencyError(w, r, err, s)
 		return
 	}
 
@@ -878,7 +882,7 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 		workspaceID,
 	).Scan(&exists)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check workspace existence")
+		s.reqLog(r).Error().Err(err).Msg("failed to check workspace existence")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
 		return
 	}
@@ -889,7 +893,7 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 
 	code, err := generateInviteCode()
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to generate invitation code")
+		s.reqLog(r).Error().Err(err).Msg("failed to generate invitation code")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
 		return
 	}
@@ -902,13 +906,13 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 		workspaceID, req.Email, req.Role, code,
 	).Scan(&inv.ID, &inv.WorkspaceID, &inv.Email, &inv.Role, &inv.Code, &inv.ExpiresAt, &inv.CreatedAt)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to insert invitation")
+		s.reqLog(r).Error().Err(err).Msg("failed to insert invitation")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.log.Error().Err(err).Msg("failed to commit transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
 		return
 	}
@@ -927,7 +931,7 @@ func (s *server) handleListInvitations(w http.ResponseWriter, r *http.Request) {
 		workspaceID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to list invitations")
+		s.reqLog(r).Error().Err(err).Msg("failed to list invitations")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list invitations")
 		return
 	}
@@ -937,14 +941,14 @@ func (s *server) handleListInvitations(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var inv invitationResponse
 		if err := rows.Scan(&inv.ID, &inv.WorkspaceID, &inv.Email, &inv.Role, &inv.Code, &inv.ExpiresAt, &inv.CreatedAt, &inv.RevokedAt); err != nil {
-			s.log.Error().Err(err).Msg("failed to scan invitation row")
+			s.reqLog(r).Error().Err(err).Msg("failed to scan invitation row")
 			writeError(w, http.StatusInternalServerError, "internal_error", "failed to list invitations")
 			return
 		}
 		invitations = append(invitations, inv)
 	}
 	if err := rows.Err(); err != nil {
-		s.log.Error().Err(err).Msg("failed to iterate invitation rows")
+		s.reqLog(r).Error().Err(err).Msg("failed to iterate invitation rows")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list invitations")
 		return
 	}
@@ -971,7 +975,7 @@ func (s *server) handleGetInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to get invitation")
+		s.reqLog(r).Error().Err(err).Msg("failed to get invitation")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to get invitation")
 		return
 	}
@@ -989,7 +993,7 @@ func (s *server) handleRevokeInvitation(w http.ResponseWriter, r *http.Request) 
 		invitationID, workspaceID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to revoke invitation")
+		s.reqLog(r).Error().Err(err).Msg("failed to revoke invitation")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to revoke invitation")
 		return
 	}
@@ -1021,7 +1025,7 @@ func (s *server) handleGetInvitationByCode(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to get invitation by code")
+		s.reqLog(r).Error().Err(err).Msg("failed to get invitation by code")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to get invitation")
 		return
 	}
@@ -1059,7 +1063,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to begin transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}
@@ -1084,7 +1088,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to get invitation for accept")
+		s.reqLog(r).Error().Err(err).Msg("failed to get invitation for accept")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}
@@ -1093,7 +1097,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	// already-consumed mutation surfaces as duplicate_idempotency_key (409),
 	// not as a follow-on 410/403 result of the first application.
 	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), inv.WorkspaceID, "invitation_accept"); err != nil {
-		writeIdempotencyError(w, err, s)
+		writeIdempotencyError(w, r, err, s)
 		return
 	}
 
@@ -1117,7 +1121,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		req.UserID,
 	).Scan(&userExists)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check user existence")
+		s.reqLog(r).Error().Err(err).Msg("failed to check user existence")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}
@@ -1128,7 +1132,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 			req.UserID, req.Name, req.Email,
 		)
 		if err != nil {
-			s.log.Error().Err(err).Msg("failed to create user")
+			s.reqLog(r).Error().Err(err).Msg("failed to create user")
 			writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 			return
 		}
@@ -1143,7 +1147,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		req.UserID, inv.WorkspaceID,
 	).Scan(&alreadyMember)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to check existing membership")
+		s.reqLog(r).Error().Err(err).Msg("failed to check existing membership")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}
@@ -1158,7 +1162,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		req.UserID, inv.WorkspaceID, inv.Role,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to create membership")
+		s.reqLog(r).Error().Err(err).Msg("failed to create membership")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}
@@ -1168,7 +1172,7 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		inv.ID,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to revoke used invitation")
+		s.reqLog(r).Error().Err(err).Msg("failed to revoke used invitation")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}
@@ -1182,13 +1186,13 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		req.UserID, inv.WorkspaceID,
 	).Scan(&mr.ID, &mr.Name, &mr.Email, &mr.Role, &mr.JoinedAt)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to query new member")
+		s.reqLog(r).Error().Err(err).Msg("failed to query new member")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.log.Error().Err(err).Msg("failed to commit transaction")
+		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}
@@ -1224,7 +1228,7 @@ func (s *server) handleCheckPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to lookup membership for permission check")
+		s.reqLog(r).Error().Err(err).Msg("failed to lookup membership for permission check")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to check permission")
 		return
 	}
@@ -1287,7 +1291,7 @@ func (s *server) handleCheckBatch(w http.ResponseWriter, r *http.Request) {
 		args...,
 	)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to batch lookup memberships")
+		s.reqLog(r).Error().Err(err).Msg("failed to batch lookup memberships")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to check permissions")
 		return
 	}
@@ -1297,14 +1301,14 @@ func (s *server) handleCheckBatch(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var uid, wid, role string
 		if err := rows.Scan(&uid, &wid, &role); err != nil {
-			s.log.Error().Err(err).Msg("failed to scan membership row")
+			s.reqLog(r).Error().Err(err).Msg("failed to scan membership row")
 			writeError(w, http.StatusInternalServerError, "internal_error", "failed to check permissions")
 			return
 		}
 		roleMap[[2]string{uid, wid}] = role
 	}
 	if err := rows.Err(); err != nil {
-		s.log.Error().Err(err).Msg("failed to iterate membership rows")
+		s.reqLog(r).Error().Err(err).Msg("failed to iterate membership rows")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to check permissions")
 		return
 	}
@@ -1357,11 +1361,28 @@ func generateInviteCode() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+func requestLoggingMiddleware(base zerolog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.NewString()
+		}
+		correlationID := r.Header.Get("X-Correlation-ID")
+		if _, err := uuid.Parse(correlationID); err != nil {
+			correlationID = requestID
+		}
+
+		l := base.With().Str("request_id", requestID).Str("correlation_id", correlationID).Logger()
+		ctx := l.WithContext(r.Context())
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func recoveryMiddleware(log zerolog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Error().Interface("panic", rec).Str("path", r.URL.Path).Msg("panic recovered")
+				zerolog.Ctx(r.Context()).Error().Interface("panic", rec).Str("path", r.URL.Path).Msg("panic recovered")
 				writeError(w, http.StatusInternalServerError, "internal_error", "unexpected server error")
 			}
 		}()

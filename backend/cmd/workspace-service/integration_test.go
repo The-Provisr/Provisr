@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -138,12 +137,6 @@ func startTestContainer(t *testing.T) string {
 type containerTestIface interface {
 	Terminate(ctx context.Context) error
 	ConnectionString(ctx context.Context, args ...string) (string, error)
-}
-
-// Without the `testcontainers` build tag there is no container provider;
-// startPostgresContainer reports failure so the suite skips.
-func startPostgresContainer(ctx context.Context) (containerTestIface, error) {
-	return nil, fmt.Errorf("testcontainers build tag not enabled (use -tags testcontainers)")
 }
 
 func runMigrations(t *testing.T, db *sql.DB) {

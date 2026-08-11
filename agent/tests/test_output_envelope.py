@@ -122,3 +122,26 @@ def test_validation_result_serializes_to_required_shape() -> None:
     assert payload["valid"] is True
     assert payload["errors"] == []
     assert payload["parsed"]["type"] == "assistant_message"
+
+
+def test_component_payload_is_recursively_immutable() -> None:
+    result = validate_envelope(
+        envelope(
+            "component_payload",
+            {
+                "component_id": "cost.summary",
+                "payload": {"monthly_usd": 20, "items": [{"name": "ec2"}]},
+            },
+        )
+    )
+
+    assert result.valid is True
+    assert result.parsed is not None
+    parsed_payload = result.parsed.data.payload
+
+    with pytest.raises(TypeError):
+        parsed_payload["monthly_usd"] = 30  # type: ignore[index]
+
+    with pytest.raises(TypeError):
+        parsed_payload["items"][0]["name"] = "rds"  # type: ignore[index]
+

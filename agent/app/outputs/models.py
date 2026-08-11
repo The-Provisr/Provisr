@@ -40,6 +40,17 @@ class AssistantMessageData(OutputModel):
     message: str = Field(min_length=1, max_length=10000)
 
 
+from types import MappingProxyType
+
+
+def _freeze_payload(value: object) -> object:
+    if isinstance(value, dict):
+        return MappingProxyType({k: _freeze_payload(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_payload(v) for v in value)
+    return value
+
+
 class ComponentPayloadData(OutputModel):
     component_id: str = Field(min_length=1, max_length=128)
     payload: dict[str, object]
@@ -50,6 +61,11 @@ class ComponentPayloadData(OutputModel):
         if not _IDENTIFIER_PATTERN.fullmatch(value):
             raise ValueError("component_id must use a safe lowercase identifier")
         return value
+
+    @field_validator("payload", mode="after")
+    @classmethod
+    def validate_payload(cls, value: dict[str, object]) -> dict[str, object]:
+        return _freeze_payload(value)  # type: ignore[return-value]
 
 
 class ManifestDraftData(OutputModel):

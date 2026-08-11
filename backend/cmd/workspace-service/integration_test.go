@@ -64,14 +64,14 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open admin connection: %v", err)
 	}
-	defer admin.Close()
+	t.Cleanup(func() { _ = admin.Close() })
 
 	dbName := "provisr_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	if _, err := admin.Exec("CREATE DATABASE " + dbName); err != nil {
 		t.Fatalf("create test database: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.Exec("DROP DATABASE " + dbName + " WITH (FORCE)"); err != nil && admin.Ping() == nil {
+		if _, err := admin.Exec("DROP DATABASE " + dbName + " WITH (FORCE)"); err != nil {
 			t.Logf("drop test database failed: %v", err)
 		}
 	})

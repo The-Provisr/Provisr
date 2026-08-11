@@ -209,9 +209,13 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slug := generateSlug(req.Name)
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required for mutations")
+		return
+	}
 
-	key := r.Header.Get("Idempotency-Key")
+	slug := generateSlug(req.Name)
 
 	tx, err := s.db.Begin()
 	if err != nil {

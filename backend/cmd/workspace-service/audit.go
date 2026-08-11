@@ -27,8 +27,10 @@ func appendAuditEvent(
 		return fmt.Errorf("marshal audit payload: %w", err)
 	}
 
+	actorType := "user"
 	if actorID == "" {
 		actorID = "system"
+		actorType = "system"
 	}
 
 	var previousHash sql.NullString
@@ -64,8 +66,8 @@ func appendAuditEvent(
 		`INSERT INTO provisr_audit.audit_events
 		   (workspace_id, event_type, actor_id, actor_type, resource_type, resource_id,
 		    payload, hash, previous_hash, correlation_id)
-		 VALUES ($1, $2::provisr_audit.event_type, $3, 'user', $4, $5, $6, $7, $8, $9::uuid)`,
-		workspaceID, eventType, actorID, resourceType, resourceID, payloadJSON, eventHash, prev, correlationID,
+		 VALUES ($1, $2::provisr_audit.event_type, $3, $4::provisr_audit.actor_type, $5, $6, $7, $8, $9, $10::uuid)`,
+		workspaceID, eventType, actorID, actorType, resourceType, resourceID, payloadJSON, eventHash, prev, correlationID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert audit event: %w", err)

@@ -140,7 +140,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      recoveryMiddleware(logger, requestLoggingMiddleware(logger, mux)),
+		Handler:      requestLoggingMiddleware(logger, recoveryMiddleware(logger, mux)),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,

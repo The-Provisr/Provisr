@@ -11,7 +11,7 @@ func createWorkspace(t *testing.T, db *sql.DB, url, adminID string) string {
 	t.Helper()
 	payload := fmt.Sprintf(
 		`{"name":"Sprint Team","environment":"dev","creator_id":%q}`, adminID)
-	resp, body := doJSON(t, "POST", url+"/workspaces", payload, nil)
+	resp, body := doJSON(t, "POST", url+"/workspaces", payload, map[string]string{"Idempotency-Key": "k-create-ws-" + adminID})
 	assertStatus(t, 201, resp)
 	id, _ := body["id"].(string)
 	if id == "" {
@@ -45,16 +45,16 @@ func TestWorkspaceLifecycle(t *testing.T) {
 	resp, _ = doJSON(t, "GET", url+"/workspaces", "", nil)
 	assertStatus(t, 400, resp)
 
-	resp, body = doJSON(t, "PATCH", url+"/workspaces/"+wsID, `{"environment":"prod"}`, nil)
+	resp, body = doJSON(t, "PATCH", url+"/workspaces/"+wsID, `{"environment":"prod"}`, map[string]string{"Idempotency-Key": "k-patch-ws"})
 	assertStatus(t, 200, resp)
 	if body["environment"] != "prod" {
 		t.Fatalf("environment not updated: %v", body)
 	}
 
-	resp, _ = doJSON(t, "PATCH", url+"/workspaces/"+wsID, `{"environment":"mars"}`, nil)
+	resp, _ = doJSON(t, "PATCH", url+"/workspaces/"+wsID, `{"environment":"mars"}`, map[string]string{"Idempotency-Key": "k-patch-invalid"})
 	assertStatus(t, 400, resp)
 
-	resp, _ = doJSON(t, "DELETE", url+"/workspaces/"+wsID, "", nil)
+	resp, _ = doJSON(t, "DELETE", url+"/workspaces/"+wsID, "", map[string]string{"Idempotency-Key": "k-del-ws"})
 	assertStatus(t, 204, resp)
 
 	resp, _ = doJSON(t, "GET", url+"/workspaces/"+wsID+"?user_id="+admin, "", nil)
@@ -145,7 +145,7 @@ func TestMemberBlockedByActiveRuns(t *testing.T) {
 		t.Fatalf("expected active_runs_exist, got %v", body)
 	}
 
-	resp, _ = doJSON(t, "DELETE", url+"/workspaces/"+wsID, "", nil)
+	resp, _ = doJSON(t, "DELETE", url+"/workspaces/"+wsID, "", map[string]string{"Idempotency-Key": "k-del-blocked"})
 	assertStatus(t, 409, resp)
 }
 

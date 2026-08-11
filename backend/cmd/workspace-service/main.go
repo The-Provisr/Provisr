@@ -555,11 +555,6 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	if err := claimIdempotencyKey(tx, key, workspaceID, "member_add"); err != nil {
-		writeIdempotencyError(w, r, err, s)
-		return
-	}
-
 	var exists bool
 	err = tx.QueryRow(
 		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL)",
@@ -572,6 +567,11 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	}
 	if !exists {
 		writeError(w, http.StatusNotFound, "not_found", "workspace not found")
+		return
+	}
+
+	if err := claimIdempotencyKey(tx, key, workspaceID, "member_add"); err != nil {
+		writeIdempotencyError(w, r, err, s)
 		return
 	}
 
@@ -704,6 +704,21 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	var exists bool
+	err = tx.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL)",
+		workspaceID,
+	).Scan(&exists)
+	if err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to check workspace existence")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
+		return
+	}
+	if !exists {
+		writeError(w, http.StatusNotFound, "not_found", "workspace not found")
+		return
+	}
+
 	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "member_role_update"); err != nil {
 		writeIdempotencyError(w, r, err, s)
 		return
@@ -755,6 +770,21 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	var wsExists bool
+	err = tx.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL)",
+		workspaceID,
+	).Scan(&wsExists)
+	if err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to check workspace existence")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
+		return
+	}
+	if !wsExists {
+		writeError(w, http.StatusNotFound, "not_found", "workspace not found")
+		return
+	}
 
 	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "member_remove"); err != nil {
 		writeIdempotencyError(w, r, err, s)
@@ -873,11 +903,6 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 	defer tx.Rollback()
 
-	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "invitation_create"); err != nil {
-		writeIdempotencyError(w, r, err, s)
-		return
-	}
-
 	var exists bool
 	err = tx.QueryRow(
 		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE id = $1 AND deleted_at IS NULL)",
@@ -890,6 +915,11 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 	if !exists {
 		writeError(w, http.StatusNotFound, "not_found", "workspace not found")
+		return
+	}
+
+	if err := claimIdempotencyKey(tx, r.Header.Get("Idempotency-Key"), workspaceID, "invitation_create"); err != nil {
+		writeIdempotencyError(w, r, err, s)
 		return
 	}
 

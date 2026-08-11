@@ -613,6 +613,15 @@ func (s *server) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := appendAuditEvent(r, tx, workspaceID, "member_added", req.UserID, "member", req.UserID, map[string]any{
+		"role":            req.Role,
+		"idempotency_key": key,
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add member")
@@ -750,6 +759,15 @@ func (s *server) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := appendAuditEvent(r, tx, workspaceID, "member_role_updated", userID, "member", userID, map[string]any{
+		"new_role":        req.Role,
+		"idempotency_key": r.Header.Get("Idempotency-Key"),
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		s.reqLog(r).Error().Err(err).Msg("failed to commit transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to update role")
@@ -832,6 +850,14 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		writeError(w, http.StatusNotFound, "not_found", "membership not found")
+		return
+	}
+
+	if err := appendAuditEvent(r, tx, workspaceID, "member_removed", userID, "member", userID, map[string]any{
+		"idempotency_key": r.Header.Get("Idempotency-Key"),
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
 		return
 	}
 
@@ -939,6 +965,16 @@ func (s *server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 	).Scan(&inv.ID, &inv.WorkspaceID, &inv.Email, &inv.Role, &inv.Code, &inv.ExpiresAt, &inv.CreatedAt)
 	if err != nil {
 		s.reqLog(r).Error().Err(err).Msg("failed to insert invitation")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
+		return
+	}
+
+	if err := appendAuditEvent(r, tx, workspaceID, "invitation_created", req.Email, "invitation", inv.ID, map[string]any{
+		"email":           req.Email,
+		"role":            req.Role,
+		"idempotency_key": r.Header.Get("Idempotency-Key"),
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create invitation")
 		return
 	}
@@ -1219,6 +1255,16 @@ func (s *server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	).Scan(&mr.ID, &mr.Name, &mr.Email, &mr.Role, &mr.JoinedAt)
 	if err != nil {
 		s.reqLog(r).Error().Err(err).Msg("failed to query new member")
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
+		return
+	}
+
+	if err := appendAuditEvent(r, tx, inv.WorkspaceID, "invitation_accepted", req.UserID, "invitation", inv.ID, map[string]any{
+		"email":           inv.Email,
+		"role":            inv.Role,
+		"idempotency_key": r.Header.Get("Idempotency-Key"),
+	}); err != nil {
+		s.reqLog(r).Error().Err(err).Msg("failed to append audit event")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to accept invitation")
 		return
 	}

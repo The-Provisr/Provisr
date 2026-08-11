@@ -39,9 +39,9 @@ func setupTestServerWithDB(t *testing.T, db *sql.DB) (*server, string) {
 	if os.Getenv("TEST_VERBOSE") != "" {
 		out = zerolog.ConsoleWriter{Out: os.Stderr}
 	}
-	logger := zerolog.New(out)
+	logger := zerolog.New(out).With().Str("service", "workspace-service").Logger()
 	s := &server{db: db, log: logger}
-	ts := httptest.NewServer(recoveryMiddleware(logger, requestLoggingMiddleware(logger, s.routes())))
+	ts := httptest.NewServer(requestLoggingMiddleware(logger, recoveryMiddleware(logger, s.routes())))
 	t.Cleanup(ts.Close)
 	return s, ts.URL
 }

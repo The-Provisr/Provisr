@@ -21,7 +21,7 @@ func createWorkspace(t *testing.T, db *sql.DB, url, adminID string) string {
 }
 
 func TestWorkspaceLifecycle(t *testing.T) {
-	srv, url, _ := setupTestServer(t)
+	srv, url := setupTestServer(t)
 	_ = srv
 
 	admin := newUUID()
@@ -62,7 +62,7 @@ func TestWorkspaceLifecycle(t *testing.T) {
 }
 
 func TestMemberManagement(t *testing.T) {
-	s, url, _ := setupTestServer(t)
+	s, url := setupTestServer(t)
 	admin := newUUID()
 	seedUser(t, s.db, admin, "admin@example.org")
 	wsID := createWorkspace(t, s.db, url, admin)
@@ -127,7 +127,7 @@ func TestMemberManagement(t *testing.T) {
 }
 
 func TestMemberBlockedByActiveRuns(t *testing.T) {
-	srv, url, _ := setupTestServer(t)
+	srv, url := setupTestServer(t)
 	admin := newUUID()
 	seedUser(t, srv.db, admin, "admin@example.org")
 	wsID := createWorkspace(t, srv.db, url, admin)
@@ -170,7 +170,7 @@ func seedActiveRun(t *testing.T, db *sql.DB, workspaceID, userID string) {
 }
 
 func TestInvitationLifecycle(t *testing.T) {
-	srv, url, _ := setupTestServer(t)
+	srv, url := setupTestServer(t)
 	admin := newUUID()
 	seedUser(t, srv.db, admin, "admin@example.org")
 	wsID := createWorkspace(t, srv.db, url, admin)
@@ -236,7 +236,7 @@ func TestInvitationLifecycle(t *testing.T) {
 }
 
 func TestInvitationRevokedAndExpired(t *testing.T) {
-	srv, url, _ := setupTestServer(t)
+	srv, url := setupTestServer(t)
 	admin := newUUID()
 	seedUser(t, srv.db, admin, "admin@example.org")
 	wsID := createWorkspace(t, srv.db, url, admin)
@@ -276,7 +276,7 @@ func TestInvitationRevokedAndExpired(t *testing.T) {
 }
 
 func TestPermissionCheckEndpoint(t *testing.T) {
-	srv, url, _ := setupTestServer(t)
+	srv, url := setupTestServer(t)
 	admin := newUUID()
 	seedUser(t, srv.db, admin, "admin@example.org")
 	wsID := createWorkspace(t, srv.db, url, admin)
@@ -340,7 +340,7 @@ func TestPermissionCheckEndpoint(t *testing.T) {
 }
 
 func TestIdempotencyKeys(t *testing.T) {
-	srv, url, _ := setupTestServer(t)
+	srv, url := setupTestServer(t)
 	admin := newUUID()
 	seedUser(t, srv.db, admin, "admin@example.org")
 	wsID := createWorkspace(t, srv.db, url, admin)

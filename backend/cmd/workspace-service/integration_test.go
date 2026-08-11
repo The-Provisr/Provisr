@@ -29,12 +29,12 @@ import (
 //   3. Neither available -> integration tests skip so `go test ./...`
 //      passes anywhere.
 
-func setupTestServer(t *testing.T) (*server, string, func()) {
+func setupTestServer(t *testing.T) (*server, string) {
 	t.Helper()
 	return setupTestServerWithDB(t, setupTestDB(t))
 }
 
-func setupTestServerWithDB(t *testing.T, db *sql.DB) (*server, string, func()) {
+func setupTestServerWithDB(t *testing.T, db *sql.DB) (*server, string) {
 	t.Helper()
 	var out io.Writer = io.Discard
 	if os.Getenv("TEST_VERBOSE") != "" {
@@ -42,8 +42,9 @@ func setupTestServerWithDB(t *testing.T, db *sql.DB) (*server, string, func()) {
 	}
 	logger := zerolog.New(out)
 	s := &server{db: db, log: logger}
-	ts := httptest.NewServer(recoveryMiddleware(logger, s.routes()))
-	return s, ts.URL, func() { ts.Close() }
+	ts := httptest.NewServer(recoveryMiddleware(logger, requestLoggingMiddleware(logger, s.routes())))
+	t.Cleanup(ts.Close)
+	return s, ts.URL
 }
 
 func setupTestDB(t *testing.T) *sql.DB {

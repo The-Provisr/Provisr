@@ -205,7 +205,7 @@ PROVISIONING_AGENT_V1 = PromptBundle(
     prompt_id=UUID("2f4061d8-c34b-4c8f-96cf-12f76d8dff2b"),
     profile="provisioning_agent",
     version="1.0.0",
-    content=_PROVISIONING_AGENT_PROMPT_V1,
+    content=PROVISIONING_AGENT_PROMPT,
     tool_allowlist=(
         "get_policy_requirements",
         "get_cloud_account_capabilities",
@@ -227,7 +227,7 @@ PROVISIONING_AGENT_V1 = PromptBundle(
     created_at=datetime(2026, 7, 31, tzinfo=UTC),
     author="Provisr Team",
     changelog="Initial provisioning agent prompt for the MVP profile.",
-    content_hash="c04679f15eed339ed536aa62aeb610c8e9e136411e40610c0360a1db23255d11",
+    content_hash="744a3ddad576689acb07bacf7c973db7938198af4139483e7fbc6aacf2309b17",
 )
 
 PROVISIONING_AGENT_V1_1 = PromptBundle(

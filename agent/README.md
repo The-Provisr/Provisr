@@ -40,9 +40,13 @@ ANTHROPIC_MODEL=claude-sonnet-4-5
 
 The older `/v1/sessions` routes remain temporarily as compatibility routes in the
 same application. Public session and SSE ownership is moving to the orchestrator.
-Only `pending_agent` model dispatch is implemented in this phase. Policy,
-cloud-context, and later provisioning phases fail closed until real integrations
-exist; the agent never fabricates tool-call evidence.
+`pending_policy` and `pending_cloud_context` call their configured read-only MCP
+services before planning. Set `PROVISR_MCP_POLICY_URL`,
+`PROVISR_MCP_CLOUD_URL`, and `PROVISR_MCP_SERVICE_AUTH_TOKEN` in deployment.
+The adapter sends a workspace-scoped context envelope, permits only the three
+read-only evidence tools, redacts sensitive evidence, and fails closed if a
+service cannot provide valid evidence. It never exposes mutation or execution
+tools to the graph.
 
 ## Verification
 

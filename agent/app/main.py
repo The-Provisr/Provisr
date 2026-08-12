@@ -16,7 +16,7 @@ from app.domain.service import AgentService
 from app.integrations.anthropic_model import ClaudeModel, LanguageModel
 from app.integrations.checkpoints import InMemoryCheckpointStore
 from app.integrations.gemini_model import GeminiModel
-from app.integrations.mcp_tools import DeterministicReadOnlyToolClient
+from app.integrations.mcp_tools import HttpReadOnlyToolClient, ReadOnlyToolClient
 from app.integrations.state import InMemoryStateStore, RedisStateStore, StateStore
 from app.profiles.catalog import build_profile_selector
 from app.profiles.registry import ProfileSelector
@@ -31,8 +31,10 @@ class Resources:
     profile_selector: ProfileSelector
     agent_service: AgentService
     dispatcher: AgentDispatcher
+    tools: ReadOnlyToolClient
 
     async def aclose(self) -> None:
+        await self.tools.aclose()
         await self.state.aclose()
 
 
@@ -56,16 +58,19 @@ def create_resources(
         model=language_model,
         profile_selector=resolved_profile_selector,
     )
+    tools = HttpReadOnlyToolClient(
+        policy_url=settings.mcp_policy_url,
+        cloud_url=settings.mcp_cloud_url,
+        timeout_seconds=settings.mcp_timeout_seconds,
+        service_auth_token=settings.mcp_service_auth_token,
+    )
     return Resources(
         state=state,
         prompt_registry=resolved_prompt_registry,
         profile_selector=resolved_profile_selector,
         agent_service=agent_service,
-        dispatcher=ModelAgentDispatcher(
-            agent_service,
-            DeterministicReadOnlyToolClient(),
-            InMemoryCheckpointStore(),
-        ),
+        dispatcher=ModelAgentDispatcher(agent_service, tools, InMemoryCheckpointStore()),
+        tools=tools,
     )
 
 

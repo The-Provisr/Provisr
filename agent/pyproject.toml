@@ -6,6 +6,7 @@ dependencies = [
     "anthropic>=0.116.0",
     "fastapi>=0.116,<1",
     "google-genai>=0.1.0",
+    "httpx>=0.28,<1",
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.10,<3",
     "redis>=6.2,<7",

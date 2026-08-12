@@ -7,6 +7,7 @@ from app.api.schemas import AgentDispatchResponse, AgentToolCall
 from app.config.settings import Settings
 from app.domain.service import AgentService
 from app.integrations.state import InMemoryStateStore
+from app.integrations.mcp_tools import DeterministicReadOnlyToolClient
 from app.main import Resources, create_app
 from app.profiles.catalog import build_profile_selector
 from app.prompts.catalog import build_prompt_registry
@@ -49,6 +50,7 @@ def build_client(
             profile_selector=profile_selector,
         ),
         dispatcher=dispatcher or FakeDispatcher(AgentDispatchResponse()),
+        tools=DeterministicReadOnlyToolClient(),
     )
     app = create_app(settings=Settings(environment="test"), resources=resources)
     return TestClient(app)

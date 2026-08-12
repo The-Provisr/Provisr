@@ -5,9 +5,16 @@ from app.profiles.models import ProfileBundle
 
 
 class FakeLanguageModel:
-    def __init__(self, raw_output: str, order: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        raw_output: str,
+        order: list[str] | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
         self.raw_output = raw_output
         self.order = order
+        self.error = error
         self.sessions: list[AgentSession] = []
         self.profiles: list[ProfileBundle] = []
 
@@ -20,6 +27,8 @@ class FakeLanguageModel:
         self.profiles.append(profile)
         if self.order is not None:
             self.order.append("model")
+        if self.error is not None:
+            raise self.error
         return self.raw_output
 
 

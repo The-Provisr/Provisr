@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { ConflictError, NotFoundError } from "../common/errors/typed-errors";
 import { DbService } from "../db/db.service";
+import { ChatEventsService } from "./chat-events.service";
 
 type Queryable = { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> };
 
@@ -30,7 +31,7 @@ type SessionRow = {
 
 @Injectable()
 export class ChatPersistenceService {
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService, private readonly events: ChatEventsService) {}
 
   async listSessions(workspaceId: string, userId: string): Promise<ChatSessionRecord[]> {
     const result = await this.db.query<SessionRow>(
@@ -121,6 +122,13 @@ export class ChatPersistenceService {
         `INSERT INTO provisr_state.chat_messages (session_id, workspace_id, turn_id, role, content)
          VALUES ($1, $2, $3, 'user', $4)`, [params.sessionId, params.workspaceId, turn.rows[0]!.id, params.prompt],
       );
+      await this.events.append({
+        sessionId: params.sessionId,
+        workspaceId: params.workspaceId,
+        turnId: turn.rows[0]!.id,
+        eventType: "turn.accepted",
+        payload: { runId: run.rows[0]!.id },
+      }, client);
       await client.query(`UPDATE provisr_state.chat_sessions SET updated_at = now() WHERE id = $1`, [params.sessionId]);
       await client.query("COMMIT");
       return { turnId: turn.rows[0]!.id, runId: run.rows[0]!.id, replayed: false };

@@ -34,11 +34,10 @@ CREATE TABLE provisr_state.chat_messages (
 );
 
 CREATE TABLE provisr_events.chat_event_sequences (
-    session_id UUID PRIMARY KEY,
-    workspace_id UUID NOT NULL,
+    workspace_id UUID PRIMARY KEY,
     next_sequence BIGINT NOT NULL DEFAULT 1 CHECK (next_sequence > 0),
-    FOREIGN KEY (session_id, workspace_id)
-        REFERENCES provisr_state.chat_sessions(id, workspace_id) ON DELETE CASCADE
+    FOREIGN KEY (workspace_id)
+        REFERENCES provisr_identity.workspaces(id) ON DELETE CASCADE
 );
 
 CREATE TABLE provisr_events.chat_events (
@@ -50,7 +49,7 @@ CREATE TABLE provisr_events.chat_events (
     event_type VARCHAR(64) NOT NULL,
     payload JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (session_id, sequence),
+    UNIQUE (workspace_id, sequence),
     FOREIGN KEY (session_id, workspace_id)
         REFERENCES provisr_state.chat_sessions(id, workspace_id) ON DELETE CASCADE,
     FOREIGN KEY (turn_id, session_id, workspace_id)
@@ -58,4 +57,4 @@ CREATE TABLE provisr_events.chat_events (
 );
 
 CREATE INDEX idx_chat_messages_session_created ON provisr_state.chat_messages(session_id, created_at, id);
-CREATE INDEX idx_chat_events_session_sequence ON provisr_events.chat_events(session_id, sequence);
+CREATE INDEX idx_chat_events_workspace_sequence ON provisr_events.chat_events(workspace_id, sequence);

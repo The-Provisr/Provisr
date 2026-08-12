@@ -1,37 +1,25 @@
-import { Test } from "@nestjs/testing";
 import { firstValueFrom, take } from "rxjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SseController } from "../../src/routes/sse.controller";
+import { ChatEventsService } from "../../src/services/chat-events.service";
 
 describe("SseController", () => {
   let controller: SseController;
 
   beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({
-      controllers: [SseController],
-    }).compile();
-
-    controller = moduleRef.get(SseController);
+    const eventService = {
+      listWorkspaceEvents: vi.fn().mockResolvedValue([
+        { id: "event-1", eventType: "turn.accepted", sequence: 4, payload: { runId: "run-1" }, createdAt: "2026-08-13T00:00:00Z" },
+      ]),
+    };
+    controller = new SseController(eventService as unknown as ChatEventsService);
   });
 
-  it("emits a keepalive event carrying the workspace id", async () => {
-    vi.useFakeTimers();
-    try {
-      const workspaceId = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
-
-      const eventPromise = firstValueFrom(
-        controller.events(workspaceId).pipe(take(1)),
-      );
-      vi.advanceTimersByTime(15_000);
-
-      const event = await eventPromise;
-      expect(event.id).toBe("0");
-      expect(JSON.parse(String(event.data))).toEqual({
-        type: "keepalive",
-        workspaceId,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+  it("replays durable workspace events after the supplied cursor", async () => {
+    const event = await firstValueFrom(controller.events(
+      "f47ac10b-58cc-4372-a567-0e02b2c3d479", 3,
+      { userId: "user-1", clerkId: "clerk-1", email: undefined, workspaceIds: [], roles: {} },
+    ).pipe(take(1)));
+    expect(event).toEqual({ id: "4", type: "turn.accepted", data: { runId: "run-1" } });
   });
 });

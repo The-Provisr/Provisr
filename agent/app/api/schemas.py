@@ -30,6 +30,17 @@ class RunTurnResponse(ApiModel):
     result: AgentOutputEnvelope
 
 
+class ConversationTurnRequest(ApiModel):
+    session_id: UUID
+    workspace_id: UUID
+    user_id: UUID
+    messages: list["AgentMessage"] = Field(min_length=1, max_length=20)
+
+
+class ConversationTurnResponse(ApiModel):
+    message: str = Field(min_length=1, max_length=10_000)
+
+
 RunState = Literal[
     "received",
     "pending_policy",

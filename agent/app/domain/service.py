@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 from app.domain.errors import InvalidModelResponseError, SessionFailedError
@@ -164,6 +165,45 @@ class AgentService:
             {"outputType": result.type, "sessionStatus": session.status},
         )
         return result
+
+    async def answer_conversation(
+        self,
+        *,
+        workspace_id: UUID,
+        request_id: UUID,
+        messages: list[tuple[Literal["user", "assistant", "system"], str]],
+    ) -> str:
+        """Answer an authenticated read-only conversation using the pinned profile."""
+        if not messages or messages[-1][0] != "user":
+            raise InvalidModelResponseError("conversation must end with a user message")
+        profile = self._profile_selector.select_profile("provisioning", None)
+        now = datetime.now(UTC)
+        session = AgentSession(
+            session_id=str(uuid4()),
+            organization_id=str(workspace_id),
+            request_id=request_id,
+            profile_id=profile.profile_id,
+            prompt_id=profile.prompt.prompt_id,
+            prompt_profile=profile.prompt.profile,
+            prompt_version=profile.prompt.version,
+            prompt_hash=profile.prompt.content_hash,
+            temperature=profile.llm_config.temperature,
+            max_tokens=profile.llm_config.max_tokens,
+            created_at=now,
+            updated_at=now,
+            messages=[
+                ConversationMessage(role=role, content=content, created_at=now)
+                for role, content in messages
+                if role in {"user", "assistant"}
+            ],
+        )
+        raw_output = await self._model.complete_turn(session, profile)
+        validation = validate_envelope(raw_output)
+        if not validation.valid or validation.parsed is None:
+            raise InvalidModelResponseError("conversation output failed envelope validation")
+        if validation.parsed.request_id != request_id:
+            raise InvalidModelResponseError("conversation output request_id did not match the active request")
+        return _message_for(validation.parsed)
 
     async def _fail_turn(self, session: AgentSession, validation_error: str) -> None:
         session.status = "FAILED"

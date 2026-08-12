@@ -2,7 +2,7 @@ import json
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import (
@@ -13,6 +13,8 @@ from app.api.dependencies import (
 from app.api.schemas import (
     AgentDispatchRequest,
     AgentDispatchResponse,
+    ConversationTurnRequest,
+    ConversationTurnResponse,
     CreateSessionRequest,
     CreateSessionResponse,
     RunTurnRequest,
@@ -44,9 +46,14 @@ async def dispatch_run(
     run_id: UUID,
     body: AgentDispatchRequest,
     dispatcher: AgentDispatcherDependency,
+    request: Request,
 ) -> AgentDispatchResponse:
     if run_id != body.run_id:
         raise DispatchRunMismatchError("path run_id must match body run_id")
+    if request.headers.get("x-provisr-run-id") != str(body.run_id):
+        raise DispatchRunMismatchError("authenticated run context must match body run_id")
+    if request.headers.get("x-provisr-workspace-id") != str(body.workspace_id):
+        raise DispatchRunMismatchError("authenticated workspace context must match body workspace_id")
     return await dispatcher.dispatch(body)
 
 
@@ -81,6 +88,22 @@ async def run_turn(
 ) -> RunTurnResponse:
     result = await service.run_turn(session_id=session_id, message=body.message)
     return RunTurnResponse(result=result)
+
+
+@router.post("/v1/conversation/turns", response_model=ConversationTurnResponse, tags=["orchestrator"])
+async def conversation_turn(
+    body: ConversationTurnRequest,
+    service: AgentServiceDependency,
+    request: Request,
+) -> ConversationTurnResponse:
+    if request.headers.get("x-provisr-workspace-id") != str(body.workspace_id):
+        raise DispatchRunMismatchError("authenticated workspace context must match body workspace_id")
+    message = await service.answer_conversation(
+        workspace_id=body.workspace_id,
+        request_id=body.session_id,
+        messages=[(item.role, item.content) for item in body.messages],
+    )
+    return ConversationTurnResponse(message=message)
 
 
 @router.get("/v1/sessions/{session_id}/events", tags=["events"])

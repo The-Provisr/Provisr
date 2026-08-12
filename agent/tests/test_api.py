@@ -188,6 +188,10 @@ def test_dispatch_accepts_the_orchestrator_contract() -> None:
     with build_client(clarification_output(), dispatcher) as client:
         response = client.post(
             f"/runs/{ids['run']}/dispatch",
+            headers={
+                "x-provisr-run-id": ids["run"],
+                "x-provisr-workspace-id": ids["workspace"],
+            },
             json={
                 "run_id": ids["run"],
                 "session_id": ids["session"],
@@ -210,6 +214,26 @@ def test_dispatch_accepts_the_orchestrator_contract() -> None:
         "events": [],
     }
     assert str(dispatcher.requests[0].run_id) == ids["run"]
+
+
+def test_dispatch_rejects_missing_authenticated_context() -> None:
+    ids = {name: str(uuid4()) for name in ["run", "session", "workspace", "user", "correlation"]}
+    with build_client(clarification_output()) as client:
+        response = client.post(
+            f"/runs/{ids['run']}/dispatch",
+            json={
+                "run_id": ids["run"],
+                "session_id": ids["session"],
+                "workspace_id": ids["workspace"],
+                "user_id": ids["user"],
+                "correlation_id": ids["correlation"],
+                "phase": "pending_policy",
+                "prompt": "Create a production API",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "DISPATCH_RUN_MISMATCH"
 
 
 def test_dispatch_rejects_a_mismatched_path_run_id() -> None:

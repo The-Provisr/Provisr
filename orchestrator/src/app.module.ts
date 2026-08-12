@@ -13,6 +13,7 @@ import { ProvisioningRunsController } from "./routes/provisioning-runs.controlle
 import { ApprovalsController } from "./routes/approvals.controller";
 import { ArtifactsController } from "./routes/artifacts.controller";
 import { SseController } from "./routes/sse.controller";
+import { DbService } from "./db/db.service";
 
 @Module({
   imports: [],
@@ -26,6 +27,7 @@ import { SseController } from "./routes/sse.controller";
     SseController,
   ],
   providers: [
+    DbService,
     {
       // Config read once at wiring time and passed in (never read from
       // process.env inside services). Fails fast in production without

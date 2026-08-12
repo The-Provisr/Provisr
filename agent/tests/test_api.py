@@ -207,6 +207,7 @@ def test_dispatch_accepts_the_orchestrator_contract() -> None:
         "tool_calls": [
             {"tool_name": "get_policy_requirements", "ok": True, "summary": "loaded"}
         ],
+        "events": [],
     }
     assert str(dispatcher.requests[0].run_id) == ids["run"]
 

@@ -14,7 +14,9 @@ from app.config.settings import Settings, load_settings
 from app.domain.dispatch import AgentDispatcher, ModelAgentDispatcher
 from app.domain.service import AgentService
 from app.integrations.anthropic_model import ClaudeModel, LanguageModel
+from app.integrations.checkpoints import InMemoryCheckpointStore
 from app.integrations.gemini_model import GeminiModel
+from app.integrations.mcp_tools import DeterministicReadOnlyToolClient
 from app.integrations.state import InMemoryStateStore, RedisStateStore, StateStore
 from app.profiles.catalog import build_profile_selector
 from app.profiles.registry import ProfileSelector
@@ -59,7 +61,11 @@ def create_resources(
         prompt_registry=resolved_prompt_registry,
         profile_selector=resolved_profile_selector,
         agent_service=agent_service,
-        dispatcher=ModelAgentDispatcher(agent_service),
+        dispatcher=ModelAgentDispatcher(
+            agent_service,
+            DeterministicReadOnlyToolClient(),
+            InMemoryCheckpointStore(),
+        ),
     )
 
 

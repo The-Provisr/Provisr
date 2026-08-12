@@ -58,6 +58,18 @@ class AgentToolCall(ApiModel):
     tool_name: str
     ok: bool
     summary: str | None = None
+    provenance: dict[str, object] | None = None
+    error_code: str | None = None
+
+
+class AgentStreamEvent(ApiModel):
+    event_type: Literal[
+        "agent.status",
+        "clarification.required",
+        "manifest.validated",
+        "turn.cancelled",
+    ]
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 class AgentQuestion(ApiModel):
@@ -76,14 +88,17 @@ class AgentDispatchRequest(ApiModel):
     prompt: str
     history: list[AgentMessage] = Field(default_factory=list)
     question_answer: Any | None = None
+    cancellation_requested: bool = False
 
 
 class AgentDispatchResponse(ApiModel):
     messages: list[AgentMessage] = Field(default_factory=list)
     tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    events: list[AgentStreamEvent] = Field(default_factory=list)
     manifest_draft: Any | None = None
     question: AgentQuestion | None = None
     policy_decision: Literal["allow", "warn", "deny", "requires_approval"] | None = None
+    checkpoint_id: str | None = None
 
 
 class ProblemDetails(ApiModel):

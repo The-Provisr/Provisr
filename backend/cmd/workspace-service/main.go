@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/provisr/backend/pkg/health"
 	"github.com/rs/zerolog"
 )
@@ -242,19 +242,19 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	var ws workspace
 	err = tx.QueryRow(
-		`INSERT INTO provisr_identity.workspaces (name, slug, environment, description, settings)
-		 VALUES ($1, $2, $3, $4, '{}')
+		`INSERT INTO provisr_identity.workspaces (name, slug, environment, description, settings, idempotency_key)
+		 VALUES ($1, $2, $3, $4, '{}', $5)
 		 RETURNING id, name, slug, environment, description, created_at, updated_at`,
-		req.Name, slug, req.Environment, req.Description,
+		req.Name, slug, req.Environment, req.Description, key,
 	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "idx_workspaces_idempotency_key" {
+			writeIdempotencyError(w, r, errIdempotencyKeyUsed, s)
+			return
+		}
 		s.reqLog(r).Error().Err(err).Msg("failed to insert workspace")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
-		return
-	}
-
-	if err := claimIdempotencyKey(tx, key, ws.ID, "workspace_create"); err != nil {
-		writeIdempotencyError(w, r, err, s)
 		return
 	}
 

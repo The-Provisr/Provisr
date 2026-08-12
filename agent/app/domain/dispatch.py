@@ -55,12 +55,18 @@ class ModelAgentDispatcher:
 
         if request.phase == "pending_policy":
             policy = await self._tools.get_policy_requirements(request)
+            if not policy.ok:
+                events.append(self._event("agent.status", phase=request.phase, state="failed", label="Policy requirements unavailable"))
+                return AgentDispatchResponse(tool_calls=[policy], events=events)
             events.append(self._event("agent.status", phase=request.phase, state="complete", label="Policy requirements loaded"))
             return AgentDispatchResponse(tool_calls=[policy], events=events)
 
         if request.phase == "pending_cloud_context":
             capabilities = await self._tools.get_cloud_account_capabilities(request)
             inventory = await self._tools.get_existing_resources(request)
+            if not capabilities.ok or not inventory.ok:
+                events.append(self._event("agent.status", phase=request.phase, state="failed", label="Cloud context unavailable"))
+                return AgentDispatchResponse(tool_calls=[capabilities, inventory], events=events)
             events.append(self._event("agent.status", phase=request.phase, state="complete", label="Cloud context loaded"))
             return AgentDispatchResponse(tool_calls=[capabilities, inventory], events=events)
 

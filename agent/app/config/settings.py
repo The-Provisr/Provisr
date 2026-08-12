@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     anthropic_workspace_id: str = Field(default="", validation_alias="ANTHROPIC_WORKSPACE_ID")
     anthropic_model: str = Field(default="claude-sonnet-4-5", validation_alias="ANTHROPIC_MODEL")
 
+    # Read-only MCP endpoints. They are intentionally blank by default: missing
+    # configuration must fail closed instead of returning invented evidence.
+    mcp_policy_url: str = "http://localhost:5100"
+    mcp_cloud_url: str = "http://localhost:5101"
+    mcp_timeout_seconds: float = Field(default=5, ge=1, le=30)
+    mcp_service_auth_token: str = Field(default="", validation_alias="PROVISR_MCP_SERVICE_AUTH_TOKEN")
+
 
 
 @lru_cache

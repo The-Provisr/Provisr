@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -7,17 +10,42 @@ import {
 } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 
-export function ChatComposer() {
+export function ChatComposer({ disabled = false, onSubmit }: { disabled?: boolean; onSubmit: (prompt: string) => Promise<boolean> }) {
+  const [prompt, setPrompt] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    const message = prompt.trim();
+    if (!message || disabled || submitting) return;
+    setSubmitting(true);
+    try {
+      if (await onSubmit(message)) setPrompt("");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <footer className="bg-white p-4 sm:p-6">
       <div className="mx-auto max-w-[850px]">
         <div className="rounded-3xl border border-gray-200 bg-gray-50 p-4 shadow-sm transition-all focus-within:ring-2 focus-within:ring-blue-100">
           <label className="mb-3 ml-2 flex items-center gap-2 text-gray-400">
             <SparklesIcon className="size-4" />
-            <span className="text-sm">
-              Describe infrastructure or upload an architecture diagram...
-            </span>
-            <input className="sr-only" aria-label="Message" />
+            <textarea
+              aria-label="Message"
+              className="min-h-6 flex-1 resize-none bg-transparent text-sm text-gray-800 outline-none placeholder:text-gray-400"
+              disabled={disabled || submitting}
+              onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder="Describe infrastructure or upload an architecture diagram..."
+              rows={1}
+              value={prompt}
+            />
           </label>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -35,9 +63,9 @@ export function ChatComposer() {
                 <MicIcon className="size-4 text-gray-500" />
                 Voice
               </Button>
-              <Button className="px-6 py-2.5" variant="primary">
+              <Button className="px-6 py-2.5" disabled={disabled || submitting || !prompt.trim()} onClick={() => void submit()} variant="primary">
                 <ArrowUpIcon className="size-3.5" />
-                Send
+                {submitting ? "Sending" : "Send"}
               </Button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 export const SCHEMA_VERSION = "manifest/v1.0";
+export * from "./schemas/manifest";
 
 export type CloudProvider = "aws" | "azure" | "gcp";
 export const requestStatuses = [

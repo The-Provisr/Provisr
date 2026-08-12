@@ -45,6 +45,11 @@ export class SessionsController {
     });
   }
 
+  @Get(":id/messages")
+  messages(@Param("id", new ParseUUIDPipe()) id: string, @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string, @CurrentUser() user: RequestUser) {
+    return this.chat.listMessages(id, workspaceId, user.userId);
+  }
+
   @Get(":id")
   get(@Param("id", new ParseUUIDPipe()) _id: string, @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string, @CurrentUser() user: RequestUser) {
     return this.chat.getSession(_id, workspaceId, user.userId);

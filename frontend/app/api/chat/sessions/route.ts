@@ -18,6 +18,17 @@ export async function POST(request: Request) {
   return proxyJson(response);
 }
 
+export async function GET(request: Request) {
+  const { getToken } = await auth.protect();
+  const token = await getToken();
+  if (!token) return Response.json({ error: "unauthorized" }, { status: 401 });
+
+  const workspaceId = new URL(request.url).searchParams.get("workspaceId");
+  if (!workspaceId) return Response.json({ error: "missing_workspace_id" }, { status: 400 });
+  const response = await callChatApi(token, `/v1/sessions?workspaceId=${encodeURIComponent(workspaceId)}`);
+  return proxyJson(response);
+}
+
 function isCreateSessionBody(value: unknown): value is { workspaceId: string; title?: string } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const { workspaceId, title } = value as { workspaceId?: unknown; title?: unknown };

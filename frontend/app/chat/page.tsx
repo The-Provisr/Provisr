@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { ChatComposer } from "@/components/ui/chat-composer";
-import { ChatSidebar } from "@/components/ui/chat-sidebar";
+import { ChatSidebar, type ChatSessionItem } from "@/components/ui/chat-sidebar";
 import {
   SettingsIcon,
   UploadIcon,
@@ -20,9 +20,18 @@ export default function ChatPage() {
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(drawerTabs[0]);
   const [sessionId, setSessionId] = useState<string>();
+  const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [error, setError] = useState<string>();
   const workspaceId = readWorkspaceId(user?.publicMetadata);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setSessions([]);
+      return;
+    }
+    void loadSessions(workspaceId).then(setSessions).catch(() => setError("Unable to load saved requests."));
+  }, [workspaceId]);
 
   async function submitPrompt(prompt: string) {
     if (!workspaceId) {
@@ -53,6 +62,7 @@ export default function ChatPage() {
         if (!session.id) throw new Error("The chat session could not be created.");
         activeSessionId = session.id;
         setSessionId(activeSessionId);
+        setSessions((current) => [{ id: session.id!, title: prompt.slice(0, 80), updatedAt: new Date().toISOString() }, ...current]);
       }
 
       const turn = await postJson<{ runId?: string }>("/api/chat/planning-turns", {
@@ -77,15 +87,33 @@ export default function ChatPage() {
     }
   }
 
+  async function selectSession(nextSessionId: string) {
+    if (!workspaceId || nextSessionId === sessionId) return;
+    setError(undefined);
+    try {
+      const stored = await getJson<StoredMessage[]>(`/api/chat/sessions/${nextSessionId}/messages?workspaceId=${encodeURIComponent(workspaceId)}`);
+      setSessionId(nextSessionId);
+      setMessages(stored.map(toChatMessage));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load the selected request.");
+    }
+  }
+
+  function startNewRequest() {
+    setSessionId(undefined);
+    setMessages([]);
+    setError(undefined);
+  }
+
   return (
     <main className="flex h-screen overflow-hidden bg-gray-50 font-sans text-gray-800">
       <NavigationRail />
-      <ChatSidebar />
+      <ChatSidebar activeSessionId={sessionId} onNewRequest={startNewRequest} onSelectSession={(id) => void selectSession(id)} sessions={sessions} />
 
       <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-50 px-4 sm:px-6">
           <div className="flex items-center gap-2">
-            <h3 className="font-medium text-sm text-gray-900">{sessionId ? "Infrastructure request" : "New infrastructure request"}</h3>
+            <h3 className="font-medium text-sm text-gray-900">{sessions.find((session) => session.id === sessionId)?.title ?? "New infrastructure request"}</h3>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
@@ -176,6 +204,38 @@ async function postJson<T>(url: string, body: Record<string, string>): Promise<T
     throw new Error(typeof payload.message === "string" ? payload.message : "Unable to complete the request.");
   }
   return payload as T;
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, { cache: "no-store" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload.message === "string" ? payload.message : "Unable to load saved requests.");
+  }
+  return payload as T;
+}
+
+async function loadSessions(workspaceId: string): Promise<ChatSessionItem[]> {
+  return getJson<ChatSessionItem[]>(`/api/chat/sessions?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+type StoredMessage = {
+  id: string;
+  turnId: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: string;
+};
+
+function toChatMessage(message: StoredMessage): ChatMessageItem {
+  return {
+    id: message.id,
+    runId: message.turnId,
+    role: message.role,
+    content: message.content,
+    status: "complete",
+    createdAt: message.createdAt,
+  };
 }
 
 function readWorkspaceId(metadata: unknown): string | undefined {

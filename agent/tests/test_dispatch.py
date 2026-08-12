@@ -7,6 +7,8 @@ from app.api.schemas import AgentDispatchRequest
 from app.domain.dispatch import ModelAgentDispatcher
 from app.domain.errors import PhaseNotConfiguredError
 from app.domain.service import AgentService
+from app.integrations.checkpoints import InMemoryCheckpointStore
+from app.integrations.mcp_tools import DeterministicReadOnlyToolClient
 from app.integrations.state import InMemoryStateStore
 from app.profiles.catalog import build_profile_selector
 from app.prompts.catalog import build_prompt_registry
@@ -34,7 +36,11 @@ def dispatcher(raw_output: str) -> tuple[ModelAgentDispatcher, FakeLanguageModel
     service = AgentService(
         state=InMemoryStateStore(), model=model, profile_selector=profiles
     )
-    return ModelAgentDispatcher(service), model
+    return ModelAgentDispatcher(
+        service,
+        DeterministicReadOnlyToolClient(),
+        InMemoryCheckpointStore(),
+    ), model
 
 
 @pytest.mark.anyio
@@ -76,10 +82,19 @@ async def test_pending_agent_adapts_a_manifest_draft() -> None:
 
 
 @pytest.mark.anyio
-async def test_unimplemented_evidence_phase_fails_closed() -> None:
+async def test_policy_phase_returns_read_only_evidence() -> None:
     adapter, model = dispatcher("{}")
 
-    with pytest.raises(PhaseNotConfiguredError):
-        await adapter.dispatch(request(phase="pending_policy"))
+    response = await adapter.dispatch(request(phase="pending_policy"))
 
     assert model.sessions == []
+    assert response.tool_calls[0].tool_name == "get_policy_requirements"
+    assert response.tool_calls[0].ok is True
+
+
+@pytest.mark.anyio
+async def test_unimplemented_phase_fails_closed() -> None:
+    adapter, _ = dispatcher("{}")
+
+    with pytest.raises(PhaseNotConfiguredError):
+        await adapter.dispatch(request(phase="pending_iac"))

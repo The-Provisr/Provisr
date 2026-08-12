@@ -7,12 +7,15 @@ CREATE TABLE provisr_state.chat_turns (
     workspace_id UUID NOT NULL,
     requester_id UUID NOT NULL REFERENCES provisr_identity.users(id),
     client_message_id UUID NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL,
     status provisr_state.chat_turn_status NOT NULL DEFAULT 'accepted',
     input JSONB NOT NULL,
     correlation_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (session_id, client_message_id),
+    UNIQUE (workspace_id, requester_id, idempotency_key),
     UNIQUE (id, session_id, workspace_id),
     FOREIGN KEY (session_id, workspace_id)
         REFERENCES provisr_state.chat_sessions(id, workspace_id) ON DELETE CASCADE

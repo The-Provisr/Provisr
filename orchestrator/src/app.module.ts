@@ -14,6 +14,7 @@ import { ApprovalsController } from "./routes/approvals.controller";
 import { ArtifactsController } from "./routes/artifacts.controller";
 import { SseController } from "./routes/sse.controller";
 import { DbService } from "./db/db.service";
+import { ChatPersistenceService } from "./services/chat-persistence.service";
 
 @Module({
   imports: [],
@@ -28,6 +29,7 @@ import { DbService } from "./db/db.service";
   ],
   providers: [
     DbService,
+    ChatPersistenceService,
     {
       // Config read once at wiring time and passed in (never read from
       // process.env inside services). Fails fast in production without

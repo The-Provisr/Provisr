@@ -8,6 +8,7 @@ import {
   Query,
 } from "@nestjs/common";
 import { z } from "zod";
+import { ChatPersistenceService } from "../services/chat-persistence.service";
 import { NotImplementedError } from "../common/errors/typed-errors";
 import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 import { CurrentUser } from "../middleware/current-user.decorator";
@@ -17,6 +18,12 @@ import { requestStatuses } from "@provisr/shared-contracts";
 export const createRunSchema = z.object({
   sessionId: z.string().uuid(),
   prompt: z.string().min(1).max(20000),
+});
+
+export const createPlanningTurnSchema = createRunSchema.extend({
+  workspaceId: z.string().uuid(),
+  clientMessageId: z.string().uuid(),
+  idempotencyKey: z.string().min(1).max(255),
 });
 
 export const confirmRunSchema = z.object({
@@ -37,6 +44,19 @@ const runStatusQuerySchema = z.enum(requestStatuses).optional();
 
 @Controller("runs")
 export class ProvisioningRunsController {
+  constructor(private readonly chat: ChatPersistenceService) {}
+
+  @Post("planning-turns")
+  submitPlanningTurn(
+    @Body(new ZodValidationPipe(createPlanningTurnSchema)) dto: z.infer<typeof createPlanningTurnSchema>,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.chat.submitPlanningTurn({
+      sessionId: dto.sessionId, workspaceId: dto.workspaceId, userId: user.userId,
+      prompt: dto.prompt, clientMessageId: dto.clientMessageId, idempotencyKey: dto.idempotencyKey,
+    });
+  }
+
   @Post()
   create(@Body(new ZodValidationPipe(createRunSchema)) _dto: CreateRunDto): never {
     // TODO(OR-005): create run via workflow state machine

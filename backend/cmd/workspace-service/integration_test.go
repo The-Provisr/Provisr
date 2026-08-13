@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/rs/zerolog"
 )
 
@@ -161,31 +163,59 @@ func runMigrations(t *testing.T, db *sql.DB) {
 		}
 		for _, stmt := range splitStatements(string(raw)) {
 			if _, err := db.Exec(stmt); err != nil {
+				if isRoleAlreadyExists(stmt, err) {
+					continue
+				}
 				t.Fatalf("migration %s failed: %v\nstatement:\n%s", name, err, stmt)
 			}
 		}
 	}
 }
 
-// splitStatements splits migration DDL into single statements. All backend
-// migrations are plain DDL, one ";" per line, with no PL/pgSQL blocks.
-// Comment lines are stripped from each statement segment so a statement that
-// is preceded by a comment block still executes.
+// isRoleAlreadyExists reports whether a migration statement failed only because
+// the role it creates already exists. Roles are cluster-wide, so the first test
+// database that runs the migrations creates them; every later test database
+// must tolerate the duplicate.
+func isRoleAlreadyExists(stmt string, err error) bool {
+	if !strings.HasPrefix(strings.TrimSpace(stmt), "CREATE ROLE") {
+		return false
+	}
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "42710"
+}
+
+// splitStatements splits migration DDL into single statements. Migrations are
+// plain DDL with one ";" per line, plus PL/pgSQL blocks that are dollar-quoted
+// ($$...$$). Semicolons inside a dollar-quoted body are statement terminators
+// of the body, not migration separators, so they are preserved. Comment lines
+// are stripped unless they are inside a dollar-quoted block.
 func splitStatements(sqlText string) []string {
 	var out []string
-	for _, part := range strings.Split(sqlText, ";\n") {
-		var lines []string
-		for _, line := range strings.Split(part, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "--") {
-				continue
+	var cur []string
+	inDollar := false
+	for _, line := range strings.Split(sqlText, "\n") {
+		if inDollar {
+			cur = append(cur, line)
+			if strings.Contains(line, "$$") {
+				inDollar = false
 			}
-			lines = append(lines, line)
+			continue
 		}
-		stmt := strings.TrimSpace(strings.Join(lines, "\n"))
-		stmt = strings.TrimSuffix(stmt, ";")
-		if stmt = strings.TrimSpace(stmt); stmt != "" {
-			out = append(out, stmt)
+		if strings.HasPrefix(strings.TrimSpace(line), "--") {
+			continue
 		}
+		cur = append(cur, line)
+		if strings.Contains(line, "$$") {
+			inDollar = true
+			continue
+		}
+		if strings.HasSuffix(strings.TrimSpace(line), ";") {
+			out = append(out, strings.TrimSpace(strings.Join(cur, "\n")))
+			cur = nil
+		}
+	}
+	if stmt := strings.TrimSpace(strings.Join(cur, "\n")); stmt != "" {
+		out = append(out, stmt)
 	}
 	return out
 }

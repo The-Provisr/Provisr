@@ -118,7 +118,7 @@ func main() {
 
 	dbDSN := os.Getenv("DATABASE_URL")
 	if dbDSN == "" {
-		dbDSN = "postgres://localhost:5432/provisr?sslmode=disable"
+		dbDSN = "postgres://provisr_app:provisr-app-dev@localhost:5432/provisr?sslmode=disable"
 	}
 
 	logger := zerolog.New(os.Stdout).With().Timestamp().Str("service", "workspace-service").Logger()

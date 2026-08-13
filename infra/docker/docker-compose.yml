@@ -10,6 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U provisr"]
       interval: 5s
@@ -163,7 +164,7 @@ services:
       - "8088:8088"
     environment:
       PORT: "8088"
-      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      DATABASE_URL: postgres://provisr_app:provisr-app-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
       postgres: { condition: service_healthy }
 

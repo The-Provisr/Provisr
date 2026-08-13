@@ -1,6 +1,8 @@
 import { INestApplication } from "@nestjs/common";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createTestApp, http, useDevAuth } from "../helpers/create-test-app";
+import { SessionsController } from "../../src/routes/sessions.controller";
+import { ChatPersistenceService } from "../../src/services/chat-persistence.service";
 
 const UUID = "a3b8f0f2-2c4a-4d6e-8f0a-1b2c3d4e5f6a";
 
@@ -38,21 +40,6 @@ describe("Sessions routes", () => {
     ]);
   });
 
-  it("returns 501 for listing with a valid workspaceId", async () => {
-    const res = await http(app)
-      .get(`/v1/sessions?workspaceId=${UUID}`)
-      .expect(501);
-    expect(res.body.message).toBe("Session listing is not implemented yet");
-  });
-
-  it("accepts a valid create body and returns 501", async () => {
-    const res = await http(app)
-      .post("/v1/sessions")
-      .send({ workspaceId: UUID })
-      .expect(501);
-    expect(res.body.message).toBe("Session creation is not implemented yet");
-  });
-
   it("returns 400 with field details for an invalid workspaceId in the body", async () => {
     const res = await http(app)
       .post("/v1/sessions")
@@ -74,17 +61,35 @@ describe("Sessions routes", () => {
     expect(res.body.details[0].message).toContain("at least 1 character");
   });
 
-  it("returns 501 for get and delete on an existing id", async () => {
-    const getRes = await http(app).get(`/v1/sessions/${UUID}`).expect(501);
-    expect(getRes.body.message).toBe("Session retrieval is not implemented yet");
-
-    const delRes = await http(app).delete(`/v1/sessions/${UUID}`).expect(501);
-    expect(delRes.body.message).toBe("Session deletion is not implemented yet");
-  });
-
   it("rejects invalid session ids in the path", async () => {
     const res = await http(app).delete("/v1/sessions/not-a-uuid").expect(400);
-    expect(res.body.error).toBe("BAD_REQUEST");
-    expect(res.body.message).toBe("Validation failed (uuid is expected)");
+    expect(res.body.code).toBe("VALIDATION_FAILED");
+    expect(res.body.message).toBe("Request validation failed");
+  });
+});
+
+describe("SessionsController", () => {
+  const user = { userId: "user-1", clerkId: "clerk-1", email: undefined, workspaceIds: [], roles: {} };
+
+  it("delegates persisted session operations to the chat service", async () => {
+    const chat = {
+      listSessions: vi.fn().mockResolvedValue([]),
+      createSession: vi.fn().mockResolvedValue({ id: UUID }),
+      getSession: vi.fn().mockResolvedValue({ id: UUID }),
+      deleteSession: vi.fn().mockResolvedValue(undefined),
+      getMessagePreview: vi.fn().mockResolvedValue([]),
+    };
+    const controller = new SessionsController(chat as unknown as ChatPersistenceService);
+
+    await controller.list(UUID, { limit: 50, offset: 0 }, user);
+    await controller.create({ workspaceId: UUID, title: "Request" }, user);
+    await controller.get(UUID, UUID, user);
+    await controller.remove(UUID, UUID, user);
+
+    expect(chat.listSessions).toHaveBeenCalledWith(UUID, user.userId, 50, 0);
+    expect(chat.createSession).toHaveBeenCalledWith({ workspaceId: UUID, userId: user.userId, title: "Request" });
+    expect(chat.getSession).toHaveBeenCalledWith(UUID, UUID, user.userId);
+    expect(chat.getMessagePreview).toHaveBeenCalledWith(UUID, UUID, user.userId);
+    expect(chat.deleteSession).toHaveBeenCalledWith(UUID, UUID, user.userId);
   });
 });

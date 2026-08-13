@@ -1,5 +1,0 @@
-{
-  "service_name": "audit",
-  "port": "8085",
-  "environment": "dev"
-}

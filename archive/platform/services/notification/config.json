@@ -1,5 +1,0 @@
-{
-  "service_name": "notification",
-  "port": "8086",
-  "environment": "dev"
-}

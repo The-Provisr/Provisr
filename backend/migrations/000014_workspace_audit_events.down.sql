@@ -1,1 +1,0 @@
--- Postgres ENUM value removal is not directly supported without recreating the type.

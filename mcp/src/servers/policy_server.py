@@ -6,12 +6,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 import asyncpg
-import httpx
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 
-from src.context.fastapi import install_context_error_handler, require_context
+from src.context.fastapi import install_context_error_handler
 from src.context.membership import MembershipStore, PostgresMembershipStore
-from src.context.models import MCPContext
 
 
 @dataclass(slots=True)
@@ -56,24 +54,6 @@ def create_app(membership_store: MembershipStore | None = None) -> FastAPI:
     @application.get("/health/ready")
     async def ready() -> dict[str, str]:
         return {"status": "ok"}
-
-    @application.post("/tools/get_policy_requirements")
-    async def get_policy_requirements(
-        _: dict[str, object],
-        context: MCPContext = Depends(require_context("policy:read")),
-    ) -> dict[str, object]:
-        """MCP-003: retrieve requirements from the backend policy authority."""
-        policy_url = os.getenv("POLICY_SERVICE_URL", "http://localhost:8081")
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(
-                f"{policy_url.rstrip('/')}/workspaces/{context.workspace_id}/policy-requirements"
-            )
-            response.raise_for_status()
-        return {
-            "ok": True,
-            "tool": "get_policy_requirements",
-            "result": response.json(),
-        }
 
     return application
 

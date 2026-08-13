@@ -1,6 +1,0 @@
-{
-  "service_name": "policy",
-  "port": "8083",
-  "environment": "dev",
-  "database_url": "postgres://provisr:provisr_dev@localhost:5433/provisr?sslmode=disable"
-}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { ChatComposer } from "@/components/ui/chat-composer";
@@ -18,11 +18,13 @@ const drawerTabs = ["Manifest", "Policy", "Terraform Plan", "Approval"];
 export default function ChatPage() {
   const { user } = useUser();
   const [isReviewOpen, setIsReviewOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState(drawerTabs[0]);
+  const [activeTab, setActiveTab] = useState<string>(drawerTabs[0]!);
   const [sessionId, setSessionId] = useState<string>();
   const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [error, setError] = useState<string>();
+  const [planningOutput, setPlanningOutput] = useState<PlanningOutput>();
+  const lastEventId = useRef(0);
   const workspaceId = readWorkspaceId(user?.publicMetadata);
 
   useEffect(() => {
@@ -32,6 +34,32 @@ export default function ChatPage() {
     }
     void loadSessions(workspaceId).then(setSessions).catch(() => setError("Unable to load saved requests."));
   }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const stream = new EventSource(`/api/chat/events?workspaceId=${encodeURIComponent(workspaceId)}&after=${lastEventId.current}`);
+    const refreshActiveSession = () => {
+      if (!sessionId) return;
+      void getJson<StoredMessage[]>(`/api/chat/sessions/${sessionId}/messages?workspaceId=${encodeURIComponent(workspaceId)}`)
+        .then((stored) => setMessages(stored.map(toChatMessage)))
+        .catch(() => setError("Planning completed, but the updated chat could not be loaded."));
+    };
+    stream.addEventListener("planning.started", (event) => {
+      lastEventId.current = Number(event.lastEventId) || lastEventId.current;
+    });
+    stream.addEventListener("planning.completed", (event) => {
+      lastEventId.current = Number(event.lastEventId) || lastEventId.current;
+      const payload = parsePlanningEvent(event.data);
+      if (sessionId && payload.sessionId !== sessionId) return;
+      setPlanningOutput(payload);
+      refreshActiveSession();
+    });
+    stream.addEventListener("planning.failed", (event) => {
+      lastEventId.current = Number(event.lastEventId) || lastEventId.current;
+      setError("Planning could not be completed. You can retry the request.");
+    });
+    return () => stream.close();
+  }, [sessionId, workspaceId]);
 
   async function submitPrompt(prompt: string) {
     if (!workspaceId) {
@@ -76,6 +104,8 @@ export default function ChatPage() {
       setMessages((current) => current.map((message) => message.id === clientMessageId
         ? { ...message, runId: turn.runId!, status: "sent" }
         : message));
+      const stored = await getJson<StoredMessage[]>(`/api/chat/sessions/${activeSessionId}/messages?workspaceId=${encodeURIComponent(workspaceId)}`);
+      setMessages(stored.map(toChatMessage));
       return true;
     } catch (submissionError) {
       const message = submissionError instanceof Error ? submissionError.message : "Unable to send the request.";
@@ -103,6 +133,7 @@ export default function ChatPage() {
     setSessionId(undefined);
     setMessages([]);
     setError(undefined);
+    setPlanningOutput(undefined);
   }
 
   return (
@@ -179,18 +210,46 @@ export default function ChatPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-5">
-              <section className="rounded-lg border border-gray-100 p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Awaiting planning output</h3>
-                <p className="mt-2 text-sm leading-relaxed text-gray-700">
-                  The request is stored and queued. Manifest, policy, plan, and approval details will appear here once the planning workflow emits them.
-                </p>
-              </section>
+              <PlanningPreview activeTab={activeTab} output={planningOutput} />
             </div>
           </aside>
         ) : null}
       </section>
     </main>
   );
+}
+
+type PlanningOutput = {
+  runId?: string;
+  sessionId?: string;
+  manifest?: unknown;
+  policyAndCloudEvidence?: Array<{ tool?: string; summary?: string | null }>;
+  planStatus?: string;
+};
+
+function parsePlanningEvent(data: string): PlanningOutput {
+  try {
+    const value = JSON.parse(data) as PlanningOutput;
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function PlanningPreview({ activeTab, output }: { activeTab: string; output?: PlanningOutput }) {
+  if (!output) {
+    return <section className="rounded-lg border border-gray-100 p-4"><h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Awaiting planning output</h3><p className="mt-2 text-sm leading-relaxed text-gray-700">The request is stored and queued. Live policy, cloud context, and manifest output will appear here.</p></section>;
+  }
+  if (activeTab === "Policy") {
+    return <section className="rounded-lg border border-gray-100 p-4"><h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Policy and cloud evidence</h3><ul className="mt-3 space-y-2 text-sm text-gray-700">{(output.policyAndCloudEvidence ?? []).map((item, index) => <li key={`${item.tool}-${index}`}><span className="font-medium">{item.tool ?? "evidence"}</span>{item.summary ? ` — ${item.summary}` : ""}</li>)}</ul></section>;
+  }
+  if (activeTab === "Manifest") {
+    return <section className="rounded-lg border border-gray-100 p-4"><h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Generated manifest</h3><pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs text-gray-700">{output.manifest ? JSON.stringify(output.manifest, null, 2) : "The agent did not return a manifest draft."}</pre></section>;
+  }
+  if (activeTab === "Terraform Plan") {
+    return <section className="rounded-lg border border-gray-100 p-4"><h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Terraform plan</h3><p className="mt-2 text-sm text-gray-700">{output.planStatus === "not_generated" ? "A Terraform plan has not been generated in this planning stage." : "No plan output is available."}</p></section>;
+  }
+  return <section className="rounded-lg border border-gray-100 p-4"><h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Approval</h3><p className="mt-2 text-sm text-gray-700">Approval is evaluated after a plan is generated.</p></section>;
 }
 
 async function postJson<T>(url: string, body: Record<string, string>): Promise<T> {

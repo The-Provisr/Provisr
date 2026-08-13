@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, JSX, ReactNode } from "react";
 import type {
   ArchitectureResourceType,
   ArchitectureSummaryProps,
@@ -16,7 +16,7 @@ import {
   ZapIcon,
 } from "@/components/ui/icons";
 
-type IconComponent = (props: ComponentProps<typeof ServerStackIcon>) => ReactNode;
+type IconComponent = (props: ComponentProps<typeof ServerStackIcon>) => JSX.Element;
 
 const resourceIcons: Record<KnownArchitectureResourceType, IconComponent> = {
   compute: ServerStackIcon,

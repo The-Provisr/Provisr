@@ -3,7 +3,10 @@
 -- (000015); this migration adds the same guarantee at the privilege level
 -- (defense in depth). The application connects as provisr_app, which can read
 -- the chain tail and append events but can never UPDATE or DELETE rows.
-CREATE ROLE provisr_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD 'provisr-app-dev';
+--
+-- The role itself is cluster-scoped and provisioned by database
+-- infrastructure (infra/docker/postgres-init/01_provisr_app_role.sql), never
+-- by this migration. This migration only applies database-local grants.
 
 GRANT USAGE ON SCHEMA provisr_identity TO provisr_app;
 GRANT USAGE ON SCHEMA provisr_state TO provisr_app;

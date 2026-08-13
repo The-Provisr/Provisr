@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"github.com/rs/zerolog"
 )
 
@@ -83,8 +81,32 @@ func setupTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 
+	provisionAppRole(t, admin)
 	runMigrations(t, db)
 	return db
+}
+
+// provisionAppRole ensures the cluster-scoped provisr_app role exists before
+// migrations run. The role is created by database infrastructure
+// (infra/docker/postgres-init/01_provisr_app_role.sql), not by migrations, so
+// the test harness provisions it the same way when targeting an existing
+// cluster.
+func provisionAppRole(t *testing.T, admin *sql.DB) {
+	t.Helper()
+	var exists bool
+	if err := admin.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = 'provisr_app')`,
+	).Scan(&exists); err != nil {
+		t.Fatalf("check provisr_app role: %v", err)
+	}
+	if exists {
+		return
+	}
+	if _, err := admin.Exec(
+		`CREATE ROLE provisr_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD 'provisr-app-dev'`,
+	); err != nil {
+		t.Fatalf("create provisr_app role: %v", err)
+	}
 }
 
 // swapDBName rewrites the database name segment of a postgres URL.
@@ -163,25 +185,10 @@ func runMigrations(t *testing.T, db *sql.DB) {
 		}
 		for _, stmt := range splitStatements(string(raw)) {
 			if _, err := db.Exec(stmt); err != nil {
-				if isRoleAlreadyExists(stmt, err) {
-					continue
-				}
 				t.Fatalf("migration %s failed: %v\nstatement:\n%s", name, err, stmt)
 			}
 		}
 	}
-}
-
-// isRoleAlreadyExists reports whether a migration statement failed only because
-// the role it creates already exists. Roles are cluster-wide, so the first test
-// database that runs the migrations creates them; every later test database
-// must tolerate the duplicate.
-func isRoleAlreadyExists(stmt string, err error) bool {
-	if !strings.HasPrefix(strings.TrimSpace(stmt), "CREATE ROLE") {
-		return false
-	}
-	var pqErr *pq.Error
-	return errors.As(err, &pqErr) && pqErr.Code == "42710"
 }
 
 // splitStatements splits migration DDL into single statements. Migrations are

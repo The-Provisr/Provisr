@@ -291,3 +291,65 @@ export function ArrowUpIcon(props: IconProps) {
     </IconBase>
   );
 }
+
+export function DatabaseIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+      <path d="M3 12a9 3 0 0 0 18 0" />
+    </IconBase>
+  );
+}
+
+export function HardDriveIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z" />
+      <path d="M22 12H2" />
+      <path d="M6 16h.01M10 16h.01" />
+    </IconBase>
+  );
+}
+
+export function NetworkIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect width="6" height="6" x="16" y="16" rx="1" />
+      <rect width="6" height="6" x="2" y="16" rx="1" />
+      <rect width="6" height="6" x="9" y="2" rx="1" />
+      <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" />
+      <path d="M12 12V8" />
+    </IconBase>
+  );
+}
+
+export function DownloadIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M12 15V3" />
+    </IconBase>
+  );
+}
+
+export function AlertTriangleIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </IconBase>
+  );
+}
+
+export function ExternalLinkIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </IconBase>
+  );
+}

@@ -37,9 +37,11 @@ The interface language is:
 | Hairline soft | `rgba(255,255,255,.07)` | Dividers |
 | Accent blue | `#0099ff` | Focus rings, links, selection only |
 | Primary CTA | `#ffffff` on `#050505` | Main action pills |
-| Warning | `#f59e0b` at 12% bg / 35% border, `#fbbf24` text | Warning cards, non-blocking caveats (FE-C04) |
-| Danger | `#ef4444` at 12% bg / 35% border, `#fca5a5` text | Destructive or blocked states |
-| Success | `#22c94f` at 12% bg / 32% border, `#86efac` text | Approval, healthy status |
+| Danger | base `#ef4444` · ink `#fca5a5` · surface `rgba(239,68,68,.12)` · hairline `rgba(239,68,68,.35)` | Errors, failed states, destructive actions |
+| Warning | base `#f59e0b` · ink `#fbbf24` · surface `rgba(245,158,11,.12)` · hairline `rgba(245,158,11,.35)` | Policy warnings, non-blocking alerts |
+| Success | base `#22c94e` · ink `#86efac` · surface `rgba(34,197,94,.12)` · hairline `rgba(34,197,94,.32)` | Live, healthy, completed states |
+
+Semantic status colors use dark-tinted surfaces with lighter ink on top; the concrete utility remaps live in `frontend/app/globals.css` (see the dark-canvas theme section).
 
 ## Typography
 

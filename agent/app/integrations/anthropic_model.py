@@ -1,30 +1,29 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import ssl
 from typing import Any, Protocol, cast
 
 import anthropic
 import certifi
-from pydantic import ValidationError
 
 from app.domain.errors import (
     DependencyUnavailableError,
     InvalidModelResponseError,
     ModelNotConfiguredError,
 )
-from app.domain.models import AgentSession, ModelTurnResult
-from app.prompts.models import PromptBundle
+from app.domain.models import AgentSession
+from app.outputs.runtime import render_runtime_system_prompt
+from app.profiles.models import ProfileBundle
 
 
 class LanguageModel(Protocol):
     async def complete_turn(
         self,
         session: AgentSession,
-        prompt: PromptBundle,
-    ) -> ModelTurnResult: ...
+        profile: ProfileBundle,
+    ) -> str: ...
 
 
 class MessagesResource(Protocol):
@@ -49,13 +48,11 @@ class ClaudeModel:
         *,
         api_key: str,
         model: str,
-        max_tokens: int,
         base_url: str = "",
         workspace_id: str = "",
         client: AnthropicClient | None = None,
     ) -> None:
         self._model = model
-        self._max_tokens = max_tokens
         if client is not None:
             self._client: AnthropicClient = client
         elif api_key:
@@ -77,8 +74,8 @@ class ClaudeModel:
     async def complete_turn(
         self,
         session: AgentSession,
-        prompt: PromptBundle,
-    ) -> ModelTurnResult:
+        profile: ProfileBundle,
+    ) -> str:
         if not self._model:
             raise ModelNotConfiguredError("Anthropic model ID is not configured")
 
@@ -89,8 +86,9 @@ class ClaudeModel:
             response = await asyncio.to_thread(
                 self._client.messages.create,
                 model=self._model,
-                max_tokens=self._max_tokens,
-                system=prompt.content,
+                max_tokens=profile.llm_config.max_tokens,
+                temperature=profile.llm_config.temperature,
+                system=render_runtime_system_prompt(profile, session.request_id),
                 messages=messages,
             )
         except ModelNotConfiguredError:
@@ -98,20 +96,7 @@ class ClaudeModel:
         except anthropic.APIError as error:
             raise DependencyUnavailableError("Anthropic request failed") from error
 
-        text = _extract_text(response)
-        try:
-            payload = json.loads(_strip_code_fence(text))
-            result = ModelTurnResult.model_validate(payload)
-        except (json.JSONDecodeError, ValidationError) as error:
-            raise InvalidModelResponseError("Claude returned an invalid agent result") from error
-
-        if result.outcome == "manifest_candidate" and result.manifest is None:
-            raise InvalidModelResponseError("Manifest candidate did not contain a manifest")
-        if result.outcome == "needs_clarification" and result.manifest is not None:
-            raise InvalidModelResponseError(
-                "Clarification result unexpectedly contained a manifest"
-            )
-        return result
+        return _strip_code_fence(_extract_text(response))
 
 
 def _build_http_client() -> anthropic.DefaultHttpxClient | None:

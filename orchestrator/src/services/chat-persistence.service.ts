@@ -114,9 +114,9 @@ export class ChatPersistenceService {
       );
       const turn = await client.query<{ id: string }>(
         `INSERT INTO provisr_state.chat_turns
-         (session_id, workspace_id, requester_id, client_message_id, idempotency_key, request_fingerprint, input, correlation_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [params.sessionId, params.workspaceId, params.userId, params.clientMessageId, params.idempotencyKey, fingerprint, JSON.stringify({ kind: "text", text: params.prompt }), correlationId],
+         (session_id, workspace_id, requester_id, client_message_id, idempotency_key, request_fingerprint, input, correlation_id, provisioning_run_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [params.sessionId, params.workspaceId, params.userId, params.clientMessageId, params.idempotencyKey, fingerprint, JSON.stringify({ kind: "text", text: params.prompt }), correlationId, run.rows[0]!.id],
       );
       await client.query(
         `INSERT INTO provisr_state.chat_messages (session_id, workspace_id, turn_id, role, content)

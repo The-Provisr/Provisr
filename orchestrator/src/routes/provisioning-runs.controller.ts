@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { ChatPersistenceService } from "../services/chat-persistence.service";
+import { PlanningDispatchService } from "../services/planning-dispatch.service";
 import { NotImplementedError } from "../common/errors/typed-errors";
 import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 import { CurrentUser } from "../middleware/current-user.decorator";
@@ -44,17 +45,19 @@ const runStatusQuerySchema = z.enum(requestStatuses).optional();
 
 @Controller("runs")
 export class ProvisioningRunsController {
-  constructor(private readonly chat: ChatPersistenceService) {}
+  constructor(private readonly chat: ChatPersistenceService, private readonly planning: PlanningDispatchService) {}
 
   @Post("planning-turns")
-  submitPlanningTurn(
+  async submitPlanningTurn(
     @Body(new ZodValidationPipe(createPlanningTurnSchema)) dto: z.infer<typeof createPlanningTurnSchema>,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.chat.submitPlanningTurn({
+    const turn = await this.chat.submitPlanningTurn({
       sessionId: dto.sessionId, workspaceId: dto.workspaceId, userId: user.userId,
       prompt: dto.prompt, clientMessageId: dto.clientMessageId, idempotencyKey: dto.idempotencyKey,
     });
+    if (!turn.replayed) await this.planning.process(turn.turnId);
+    return turn;
   }
 
   @Post()

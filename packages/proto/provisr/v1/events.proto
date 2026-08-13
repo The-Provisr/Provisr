@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package provisr.v1;
+
+option go_package = "github.com/provisr/backend/pkg/protos/provisr/v1";
+
+import "provisr/v1/common.proto";
+
+message StateChangedEvent {
+  string event_id = 1;
+  string request_id = 2;
+  string workspace_id = 3;
+  string previous_status = 4;
+  string new_status = 5;
+  int32 state_version = 6;
+  string actor = 7;
+  string correlation_id = 8;
+  Timestamp timestamp = 9;
+}
+
+message AuditEvent {
+  string event_id = 1;
+  string request_id = 2;
+  string workspace_id = 3;
+  string user_id = 4;
+  string service_name = 5;
+  string event_type = 6;
+  string payload_json = 7;
+  string previous_event_hash = 8;
+  string event_hash = 9;
+  Timestamp created_at = 10;
+}

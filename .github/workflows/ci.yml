@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      go: ${{ steps.changes.outputs.go }}
+      ts: ${{ steps.changes.outputs.ts }}
+      python: ${{ steps.changes.outputs.python }}
+      proto: ${{ steps.changes.outputs.proto }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            go:
+              - 'backend/**'
+            ts:
+              - 'frontend/**'
+              - 'orchestrator/**'
+              - 'packages/shared-contracts/**'
+            python:
+              - 'agent/**'
+              - 'mcp/**'
+            proto:
+              - 'packages/proto/**'
+
+  golang:
+    needs: detect
+    if: ${{ needs.detect.outputs.go == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - run: go build ./cmd/...
+        working-directory: backend
+      - run: go test ./...
+        working-directory: backend
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: backend
+
+  typescript:
+    needs: detect
+    if: ${{ needs.detect.outputs.ts == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @provisr/shared-contracts build
+      - run: pnpm --filter @provisr/orchestrator build
+      - run: pnpm --filter @provisr/frontend build
+
+  python:
+    needs: detect
+    if: ${{ needs.detect.outputs.python == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - run: uv sync --frozen
+        working-directory: agent
+      - run: uv run ruff check app
+        working-directory: agent
+      - run: uv sync --frozen
+        working-directory: mcp
+      - run: uv run ruff check src
+        working-directory: mcp
+
+  proto:
+    needs: detect
+    if: ${{ needs.detect.outputs.proto == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1
+      - run: buf lint
+      - run: buf breaking --against .git
+        working-directory: packages/proto

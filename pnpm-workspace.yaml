@@ -1,0 +1,8 @@
+packages:
+  - "frontend"
+  - "orchestrator"
+  - "packages/shared-contracts"
+allowBuilds:
+  '@clerk/shared': true
+  esbuild: true
+  sharp: true

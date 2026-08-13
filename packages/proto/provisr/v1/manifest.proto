@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package provisr.v1;
+
+option go_package = "github.com/provisr/backend/pkg/protos/provisr/v1";
+
+
+
+// ResourceManifest is the canonical provider-neutral infrastructure intent.
+message ResourceManifest {
+  string schema_version = 1;
+  CloudProvider provider = 2;
+  string region = 3;
+  string cloud_account_id = 4;
+  string environment = 5;
+  repeated Resource resources = 6;
+  repeated Dependency dependencies = 7;
+  map<string, string> tags = 8;
+  SecuritySettings security = 9;
+  CostMetadata cost = 10;
+  repeated string policy_requirement_refs = 11;
+  map<string, SourceMetadata> source_metadata = 12;
+  repeated Unknown unknown_fields = 13;
+  repeated string user_confirmation_requirements = 14;
+}
+
+message Resource {
+  string id = 1;
+  ResourceType type = 2;
+  string name = 3;
+  string provider = 4;
+  string region = 5;
+  map<string, string> properties = 6;
+  map<string, string> tags = 7;
+}
+
+message Dependency {
+  string source_id = 1;
+  string target_id = 2;
+  string relationship = 3;
+}
+
+message SecuritySettings {
+  bool public_access = 1;
+  bool encryption_enabled = 2;
+  string encryption_type = 3;
+}
+
+message CostMetadata {
+  double estimated_monthly_usd = 1;
+  int32 confidence_pct = 2;
+}
+
+message SourceMetadata {
+  string source = 1; // user_prompt, image_detection, policy_default, admin_default, cloud_state, ai_assumption
+  double confidence = 2;
+}
+
+message Unknown {
+  string field = 1;
+  string description = 2;
+  string suggested_value = 3;
+}
+
+enum CloudProvider {
+  CLOUD_PROVIDER_UNSPECIFIED = 0;
+  AWS = 1;
+  AZURE = 2;
+  GCP = 3;
+}
+
+enum ResourceType {
+  RESOURCE_TYPE_UNSPECIFIED = 0;
+  COMPUTE_INSTANCE = 1;
+  CONTAINER_CLUSTER = 2;
+  VIRTUAL_NETWORK = 3;
+  DATABASE = 4;
+  STORAGE_BUCKET = 5;
+  LOAD_BALANCER = 6;
+  MONITORING_ALARM = 7;
+  LOG_GROUP = 8;
+}

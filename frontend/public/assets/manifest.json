@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "basePath": "/assets",
+  "style": {
+    "canvas": "#050505",
+    "palette": ["#ffffff", "#8b5cf6", "#ec4899", "#222222"],
+    "direction": "Dark editorial infrastructure illustrations with restrained cinematic light, clean geometry, and subtle grain."
+  },
+  "assets": [
+    {
+      "file": "policy-guardrails.png",
+      "role": "Policy and security guardrails",
+      "sections": ["platform-policy"]
+    },
+    {
+      "file": "multicloud-translation.png",
+      "role": "Provider-neutral intent translated across cloud providers",
+      "sections": ["platform-multicloud", "requester-control"]
+    },
+    {
+      "file": "audit-evidence.png",
+      "role": "Immutable audit evidence and chain of custody",
+      "sections": ["platform-audit", "auditor-control"]
+    },
+    {
+      "file": "approval-gates.png",
+      "role": "Human confirmation and role-aware approval gates",
+      "sections": ["platform-approval", "approver-control"]
+    },
+    {
+      "file": "aws-2.svg",
+      "role": "Amazon Web Services provider logo",
+      "sections": ["platform-multicloud", "onboarding-cloud", "workspace-cloud-accounts"]
+    },
+    {
+      "file": "azure-2.svg",
+      "role": "Microsoft Azure provider logo",
+      "sections": ["platform-multicloud", "onboarding-cloud", "workspace-cloud-accounts"]
+    },
+    {
+      "file": "google-cloud-1.svg",
+      "role": "Google Cloud provider logo",
+      "sections": ["platform-multicloud", "onboarding-cloud", "workspace-cloud-accounts"]
+    }
+  ]
+}

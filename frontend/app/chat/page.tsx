@@ -16,6 +16,23 @@ import type { ChatMessageItem } from "@/lib/chat/chat-message-types";
 const drawerTabs = ["Manifest", "Policy", "Terraform Plan", "Approval"];
 
 export default function ChatPage() {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-50 px-6 text-center">
+        <div className="max-w-md space-y-2">
+          <h1 className="font-semibold text-lg text-gray-900">Chat is unavailable</h1>
+          <p className="text-sm text-gray-600">
+            Configure Clerk authentication to use the planning chat experience.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  return <ClerkChatPage />;
+}
+
+function ClerkChatPage() {
   const { user } = useUser();
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(drawerTabs[0]!);

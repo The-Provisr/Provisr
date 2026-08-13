@@ -24,9 +24,11 @@ GRANT SELECT ON
 
 GRANT SELECT, INSERT ON provisr_idempotency.keys TO provisr_app;
 
--- Append-only: read the chain tail and append; never mutate or delete rows.
+-- Append-only: read the chain tail and append; never mutate, delete, or
+-- truncate rows. The table stays owned by the migration role, never by the
+-- application role, so provisr_app cannot drop privileges or the trigger.
 GRANT SELECT, INSERT ON provisr_audit.audit_events TO provisr_app;
-REVOKE UPDATE, DELETE ON provisr_audit.audit_events FROM provisr_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON provisr_audit.audit_events FROM provisr_app;
 
 GRANT USAGE ON TYPE
     provisr_identity.environment,

@@ -49,6 +49,11 @@ func TestAuditEventsAppendOnlyPrivileges(t *testing.T) {
 	} else if has {
 		t.Error("provisr_app must NOT be able to DELETE audit_events")
 	}
+	if has, err := tablePrivilege(ctx, conn, "TRUNCATE"); err != nil {
+		t.Fatalf("check TRUNCATE privilege: %v", err)
+	} else if has {
+		t.Error("provisr_app must NOT be able to TRUNCATE audit_events")
+	}
 
 	workspaceID := uuid.NewString()
 	if _, err := conn.ExecContext(ctx,
@@ -80,6 +85,24 @@ func TestAuditEventsAppendOnlyPrivileges(t *testing.T) {
 		`DELETE FROM provisr_audit.audit_events`,
 	); err == nil {
 		t.Fatal("DELETE on audit_events as provisr_app must be denied")
+	}
+
+	if _, err := conn.ExecContext(ctx,
+		`TRUNCATE provisr_audit.audit_events`,
+	); err == nil {
+		t.Fatal("TRUNCATE on audit_events as provisr_app must be denied")
+	}
+
+	if _, err := conn.ExecContext(ctx, "RESET ROLE"); err != nil {
+		t.Fatalf("reset role: %v", err)
+	}
+
+	// The statement-level trigger must block TRUNCATE for the table owner
+	// too: row-level triggers do not fire on TRUNCATE.
+	if _, err := conn.ExecContext(ctx,
+		`TRUNCATE provisr_audit.audit_events`,
+	); err == nil {
+		t.Fatal("TRUNCATE on audit_events must be denied by the append-only trigger")
 	}
 }
 

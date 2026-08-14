@@ -23,6 +23,7 @@ const maxBody = 1 << 20
 var (
 	errIdempotencyKeyMissing = errors.New("idempotency key missing")
 	errIdempotencyKeyUsed    = errors.New("idempotency key already used")
+	errIdempotencyKeyInvalid = errors.New("idempotency key invalid")
 )
 
 type contextKey string
@@ -454,8 +455,11 @@ func (s *server) writeError(r *http.Request, w http.ResponseWriter, status int, 
 
 func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Request, workspaceID, mutation string) error {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" || len(key) > 128 {
+	if key == "" {
 		return errIdempotencyKeyMissing
+	}
+	if len(key) > 128 {
+		return errIdempotencyKeyInvalid
 	}
 	res, err := tx.Exec(
 		`INSERT INTO provisr_idempotency.keys (workspace_id, key, mutation)
@@ -481,6 +485,8 @@ func (s *server) writeIdempotencyError(w http.ResponseWriter, r *http.Request, e
 	switch {
 	case errors.Is(err, errIdempotencyKeyMissing):
 		s.writeError(r, w, http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required for mutations")
+	case errors.Is(err, errIdempotencyKeyInvalid):
+		s.writeError(r, w, http.StatusBadRequest, "idempotency_key_invalid", "Idempotency-Key header must not exceed 128 characters")
 	case errors.Is(err, errIdempotencyKeyUsed):
 		s.writeError(r, w, http.StatusConflict, "duplicate_idempotency_key", "Idempotency-Key was already used for a mutation")
 	default:

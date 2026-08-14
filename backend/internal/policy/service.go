@@ -310,7 +310,7 @@ func (s *server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "update_policy_settings"); err != nil {
 		s.writeIdempotencyError(w, r, err)

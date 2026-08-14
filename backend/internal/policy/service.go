@@ -180,6 +180,13 @@ func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r, w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
 		return
 	}
+	switch req.Category {
+	case "security", "cost", "compliance", "environment":
+		// valid
+	default:
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "category must be one of: security, cost, compliance, environment")
+		return
+	}
 
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {

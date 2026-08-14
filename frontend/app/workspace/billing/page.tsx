@@ -5,10 +5,25 @@ import {
   PageHeader,
   SectionCard,
   StatCard,
-  WorkspaceSidebar,
-} from "@/components/ui/provisr-app";
+interface BillingData {
+  planName?: string;
+  features?: string[];
+  runsThisMonth?: number;
+  activeWorkspaces?: number;
+  totalResources?: number;
+}
 
-export default function BillingUsagePage() {
+export default async function BillingUsagePage() {
+  let billingData: BillingData | null = null;
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_ORCHESTRATOR_URL}/v1/workspaces/current/billing`, { cache: 'no-store' });
+    if (res.ok) {
+      billingData = await res.json();
+    }
+  } catch (e) {
+    // Orchestrator payload unavailable
+  }
+
   return (
     <AppShell sidebar={<WorkspaceSidebar active="Billing & Usage" />}>
       <PageHeader
@@ -18,19 +33,23 @@ export default function BillingUsagePage() {
       <PageBody>
         <div className="mx-auto max-w-[900px] space-y-4">
           <SectionCard title="Current plan">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="text-lg font-semibold text-gray-900">Team Plan</div>
-                <ul className="mt-3 space-y-1.5 text-sm text-gray-600">
-                  <li>Unlimited workspace members</li>
-                  <li>Up to 10 active cloud accounts</li>
-                  <li>Standard policy engine and approvals</li>
-                  <li>30-day audit log retention</li>
-                  <li>Email support</li>
-                </ul>
+            {billingData ? (
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">{billingData.planName || "Unknown Plan"}</div>
+                  <ul className="mt-3 space-y-1.5 text-sm text-gray-600">
+                    {billingData.features?.map((f: string, i: number) => (
+                      <li key={i}>{f}</li>
+                    ))}
+                  </ul>
+                </div>
+                <Button variant="primary">Upgrade plan</Button>
               </div>
-              <Button variant="primary">Upgrade plan</Button>
-            </div>
+            ) : (
+              <div className="text-sm text-gray-600">
+                Billing plan details are currently unavailable.
+              </div>
+            )}
           </SectionCard>
 
           <section className="rounded-lg border border-blue-100 bg-blue-50 p-4" role="status">
@@ -44,11 +63,17 @@ export default function BillingUsagePage() {
           </section>
 
           <SectionCard title="Usage summary">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <StatCard label="Runs This Month" value="124" />
-              <StatCard label="Active Workspaces" value="3" />
-              <StatCard label="Total Resources" value="482" />
-            </div>
+            {billingData ? (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <StatCard label="Runs This Month" value={billingData.runsThisMonth?.toString() || "0"} />
+                <StatCard label="Active Workspaces" value={billingData.activeWorkspaces?.toString() || "0"} />
+                <StatCard label="Total Resources" value={billingData.totalResources?.toString() || "0"} />
+              </div>
+            ) : (
+              <div className="text-sm text-gray-600">
+                Usage data is currently unavailable.
+              </div>
+            )}
           </SectionCard>
 
           <section className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white p-4 text-sm text-gray-600">

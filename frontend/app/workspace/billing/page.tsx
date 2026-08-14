@@ -5,6 +5,9 @@ import {
   PageHeader,
   SectionCard,
   StatCard,
+  WorkspaceSidebar,
+} from "@/components/ui/provisr-app";
+
 interface BillingData {
   planName?: string;
   features?: string[];

@@ -181,9 +181,22 @@ func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to begin tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to create policy pack")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := s.claimIdempotencyKey(r.Context(), tx, r, req.WorkspaceID, "create_policy_pack"); err != nil {
+		s.writeIdempotencyError(w, r, err)
+		return
+	}
+
 	var p policyPack
 	var wsID sql.NullString
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO provisr_policy.policy_packs (workspace_id, name, description, category, is_system_pack, is_enabled)
 		 SELECT id, $2, $3, $4::provisr_policy.pack_category, false, true
 		 FROM provisr_identity.workspaces WHERE id = $1
@@ -202,6 +215,23 @@ func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
 	}
 	if wsID.Valid {
 		p.WorkspaceID = &wsID.String
+	}
+
+	auditPayload := map[string]any{
+		"pack_id": p.ID,
+		"name": p.Name,
+		"category": p.Category,
+	}
+	if err := s.emitAudit(r.Context(), tx, req.WorkspaceID, "state_transition", p.ID, auditPayload); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to create policy pack")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to commit tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to create policy pack")
+		return
 	}
 
 	s.writeJSON(w, http.StatusCreated, p)
@@ -375,7 +405,7 @@ func (s *server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"enabled_pack_ids": settings.EnabledPackIDs,
 		"mode":             settings.Mode,
 	}
-	if err := s.emitAudit(r.Context(), tx, workspaceID, "update_policy_settings", workspaceID, auditPayload); err != nil {
+	if err := s.emitAudit(r.Context(), tx, workspaceID, "state_transition", workspaceID, auditPayload); err != nil {
 		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to emit audit event")
 		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
 		return

@@ -265,6 +265,7 @@ func (s *server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 			 SELECT id, ARRAY['a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000003']::uuid[], 'enforced'::provisr_policy.policy_mode
 			 FROM provisr_identity.workspaces
 			 WHERE id = $1
+			 ON CONFLICT (workspace_id) DO UPDATE SET updated_at = provisr_policy.workspace_policy_settings.updated_at
 			 RETURNING workspace_id, enabled_pack_ids, mode, created_at, updated_at`,
 			workspaceID,
 		).Scan(&settings.WorkspaceID, &packIDs, &settings.Mode, &settings.CreatedAt, &settings.UpdatedAt)

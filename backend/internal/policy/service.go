@@ -461,7 +461,7 @@ func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Re
 	if len(key) > 128 {
 		return errIdempotencyKeyInvalid
 	}
-	res, err := tx.Exec(
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO provisr_idempotency.keys (workspace_id, key, mutation)
 		 VALUES ($1, $2, $3)
 		 ON CONFLICT (workspace_id, key) DO NOTHING`,
@@ -502,33 +502,42 @@ func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventTy
 	}
 
 	var previousHash sql.NullString
-	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('provisr_audit.chain'), 0)`); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('provisr_audit.chain'), 0)`); err != nil {
 		return fmt.Errorf("acquire audit chain lock: %w", err)
 	}
-	if err := tx.QueryRow(
+	if err := tx.QueryRowContext(ctx,
 		`SELECT hash FROM provisr_audit.audit_events ORDER BY seq DESC LIMIT 1`,
 	).Scan(&previousHash); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read previous audit hash: %w", err)
 	}
 
 	correlationID := correlationID(ctx)
+	actorID := "policy-service"
+	actorType := "system"
+	resourceType := "policy"
+
 	sum := sha256.New()
-	sum.Write([]byte(previousHash.String))
-	sum.Write([]byte(eventType))
+	sum.Write([]byte(previousHash.String + "\x00"))
+	sum.Write([]byte(workspaceID + "\x00"))
+	sum.Write([]byte(actorID + "\x00"))
+	sum.Write([]byte(actorType + "\x00"))
+	sum.Write([]byte(resourceType + "\x00"))
+	sum.Write([]byte(resourceID + "\x00"))
+	sum.Write([]byte(eventType + "\x00"))
 	sum.Write(payloadJSON)
-	sum.Write([]byte(correlationID))
+	sum.Write([]byte("\x00" + correlationID))
 	eventHash := hex.EncodeToString(sum.Sum(nil))
 
 	var prev any
 	if previousHash.Valid {
 		prev = previousHash.String
 	}
-	_, err = tx.Exec(
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO provisr_audit.audit_events
 		   (workspace_id, event_type, actor_id, actor_type, resource_type, resource_id,
 		    payload, hash, previous_hash, correlation_id)
-		 VALUES ($1, $2::provisr_audit.event_type, $3, 'system', 'policy', $4, $5, $6, $7, $8)`,
-		workspaceID, eventType, "policy-service", resourceID, payloadJSON, eventHash, prev, correlationID,
+		 VALUES ($1, $2::provisr_audit.event_type, $3, $4::provisr_audit.actor_type, $5, $6, $7, $8, $9, $10)`,
+		workspaceID, eventType, actorID, actorType, resourceType, resourceID, payloadJSON, eventHash, prev, correlationID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert audit event: %w", err)

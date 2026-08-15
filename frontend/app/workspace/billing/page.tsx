@@ -19,7 +19,10 @@ interface BillingData {
 export default async function BillingUsagePage() {
   let billingData: BillingData | null = null;
   try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_ORCHESTRATOR_URL}/v1/workspaces/current/billing`, { cache: 'no-store' });
+    const res = await fetch(`${process.env.NEXT_PUBLIC_ORCHESTRATOR_URL}/v1/workspaces/current/billing`, { 
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5_000)
+    });
     if (res.ok) {
       billingData = await res.json();
     }

@@ -4,17 +4,22 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Any
 
 import asyncpg
-from fastapi import FastAPI
+import httpx
+from fastapi import Depends, FastAPI, HTTPException, Request
 
-from src.context.fastapi import install_context_error_handler
+from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
+from src.context.models import MCPContext
 
 
 @dataclass(slots=True)
 class Resources:
     membership_store: MembershipStore
+    http_client: httpx.AsyncClient
+    backend_url: str
 
 
 def create_app(membership_store: MembershipStore | None = None) -> FastAPI:
@@ -34,10 +39,18 @@ def create_app(membership_store: MembershipStore | None = None) -> FastAPI:
             )
             resolved_store = PostgresMembershipStore(pool)
 
-        application.state.resources = Resources(membership_store=resolved_store)
+        http_client = httpx.AsyncClient()
+        backend_url = os.getenv("BACKEND_URL", "http://localhost:8080")
+
+        application.state.resources = Resources(
+            membership_store=resolved_store,
+            http_client=http_client,
+            backend_url=backend_url,
+        )
         try:
             yield
         finally:
+            await http_client.aclose()
             if pool is not None:
                 await pool.close()
 
@@ -54,6 +67,23 @@ def create_app(membership_store: MembershipStore | None = None) -> FastAPI:
     @application.get("/health/ready")
     async def ready() -> dict[str, str]:
         return {"status": "ok"}
+
+    @application.post("/tools/get_policy_requirements")
+    async def get_policy_requirements(
+        request: Request,
+        context: MCPContext = Depends(require_context("workspace.read")),  # noqa: B008
+    ) -> dict[str, Any]:
+        resources: Resources = request.app.state.resources
+        
+        # Proxy request to backend (BE-C03 endpoint)
+        url = f"{resources.backend_url}/v1/workspaces/{context.workspace_id}/policy-requirements"
+        response = await resources.http_client.get(url)
+        
+        if response.status_code != 200:
+            # Re-raise backend error as HTTP 500 so agent knows it failed
+            raise HTTPException(status_code=500, detail="Failed to fetch policy requirements from backend")
+            
+        return response.json()
 
     return application
 

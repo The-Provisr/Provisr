@@ -27,6 +27,7 @@ var (
 )
 
 type contextKey string
+
 const correlationIDKey contextKey = "correlation_id"
 
 // --- Models ---
@@ -81,6 +82,7 @@ func New(db *sql.DB, log zerolog.Logger) http.Handler {
 	mux.HandleFunc("POST /v1/policy-packs", s.handleCreatePack)
 	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /v1/workspaces/{workspace_id}/policy-settings", s.handleUpdateSettings)
+	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-requirements", s.handleGetPolicyRequirements)
 
 	return loggingMiddleware(log, s.recoveryMiddleware(mux))
 }
@@ -211,7 +213,7 @@ func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
 		 RETURNING id, workspace_id, name, description, category, is_system_pack, is_enabled, created_at, updated_at`,
 		req.WorkspaceID, req.Name, req.Description, req.Category,
 	).Scan(&p.ID, &wsID, &p.Name, &p.Description, &p.Category, &p.IsSystemPack, &p.IsEnabled, &p.CreatedAt, &p.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		s.writeError(r, w, http.StatusBadRequest, "workspace_not_found", "workspace does not exist")
 		return
@@ -226,8 +228,8 @@ func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	auditPayload := map[string]any{
-		"pack_id": p.ID,
-		"name": p.Name,
+		"pack_id":  p.ID,
+		"name":     p.Name,
 		"category": p.Category,
 	}
 	if err := s.emitAudit(r.Context(), tx, req.WorkspaceID, "state_transition", p.ID, auditPayload); err != nil {
@@ -580,4 +582,119 @@ func loggingMiddleware(base zerolog.Logger, next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, correlationIDKey, corrID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+type policyConstraints struct {
+	AllowedRegions          []string `json:"allowed_regions"`
+	MaxMonthlyBudgetUSD     int      `json:"max_monthly_budget_usd"`
+	RequiredTags            []string `json:"required_tags"`
+	ProhibitedResourceTypes []string `json:"prohibited_resource_types"`
+	RequiredEncryption      bool     `json:"required_encryption"`
+	RequiredBackup          bool     `json:"required_backup"`
+}
+
+type unprojectedRule struct {
+	Key         string `json:"key"`
+	Severity    string `json:"severity"`
+	Description string `json:"description"`
+}
+
+type policyRequirementsResponse struct {
+	HasPolicies      bool              `json:"has_policies"`
+	PolicyCount      int               `json:"policy_count"`
+	Constraints      policyConstraints `json:"constraints"`
+	UnprojectedRules []unprojectedRule `json:"unprojected_rules"`
+}
+
+func (s *server) handleGetPolicyRequirements(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspace_id")
+	if _, err := uuid.Parse(workspaceID); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
+		return
+	}
+
+	rows, err := s.db.QueryContext(r.Context(),
+		`SELECT r.rule_key, r.severity, r.description, r.parameters_schema
+		 FROM provisr_policy.policy_rules r
+		 JOIN provisr_policy.workspace_policy_settings ws ON r.pack_id = ANY(ws.enabled_pack_ids)
+		 WHERE ws.workspace_id = $1 AND r.is_enabled = true`,
+		workspaceID,
+	)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to query policy rules")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to retrieve policy requirements")
+		return
+	}
+	defer rows.Close()
+
+	resp := policyRequirementsResponse{
+		HasPolicies: false,
+		Constraints: policyConstraints{
+			AllowedRegions:          []string{},
+			RequiredTags:            []string{},
+			ProhibitedResourceTypes: []string{},
+		},
+		UnprojectedRules: []unprojectedRule{},
+	}
+
+	for rows.Next() {
+		var key, severity, description string
+		var paramsJSON []byte
+		if err := rows.Scan(&key, &severity, &description, &paramsJSON); err != nil {
+			zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to scan policy rule")
+			s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to retrieve policy requirements")
+			return
+		}
+
+		resp.HasPolicies = true
+		resp.PolicyCount++
+
+		var params map[string]any
+		if len(paramsJSON) > 0 {
+			_ = json.Unmarshal(paramsJSON, &params)
+		}
+
+		projected := true
+		switch key {
+		case "allowed_regions":
+			if val, ok := params["regions"].([]any); ok {
+				for _, v := range val {
+					if str, ok := v.(string); ok {
+						resp.Constraints.AllowedRegions = append(resp.Constraints.AllowedRegions, str)
+					}
+				}
+			}
+		case "budget_max":
+			if val, ok := params["max_usd"].(float64); ok {
+				resp.Constraints.MaxMonthlyBudgetUSD = int(val)
+			}
+		case "required_tags":
+			if val, ok := params["tags"].([]any); ok {
+				for _, v := range val {
+					if str, ok := v.(string); ok {
+						resp.Constraints.RequiredTags = append(resp.Constraints.RequiredTags, str)
+					}
+				}
+			}
+		case "require_encryption":
+			resp.Constraints.RequiredEncryption = true
+		default:
+			projected = false
+		}
+
+		if !projected {
+			resp.UnprojectedRules = append(resp.UnprojectedRules, unprojectedRule{
+				Key:         key,
+				Severity:    severity,
+				Description: description,
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("rows iteration error")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to retrieve policy requirements")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
 }

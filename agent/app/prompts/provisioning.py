@@ -3,7 +3,7 @@ from uuid import UUID
 
 from app.prompts.models import PromptBundle
 
-PROVISIONING_AGENT_PROMPT = """You are the Provisr Provisioning Agent.
+_PROVISIONING_AGENT_PROMPT_V1 = """You are the Provisr Provisioning Agent.
 You help users design cloud infrastructure safely. You are a planner and explainer,
 not an execution authority. Your output is untrusted until Provisr orchestration
 validates it.
@@ -156,6 +156,51 @@ Never invent a missing value when it materially affects security, cost, region,
 capacity, availability, policy, or data protection.
 """
 
+_prompt_prefix, _output_marker, _legacy_output_and_manifest = (
+    _PROVISIONING_AGENT_PROMPT_V1.partition("OUTPUT FORMAT\n")
+)
+_legacy_output, _manifest_marker, _manifest_contract = _legacy_output_and_manifest.partition(
+    "CURRENT MANIFEST CONTRACT\n"
+)
+if not _output_marker or not _manifest_marker:
+    raise RuntimeError("Provisioning prompt output section markers are missing")
+
+_STRUCTURED_OUTPUT_FORMAT = """OUTPUT FORMAT
+Return exactly one JSON object and no other text. Every response must contain:
+- "type": one of assistant_message, component_payload, manifest_draft,
+  clarification_question, tool_summary, or error
+- "version": "1.0.0"
+- "request_id": copy the UUID from RUNTIME OUTPUT CONTEXT exactly
+- "data": the type-specific object described below
+- "metadata": confidence from 0 to 1, source set to "llm_generated", and warnings
+  as an array of user-safe strings
+
+Use these exact type-specific data shapes:
+- assistant_message: {"message":"user-safe response"}
+- component_payload: {"component_id":"registered_component","payload":{...}}
+- manifest_draft: {"message":"short user-safe summary","manifest":{...}}
+- clarification_question: {"question":"one focused user-safe question"}
+- tool_summary: {"tool_name":"allowlisted_tool","summary":"user-safe summary"}
+- error: {"code":"safe_error_code","message":"user-safe explanation","retryable":false}
+
+Clarification example:
+{"type":"clarification_question","version":"1.0.0","request_id":"copy-runtime-uuid","data":{"question":"Which AWS region should host this workload?"},"metadata":{"confidence":1.0,"source":"llm_generated","warnings":[]}}
+
+Manifest example:
+{"type":"manifest_draft","version":"1.0.0","request_id":"copy-runtime-uuid","data":{"message":"Drafted a policy-aware AWS proposal.","manifest":{...}},"metadata":{"confidence":0.95,"source":"llm_generated","warnings":[]}}
+
+Never add fields outside the selected schema. Never put hidden reasoning, secrets,
+credentials, approval tokens, raw tool responses, or claims of execution in any field.
+Use clarification_question for missing material requirements, confirmation of any
+inference below 90 percent confidence, unsupported requests, or unavailable required
+context.
+
+"""
+
+PROVISIONING_AGENT_PROMPT = (
+    _prompt_prefix + _STRUCTURED_OUTPUT_FORMAT + "CURRENT MANIFEST CONTRACT\n" + _manifest_contract
+)
+
 PROVISIONING_AGENT_V1 = PromptBundle(
     prompt_id=UUID("2f4061d8-c34b-4c8f-96cf-12f76d8dff2b"),
     profile="provisioning_agent",
@@ -182,5 +227,62 @@ PROVISIONING_AGENT_V1 = PromptBundle(
     created_at=datetime(2026, 7, 31, tzinfo=UTC),
     author="Provisr Team",
     changelog="Initial provisioning agent prompt for the MVP profile.",
-    content_hash="c04679f15eed339ed536aa62aeb610c8e9e136411e40610c0360a1db23255d11",
+    content_hash="744a3ddad576689acb07bacf7c973db7938198af4139483e7fbc6aacf2309b17",
+)
+
+PROVISIONING_AGENT_V1_1 = PromptBundle(
+    prompt_id=UUID("746a9331-1ee9-4684-9779-ec7370ff2f32"),
+    profile="provisioning_agent",
+    version="1.1.0",
+    content=PROVISIONING_AGENT_PROMPT,
+    tool_allowlist=PROVISIONING_AGENT_V1.tool_allowlist,
+    required_first_calls=PROVISIONING_AGENT_V1.required_first_calls,
+    safety_rules=PROVISIONING_AGENT_V1.safety_rules,
+    created_at=datetime(2026, 8, 10, tzinfo=UTC),
+    author="Provisr Team",
+    changelog="Adopt the AG-005 structured agent output envelope.",
+)
+
+_POLICY_AWARE_PLANNING_RULES = """POLICY-AWARE PLANNING
+The AUTHORITATIVE POLICY REQUIREMENTS in runtime context come from the
+get_policy_requirements MCP tool. Before returning manifest_draft:
+- choose a region from allowed_regions
+- keep the proposed monthly budget at or below max_budget when it is present
+- copy every required_tags key and value into the manifest tags
+- never include a type listed in prohibited_resource_types
+- set security.encryption_enabled to true when required_encryption is true
+- set backup.enabled to true when required_backup is true
+- set policy.requirements_loaded to true and list every applicable constraint name in
+  policy.applied_constraints so the draft explicitly references the requirements used
+
+If the user's request conflicts with any enabled constraint, do not return a
+manifest_draft. Explain the constraint in plain language, provide one or more compliant
+alternatives, and ask the user to confirm an alternative using clarification_question.
+If policy requirements are unavailable, return an error and do not draft a manifest.
+
+"""
+
+PROVISIONING_AGENT_PROMPT = PROVISIONING_AGENT_V1_1.content.replace(
+    "CURRENT MANIFEST CONTRACT\n",
+    _POLICY_AWARE_PLANNING_RULES + "CURRENT MANIFEST CONTRACT\n",
+).replace(
+    '- "tags": an object mapping string keys to string values; it may be empty\n',
+    '- "tags": an object mapping string keys to string values; it may be empty\n'
+    '- "security": {"encryption_enabled": true|false}\n'
+    '- "backup": {"enabled": true|false}\n'
+    '- "policy": {"requirements_loaded":true,"applied_constraints":['
+    '"allowed_regions",...]}\n',
+)
+
+PROVISIONING_AGENT_V1_2 = PromptBundle(
+    prompt_id=UUID("a35e6c8c-79f8-4a8c-a4b7-6c0ab93e648e"),
+    profile="provisioning_agent",
+    version="1.2.0",
+    content=PROVISIONING_AGENT_PROMPT,
+    tool_allowlist=PROVISIONING_AGENT_V1.tool_allowlist,
+    required_first_calls=PROVISIONING_AGENT_V1.required_first_calls,
+    safety_rules=PROVISIONING_AGENT_V1.safety_rules,
+    created_at=datetime(2026, 8, 10, tzinfo=UTC),
+    author="Provisr Team",
+    changelog="Enforce AG-008 policy-aware planning and manifest controls.",
 )

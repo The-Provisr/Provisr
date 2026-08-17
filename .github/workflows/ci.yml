@@ -67,7 +67,7 @@ jobs:
           version: 11.18.0
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.2"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @provisr/shared-contracts build

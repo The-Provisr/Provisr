@@ -15,6 +15,9 @@ from app.domain.service import AgentService
 from app.integrations.anthropic_model import ClaudeModel, LanguageModel
 from app.integrations.gemini_model import GeminiModel
 from app.integrations.state import InMemoryStateStore, RedisStateStore, StateStore
+from app.policy.tool import PolicyRequirementsTool, UnavailablePolicyRequirementsTool
+from app.profiles.catalog import build_profile_selector
+from app.profiles.registry import ProfileSelector
 from app.prompts.catalog import build_prompt_registry
 from app.prompts.registry import PromptRegistry
 
@@ -23,6 +26,8 @@ from app.prompts.registry import PromptRegistry
 class Resources:
     state: StateStore
     prompt_registry: PromptRegistry
+    profile_selector: ProfileSelector
+    policy_tool: PolicyRequirementsTool
     agent_service: AgentService
 
     async def aclose(self) -> None:
@@ -33,6 +38,8 @@ def create_resources(
     settings: Settings,
     model: LanguageModel | None = None,
     prompt_registry: PromptRegistry | None = None,
+    profile_selector: ProfileSelector | None = None,
+    policy_tool: PolicyRequirementsTool | None = None,
 ) -> Resources:
     if settings.state_backend == "redis":
         redis = Redis.from_url(settings.redis_url, decode_responses=True)
@@ -42,13 +49,18 @@ def create_resources(
 
     language_model = model or _build_model(settings)
     resolved_prompt_registry = prompt_registry or build_prompt_registry()
+    resolved_profile_selector = profile_selector or build_profile_selector(resolved_prompt_registry)
+    resolved_policy_tool = policy_tool or UnavailablePolicyRequirementsTool()
     return Resources(
         state=state,
         prompt_registry=resolved_prompt_registry,
+        profile_selector=resolved_profile_selector,
+        policy_tool=resolved_policy_tool,
         agent_service=AgentService(
             state=state,
             model=language_model,
-            prompt_registry=resolved_prompt_registry,
+            profile_selector=resolved_profile_selector,
+            policy_tool=resolved_policy_tool,
         ),
     )
 
@@ -58,12 +70,10 @@ def _build_model(settings: Settings) -> LanguageModel:
         return GeminiModel(
             api_key=settings.gemini_api_key,
             model=settings.gemini_model,
-            max_tokens=settings.anthropic_max_tokens,
         )
     return ClaudeModel(
         api_key=settings.anthropic_api_key,
         model=settings.anthropic_model,
-        max_tokens=settings.anthropic_max_tokens,
         base_url=settings.anthropic_base_url,
         workspace_id=settings.anthropic_workspace_id,
     )

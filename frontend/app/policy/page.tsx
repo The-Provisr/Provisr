@@ -57,6 +57,7 @@ export default function PolicySettingsPage() {
 
   const selectPack = (packId: string) => {
     setSelectedPackId(packId);
+    setConfirmReset(false);
     setExpandedRuleKey(null);
     setViewMode("visual");
     document.getElementById("policy-rules")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -106,6 +107,22 @@ export default function PolicySettingsPage() {
     setError(null);
     try {
       await resetPolicyPack(selectedPack.id);
+      const defaults = policyPacks.find((pack) => pack.id === selectedPack.id);
+      if (defaults) {
+        setDraft((current) =>
+          current.map((pack) =>
+            pack.id === selectedPack.id
+              ? {
+                  ...defaults,
+                  rules: defaults.rules.map((rule) => ({
+                    ...rule,
+                    parameters: rule.parameters.map((p) => ({ ...p })),
+                  })),
+                }
+              : pack,
+          ),
+        );
+      }
       setConfirmReset(false);
       setToast({ tone: "success", message: `${selectedPack.name} reset to defaults.` });
     } catch (resetError) {

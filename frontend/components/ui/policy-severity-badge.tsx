@@ -25,7 +25,7 @@ export function PolicySeverityBadge({ severity }: { severity: PolicySeverity }) 
         meta.className,
       )}
     >
-      <span className="w-1.5 rounded-full bg-current" />
+      <span className="size-1.5 rounded-full bg-current" />
       {meta.label}
     </span>
   );

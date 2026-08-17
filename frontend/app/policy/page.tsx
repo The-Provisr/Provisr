@@ -241,6 +241,7 @@ export default function PolicySettingsPage() {
                         rules: current.rules.map((r) => (r.key === ruleKey ? { ...r, enabled } : r)),
                       }))
                     }
+                    onExpandChange={(ruleKey, expanded) => setExpandedRuleKey(expanded ? ruleKey : null)}
                     onParametersChange={(ruleKey, parameters) =>
                       updatePack(selectedPack.id, (current) => ({
                         ...current,

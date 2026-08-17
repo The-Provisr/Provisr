@@ -14,6 +14,7 @@ type PolicyRuleRowProps = {
   defaultExpanded?: boolean;
   isAdmin?: boolean;
   onEnabledChange?: (ruleKey: string, enabled: boolean) => void;
+  onExpandChange?: (ruleKey: string, expanded: boolean) => void;
   onParametersChange?: (ruleKey: string, parameters: PolicyParameter[]) => void;
   onRegoChange?: (ruleKey: string, source: string) => void;
 };
@@ -24,10 +25,19 @@ export function PolicyRuleRow({
   defaultExpanded = false,
   isAdmin = false,
   onEnabledChange,
+  onExpandChange,
   onParametersChange,
   onRegoChange,
 }: PolicyRuleRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+
+  const toggleExpanded = () => {
+    setExpanded((value) => {
+      const next = !value;
+      onExpandChange?.(rule.key, next);
+      return next;
+    });
+  };
   const [parameters, setParameters] = useState(rule.parameters);
 
   const updateParameter = (key: string, value: PolicyParameter["value"]) => {
@@ -44,13 +54,13 @@ export function PolicyRuleRow({
         aria-expanded={expanded}
         className="flex cursor-pointer flex-wrap items-center gap-3 px-4 py-3 sm:px-6"
         data-testid="rule-row"
-        onClick={() => setExpanded((value) => !value)}
+        onClick={toggleExpanded}
         role="button"
         tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            setExpanded((value) => !value);
+            toggleExpanded();
           }
         }}
       >

@@ -242,3 +242,47 @@ PROVISIONING_AGENT_V1_1 = PromptBundle(
     author="Provisr Team",
     changelog="Adopt the AG-005 structured agent output envelope.",
 )
+
+_POLICY_AWARE_PLANNING_RULES = """POLICY-AWARE PLANNING
+The AUTHORITATIVE POLICY REQUIREMENTS in runtime context come from the
+get_policy_requirements MCP tool. Before returning manifest_draft:
+- choose a region from allowed_regions
+- keep the proposed monthly budget at or below max_budget when it is present
+- copy every required_tags key and value into the manifest tags
+- never include a type listed in prohibited_resource_types
+- set security.encryption_enabled to true when required_encryption is true
+- set backup.enabled to true when required_backup is true
+- set policy.requirements_loaded to true and list every applicable constraint name in
+  policy.applied_constraints so the draft explicitly references the requirements used
+
+If the user's request conflicts with any enabled constraint, do not return a
+manifest_draft. Explain the constraint in plain language, provide one or more compliant
+alternatives, and ask the user to confirm an alternative using clarification_question.
+If policy requirements are unavailable, return an error and do not draft a manifest.
+
+"""
+
+PROVISIONING_AGENT_PROMPT = PROVISIONING_AGENT_V1_1.content.replace(
+    "CURRENT MANIFEST CONTRACT\n",
+    _POLICY_AWARE_PLANNING_RULES + "CURRENT MANIFEST CONTRACT\n",
+).replace(
+    '- "tags": an object mapping string keys to string values; it may be empty\n',
+    '- "tags": an object mapping string keys to string values; it may be empty\n'
+    '- "security": {"encryption_enabled": true|false}\n'
+    '- "backup": {"enabled": true|false}\n'
+    '- "policy": {"requirements_loaded":true,"applied_constraints":['
+    '"allowed_regions",...]}\n',
+)
+
+PROVISIONING_AGENT_V1_2 = PromptBundle(
+    prompt_id=UUID("a35e6c8c-79f8-4a8c-a4b7-6c0ab93e648e"),
+    profile="provisioning_agent",
+    version="1.2.0",
+    content=PROVISIONING_AGENT_PROMPT,
+    tool_allowlist=PROVISIONING_AGENT_V1.tool_allowlist,
+    required_first_calls=PROVISIONING_AGENT_V1.required_first_calls,
+    safety_rules=PROVISIONING_AGENT_V1.safety_rules,
+    created_at=datetime(2026, 8, 10, tzinfo=UTC),
+    author="Provisr Team",
+    changelog="Enforce AG-008 policy-aware planning and manifest controls.",
+)

@@ -1,75 +1,101 @@
 import { Button } from "@/components/ui/button";
 import {
   AppShell,
-  DataTable,
-  MiniBarChart,
   PageBody,
   PageHeader,
-  ProviderPieChart,
   SectionCard,
   StatCard,
   WorkspaceSidebar,
 } from "@/components/ui/provisr-app";
 
-export default function BillingUsagePage() {
+interface BillingData {
+  planName?: string;
+  features?: string[];
+  runsThisMonth?: number;
+  activeWorkspaces?: number;
+  totalResources?: number;
+}
+
+export default async function BillingUsagePage() {
+  let billingData: BillingData | null = null;
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_ORCHESTRATOR_URL}/v1/workspaces/current/billing`, { 
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5_000)
+    });
+    if (res.ok) {
+      billingData = await res.json();
+    }
+  } catch (e) {
+    // Orchestrator payload unavailable
+  }
+
   return (
     <AppShell sidebar={<WorkspaceSidebar active="Billing & Usage" />}>
       <PageHeader
-        actions={
-          <>
-            <Button variant="secondary">Manage payment method</Button>
-            <Button variant="primary">Upgrade plan</Button>
-          </>
-        }
-        description="Plan, billing, request runs, and usage across the workspace."
-        title="Billing & Usage"
+        description="Plan, usage, and billing controls for this workspace."
+        title="Billing"
       />
       <PageBody>
-        <div className="mx-auto max-w-[1180px] space-y-6">
-          <div className="grid gap-4 lg:grid-cols-4">
-            <StatCard detail="Current plan" label="Plan" value="Business" />
-            <StatCard detail="This billing cycle" label="Monthly usage" tone="blue" value="68%" />
-            <StatCard detail="2.4M of 5M included" label="Token usage" tone="green" value="2.4M" />
-            <StatCard detail="3 active workspaces" label="Request runs" tone="amber" value="124" />
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <SectionCard title="Token usage over time">
-              <MiniBarChart data={[24, 32, 42, 36, 58, 64, 72].map((value, index) => ({ label: `D${index + 1}`, value }))} />
-            </SectionCard>
-            <SectionCard title="Request runs by day">
-              <MiniBarChart data={[8, 12, 9, 15, 13, 5, 7].map((value, index) => ({ label: `D${index + 1}`, value }))} />
-            </SectionCard>
-            <SectionCard title="Usage by workspace member">
-              <DataTable
-                columns={["Member", "Tokens", "Request runs"]}
-                rows={[
-                  ["Maya Chen", "620K", "32"],
-                  ["Owen Patel", "540K", "28"],
-                  ["Jules Kim", "310K", "18"],
-                ]}
-              />
-            </SectionCard>
-            <SectionCard title="Usage by provider">
-              <ProviderPieChart
-                segments={[
-                  { label: "AWS", value: 64, color: "#0f172a" },
-                  { label: "Azure", value: 22, color: "#2563eb" },
-                  { label: "GCP", value: 14, color: "#16a34a" },
-                ]}
-              />
-            </SectionCard>
-          </div>
-
-          <SectionCard title="Invoice history">
-            <DataTable
-              columns={["Invoice", "Date", "Amount", "Status", "Action"]}
-              rows={[
-                ["INV-2026-07", "July 1, 2026", "$1,240", "Paid", <Button key="july" variant="secondary">Download invoice</Button>],
-                ["INV-2026-06", "June 1, 2026", "$1,180", "Paid", <Button key="june" variant="secondary">Download invoice</Button>],
-              ]}
-            />
+        <div className="mx-auto max-w-[900px] space-y-4">
+          <SectionCard title="Current plan">
+            {billingData ? (
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">{billingData.planName || "Unknown Plan"}</div>
+                  <ul className="mt-3 space-y-1.5 text-sm text-gray-600">
+                    {billingData.features?.map((f: string, i: number) => (
+                      <li key={i}>{f}</li>
+                    ))}
+                  </ul>
+                </div>
+                <Button variant="primary">Upgrade plan</Button>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-600">
+                Billing plan details are currently unavailable.
+              </div>
+            )}
           </SectionCard>
+
+          <section className="rounded-lg border border-blue-100 bg-blue-50 p-4" role="status">
+            <div className="text-sm font-medium text-blue-900">
+              Pricing and billing controls coming soon
+            </div>
+            <p className="mt-1 text-xs text-blue-700">
+              We&apos;re building self-serve plan changes, invoices, and payment
+              management. In the meantime, contact support for billing questions.
+            </p>
+          </section>
+
+          <SectionCard title="Usage summary">
+            {billingData ? (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <StatCard label="Runs This Month" value={billingData.runsThisMonth !== undefined ? billingData.runsThisMonth.toString() : "Unavailable"} />
+                <StatCard label="Active Workspaces" value={billingData.activeWorkspaces !== undefined ? billingData.activeWorkspaces.toString() : "Unavailable"} />
+                <StatCard label="Total Resources" value={billingData.totalResources !== undefined ? billingData.totalResources.toString() : "Unavailable"} />
+              </div>
+            ) : (
+              <div className="text-sm text-gray-600">
+                Usage data is currently unavailable.
+              </div>
+            )}
+          </SectionCard>
+
+          <section className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white p-4 text-sm text-gray-600">
+            <a
+              className="font-medium text-slate-900 underline underline-offset-2"
+              href="https://docs.provisr.dev/billing"
+            >
+              View billing documentation
+            </a>
+            <span>
+              Questions? Contact{" "}
+              <a className="font-medium text-slate-900 underline underline-offset-2" href="mailto:support@provisr.dev">
+                support@provisr.dev
+              </a>
+            </span>
+          </section>
         </div>
       </PageBody>
     </AppShell>

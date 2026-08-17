@@ -71,9 +71,9 @@ export default async function BillingUsagePage() {
           <SectionCard title="Usage summary">
             {billingData ? (
               <div className="grid gap-4 sm:grid-cols-3">
-                <StatCard label="Runs This Month" value={billingData.runsThisMonth?.toString() || "0"} />
-                <StatCard label="Active Workspaces" value={billingData.activeWorkspaces?.toString() || "0"} />
-                <StatCard label="Total Resources" value={billingData.totalResources?.toString() || "0"} />
+                <StatCard label="Runs This Month" value={billingData.runsThisMonth !== undefined ? billingData.runsThisMonth.toString() : "Unavailable"} />
+                <StatCard label="Active Workspaces" value={billingData.activeWorkspaces !== undefined ? billingData.activeWorkspaces.toString() : "Unavailable"} />
+                <StatCard label="Total Resources" value={billingData.totalResources !== undefined ? billingData.totalResources.toString() : "Unavailable"} />
               </div>
             ) : (
               <div className="text-sm text-gray-600">

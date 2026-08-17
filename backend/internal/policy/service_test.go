@@ -2,11 +2,15 @@ package policy
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestPrincipalFromContext(t *testing.T) {
@@ -77,39 +81,61 @@ func TestValidateParametersSchema(t *testing.T) {
 	}
 }
 
-func TestParseJWTClaims(t *testing.T) {
-	// Create sample JWT token: header.payload.signature
-	// payload: {"sub":"user-123","role":"admin","workspace_id":"ws-456"}
-	payloadJSON := `{"sub":"user-123","role":"admin","workspace_id":"ws-456"}`
-	token := "eyJhbGciOiJIUzI1NiJ9." + base64.RawURLEncoding.EncodeToString([]byte(payloadJSON)) + ".sig"
+func generateTestJWT(claimsJSON, secret string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(claimsJSON))
+	unsigned := header + "." + payload
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(unsigned))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return unsigned + "." + sig
+}
 
-	p, ok := parseJWTClaims(token)
-	if !ok {
-		t.Fatal("expected parseJWTClaims to succeed")
+func TestVerifyAndParseJWT(t *testing.T) {
+	secret := "test-secret-key-32-chars-long!!"
+
+	// Valid admin token
+	payloadJSON := fmt.Sprintf(`{"sub":"user-123","role":"admin","workspace_id":"ws-456","exp":%d}`, time.Now().Add(time.Hour).Unix())
+	token := generateTestJWT(payloadJSON, secret)
+
+	p, err := verifyAndParseJWT(token, secret)
+	if err != nil {
+		t.Fatalf("expected verifyAndParseJWT to succeed: %v", err)
 	}
 	if p.ID != "user-123" || p.Role != "admin" || p.WorkspaceID != "ws-456" {
 		t.Fatalf("unexpected principal: %+v", p)
 	}
 
+	// Forged token (signed with wrong secret)
+	forgedToken := generateTestJWT(payloadJSON, "wrong-secret-key")
+	if _, err := verifyAndParseJWT(forgedToken, secret); err == nil {
+		t.Fatal("expected forged token to fail signature verification")
+	}
+
+	// Expired token
+	expiredPayload := fmt.Sprintf(`{"sub":"user-123","role":"admin","exp":%d}`, time.Now().Add(-time.Hour).Unix())
+	expiredToken := generateTestJWT(expiredPayload, secret)
+	if _, err := verifyAndParseJWT(expiredToken, secret); err == nil {
+		t.Fatal("expected expired token to fail verification")
+	}
+
 	// Clerk org:admin payload
-	clerkAdminPayload := `{"sub":"clerk-1","org_role":"org:admin"}`
-	clerkToken := "eyJhbGciOiJIUzI1NiJ9." + base64.RawURLEncoding.EncodeToString([]byte(clerkAdminPayload)) + ".sig"
-	p, ok = parseJWTClaims(clerkToken)
-	if !ok {
-		t.Fatal("expected clerkToken parsing to succeed")
+	clerkAdminPayload := fmt.Sprintf(`{"sub":"clerk-1","org_role":"org:admin","exp":%d}`, time.Now().Add(time.Hour).Unix())
+	clerkToken := generateTestJWT(clerkAdminPayload, secret)
+	p, err = verifyAndParseJWT(clerkToken, secret)
+	if err != nil {
+		t.Fatalf("expected clerkToken parsing to succeed: %v", err)
 	}
 	if p.Role != "admin" {
 		t.Fatalf("expected admin role from org:admin, got %s", p.Role)
 	}
-
-	// Invalid token format
-	if _, ok := parseJWTClaims("invalid-token"); ok {
-		t.Fatal("expected failure for malformed token")
-	}
 }
 
 func TestAuthMiddleware(t *testing.T) {
-	// Test Bearer admin-token
+	secret := "jwt-test-secret-value-12345"
+	t.Setenv("JWT_SECRET", secret)
+	t.Setenv("AUTH_DEV_BYPASS", "false")
+
 	var capturedPrincipal Principal
 	var capturedIsAdmin bool
 
@@ -120,30 +146,59 @@ func TestAuthMiddleware(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req, _ := http.NewRequest("GET", "/v1/policy-packs", nil)
-	req.Header.Set("Authorization", "Bearer admin-token")
-	req.Header.Set("X-User-Role", "viewer") // Client header must not override
+	// 1. Valid signed Bearer JWT
+	validPayload := fmt.Sprintf(`{"sub":"user-admin","role":"admin","exp":%d}`, time.Now().Add(time.Hour).Unix())
+	validToken := generateTestJWT(validPayload, secret)
 
+	req, _ := http.NewRequest("GET", "/v1/policy-packs", nil)
+	req.Header.Set("Authorization", "Bearer "+validToken)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
 	if !capturedIsAdmin || capturedPrincipal.Role != "admin" {
-		t.Fatalf("expected admin principal from admin-token, got %+v (isAdmin=%v)", capturedPrincipal, capturedIsAdmin)
+		t.Fatalf("expected admin principal from valid JWT, got %+v (isAdmin=%v)", capturedPrincipal, capturedIsAdmin)
 	}
 
-	// Test untrusted X-User-Role with no auth header in non-dev mode
+	// 2. Forged Bearer JWT (must be rejected)
+	capturedPrincipal = Principal{}
+	capturedIsAdmin = false
+
+	forgedToken := generateTestJWT(validPayload, "attacker-secret")
+	reqForged, _ := http.NewRequest("GET", "/v1/policy-packs", nil)
+	reqForged.Header.Set("Authorization", "Bearer "+forgedToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, reqForged)
+
+	if capturedIsAdmin || capturedPrincipal.Role == "admin" {
+		t.Fatalf("forged JWT must not grant admin, got %+v (isAdmin=%v)", capturedPrincipal, capturedIsAdmin)
+	}
+
+	// 3. Untrusted X-User-Role with no auth header in non-dev mode (must be rejected)
 	capturedPrincipal = Principal{}
 	capturedIsAdmin = false
 
 	reqNoAuth, _ := http.NewRequest("GET", "/v1/policy-packs", nil)
 	reqNoAuth.Header.Set("X-User-Role", "admin") // Untrusted spoof attempt
-
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, reqNoAuth)
 
 	if capturedIsAdmin || capturedPrincipal.Role == "admin" {
 		t.Fatalf("untrusted X-User-Role must not grant admin, got %+v (isAdmin=%v)", capturedPrincipal, capturedIsAdmin)
 	}
+
+	// 4. Hardcoded admin-token in production mode (must be rejected)
+	capturedPrincipal = Principal{}
+	capturedIsAdmin = false
+
+	reqAdminToken, _ := http.NewRequest("GET", "/v1/policy-packs", nil)
+	reqAdminToken.Header.Set("Authorization", "Bearer admin-token")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, reqAdminToken)
+
+	if capturedIsAdmin || capturedPrincipal.Role == "admin" {
+		t.Fatalf("admin-token in production mode must not grant admin, got %+v (isAdmin=%v)", capturedPrincipal, capturedIsAdmin)
+	}
 }
+
 
 

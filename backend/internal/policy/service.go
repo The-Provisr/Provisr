@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -737,34 +739,45 @@ func authMiddleware(next http.Handler) http.Handler {
 		if authHeader != "" {
 			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 				token := strings.TrimSpace(authHeader[7:])
-				if token == "admin-token" {
-					ctx = ContextWithPrincipal(ctx, Principal{ID: "admin", Role: "admin"})
-				} else if secret := os.Getenv("POLICY_SERVICE_SECRET"); secret != "" && token == secret {
+				jwtSecret := os.Getenv("JWT_SECRET")
+				if jwtSecret == "" {
+					jwtSecret = os.Getenv("POLICY_JWT_SECRET")
+				}
+
+				serviceSecret := os.Getenv("POLICY_SERVICE_SECRET")
+				if serviceSecret != "" && token == serviceSecret {
 					ctx = ContextWithPrincipal(ctx, Principal{ID: "policy-service", Role: "admin"})
-				} else if p, ok := parseJWTClaims(token); ok {
-					ctx = ContextWithPrincipal(ctx, p)
+				} else if jwtSecret != "" {
+					if p, err := verifyAndParseJWT(token, jwtSecret); err == nil {
+						ctx = ContextWithPrincipal(ctx, p)
+					}
 				}
 			}
 		}
 
-		// 2. Dev bypass mode for local development and testing
+		// 2. Dev bypass mode for local development and testing only
 		if os.Getenv("AUTH_DEV_BYPASS") == "true" {
 			if _, ok := PrincipalFromContext(ctx); !ok {
-				role := r.Header.Get("X-Dev-Role")
-				if role == "" {
-					role = r.Header.Get("X-User-Role")
+				authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+				if authHeader == "Bearer admin-token" {
+					ctx = ContextWithPrincipal(ctx, Principal{ID: "dev-admin", Role: "admin"})
+				} else {
+					role := r.Header.Get("X-Dev-Role")
+					if role == "" {
+						role = r.Header.Get("X-User-Role")
+					}
+					if role == "" {
+						role = os.Getenv("DEV_USER_ROLE")
+					}
+					if role == "" {
+						role = "admin"
+					}
+					userID := os.Getenv("DEV_USER_ID")
+					if userID == "" {
+						userID = "dev-user"
+					}
+					ctx = ContextWithPrincipal(ctx, Principal{ID: userID, Role: role})
 				}
-				if role == "" {
-					role = os.Getenv("DEV_USER_ROLE")
-				}
-				if role == "" {
-					role = "admin"
-				}
-				userID := os.Getenv("DEV_USER_ID")
-				if userID == "" {
-					userID = "dev-user"
-				}
-				ctx = ContextWithPrincipal(ctx, Principal{ID: userID, Role: role})
 			}
 		}
 
@@ -772,17 +785,39 @@ func authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func parseJWTClaims(token string) (Principal, bool) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return Principal{}, false
+func verifyAndParseJWT(token string, secret string) (Principal, error) {
+	if secret == "" {
+		return Principal{}, errors.New("jwt secret not configured")
 	}
 
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return Principal{}, errors.New("invalid jwt format")
+	}
+
+	// 1. Verify HMAC-SHA256 signature
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	expectedSig := mac.Sum(nil)
+
+	actualSig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		actualSig, err = base64.URLEncoding.DecodeString(parts[2])
+		if err != nil {
+			return Principal{}, errors.New("invalid signature encoding")
+		}
+	}
+
+	if !hmac.Equal(expectedSig, actualSig) {
+		return Principal{}, errors.New("jwt signature mismatch")
+	}
+
+	// 2. Parse payload
 	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		payloadBytes, err = base64.URLEncoding.DecodeString(parts[1])
 		if err != nil {
-			return Principal{}, false
+			return Principal{}, errors.New("invalid payload encoding")
 		}
 	}
 
@@ -791,11 +826,22 @@ func parseJWTClaims(token string) (Principal, bool) {
 		Role        string         `json:"role"`
 		OrgRole     string         `json:"org_role"`
 		WorkspaceID string         `json:"workspace_id"`
+		Exp         int64          `json:"exp"`
+		Nbf         int64          `json:"nbf"`
 		Metadata    map[string]any `json:"metadata"`
 	}
 
 	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
-		return Principal{}, false
+		return Principal{}, errors.New("invalid claims json")
+	}
+
+	// 3. Expiry and Not-Before verification
+	now := time.Now().Unix()
+	if claims.Exp > 0 && now > claims.Exp {
+		return Principal{}, errors.New("jwt expired")
+	}
+	if claims.Nbf > 0 && now < claims.Nbf {
+		return Principal{}, errors.New("jwt not valid yet")
 	}
 
 	role := claims.Role
@@ -813,5 +859,5 @@ func parseJWTClaims(token string) (Principal, bool) {
 		ID:          claims.Sub,
 		Role:        role,
 		WorkspaceID: claims.WorkspaceID,
-	}, true
+	}, nil
 }

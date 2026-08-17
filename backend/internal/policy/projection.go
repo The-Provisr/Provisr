@@ -10,7 +10,7 @@ import (
 
 type PolicyRequirements struct {
 	AllowedRegions          []string `json:"allowed_regions,omitempty"`
-	MaxMonthlyBudgetUSD     float64  `json:"max_monthly_budget_usd,omitempty"`
+	MaxMonthlyBudgetUSD     *float64 `json:"max_monthly_budget_usd,omitempty"`
 	RequiredTags            []string `json:"required_tags,omitempty"`
 	ProhibitedResourceTypes []string `json:"prohibited_resource_types,omitempty"`
 	RequiredEncryption      bool     `json:"required_encryption,omitempty"`
@@ -104,7 +104,8 @@ func ProjectPolicyRequirements(ctx context.Context, db *sql.DB, workspaceID stri
 			}
 		case "budget_max":
 			if maxUSD, ok := params["max_usd"].(float64); ok {
-				reqs.MaxMonthlyBudgetUSD = maxUSD
+				val := maxUSD
+				reqs.MaxMonthlyBudgetUSD = &val
 			}
 		case "required_tags":
 			if tags, ok := params["tags"].([]any); ok {

@@ -543,7 +543,8 @@
             "method": "POST",
             "header": [
               { "key": "Authorization", "value": "Bearer {{bearerToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "neg-workspace-invalid-{{$guid}}" }
             ],
             "body": {
               "mode": "raw",
@@ -584,7 +585,8 @@
             "method": "POST",
             "header": [
               { "key": "Authorization", "value": "Bearer {{bearerToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "neg-approval-invalid-{{$guid}}" }
             ],
             "body": {
               "mode": "raw",

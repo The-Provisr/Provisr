@@ -63,7 +63,11 @@ class GeminiModel:
                 model=self._model,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=render_runtime_system_prompt(profile, session.request_id),
+                    system_instruction=render_runtime_system_prompt(
+                        profile,
+                        session.request_id,
+                        session.policy_requirements,
+                    ),
                     max_output_tokens=profile.llm_config.max_tokens,
                     response_mime_type="application/json",
                     temperature=profile.llm_config.temperature,

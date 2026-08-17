@@ -544,10 +544,11 @@ func (s *server) handleUpdateRuleParameters(w http.ResponseWriter, r *http.Reque
 		s.writeError(r, w, http.StatusBadRequest, "validation_error", "parameters_schema is required")
 		return
 	}
-	
-	// Validate JSON
-	if !json.Valid([]byte(req.ParametersSchema)) {
-		s.writeError(r, w, http.StatusBadRequest, "validation_error", "parameters_schema must be valid JSON")
+
+	// Validate JSON object
+	var schemaObj map[string]any
+	if err := json.Unmarshal([]byte(req.ParametersSchema), &schemaObj); err != nil || schemaObj == nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "parameters_schema must be a valid JSON object")
 		return
 	}
 

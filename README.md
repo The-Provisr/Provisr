@@ -45,3 +45,23 @@ docker compose --profile all up
 
 Design specs live in the **docs-provisor** repository (architecture PDFs, ERD, SRS, PRD).
 
+## API testing
+
+A Postman collection for the orchestrator API lives in [`postman/`](postman/):
+
+```bash
+# Import both files into Postman (File → Import), select the "Provisr Local"
+# environment, and run. CLI alternative (runs finite folders, excluding persistent SSE stream):
+newman run postman/Provisr_API.postman_collection.json \
+  -e postman/provisr.env.json \
+  --folder "Health" \
+  --folder "Workspaces" \
+  --folder "Sessions" \
+  --folder "Runs" \
+  --folder "Approvals" \
+  --folder "Artifacts" \
+  --folder "Negative cases"
+```
+
+See the collection description for auth setup (Clerk bearer token or `AUTH_DEV_BYPASS`) and current endpoint status.
+

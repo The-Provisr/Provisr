@@ -7,6 +7,29 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class SecurityConfiguration(StrictModel):
+    encryption_enabled: bool
+
+
+class BackupConfiguration(StrictModel):
+    enabled: bool
+
+
+type PolicyConstraintName = Literal[
+    "allowed_regions",
+    "max_budget",
+    "required_tags",
+    "prohibited_resource_types",
+    "required_encryption",
+    "required_backup",
+]
+
+
+class PolicyApplication(StrictModel):
+    requirements_loaded: Literal[True]
+    applied_constraints: tuple[PolicyConstraintName, ...]
+
+
 class Ec2Resource(StrictModel):
     type: Literal["aws_ec2"]
     name: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
@@ -39,4 +62,7 @@ class ResourceManifest(StrictModel):
     environment: Literal["development", "staging", "production", "sandbox"]
     monthly_budget_usd: float | None = Field(default=None, gt=0)
     tags: dict[str, str] = Field(default_factory=dict)
+    security: SecurityConfiguration
+    backup: BackupConfiguration
+    policy: PolicyApplication
     resources: list[AwsResource] = Field(min_length=1, max_length=50)

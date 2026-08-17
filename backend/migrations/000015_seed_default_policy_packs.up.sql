@@ -11,7 +11,7 @@ VALUES (
 
 INSERT INTO provisr_policy.policy_rules (pack_id, rule_key, rego_rule, severity, description, remediation_hint, parameters_schema) VALUES
 ('a0000000-0000-0000-0000-000000000001', 'no_public_s3',
- 'package provisr.security\n\ndefault allow = true\n\ndeny[msg] {\n  input.resource_type == "aws_s3_bucket"\n  input.planned_values.acl == "public-read"\n  msg := "S3 bucket must not have public-read ACL"\n}',
+ 'package provisr.security\n\ndefault allow = true\n\ndeny[msg] {\n  input.resource_type == "aws_s3_bucket"\n  public_acls := {"public-read", "public-read-write"}\n  public_acls[input.planned_values.acl]\n  msg := "S3 bucket must not have public-read or public-read-write ACL"\n}',
  'deny', 'Deny S3 buckets with public ACLs', 'Set the S3 bucket ACL to private or use bucket policies for controlled access.', '{}'),
 ('a0000000-0000-0000-0000-000000000001', 'require_encryption',
  'package provisr.security\n\ndefault allow = true\n\ndeny[msg] {\n  input.resource_type == "aws_ebs_volume"\n  not input.planned_values.encrypted\n  msg := "EBS volumes must be encrypted"\n}',
@@ -52,5 +52,5 @@ INSERT INTO provisr_policy.policy_rules (pack_id, rule_key, rego_rule, severity,
  'package provisr.compliance\n\ndefault allow = true\n\ndeny[msg] {\n  required := input.parameters.tags\n  tag := required[_]\n  not input.planned_values.tags[tag]\n  msg := sprintf("Required tag ''%s'' is missing", [tag])\n}',
  'deny', 'Require specific tags on all resources', 'Add the required tags to the resource configuration.', '{"tags": ["Environment", "Team", "CostCenter"]}'),
 ('a0000000-0000-0000-0000-000000000003', 'allowed_regions',
- 'package provisr.compliance\n\ndefault allow = true\n\ndeny[msg] {\n  allowed := input.parameters.regions\n  not allowed[input.region]\n  msg := sprintf("Region ''%s'' is not in the allowed list", [input.region])\n}',
+ 'package provisr.compliance\n\ndefault allow = true\n\ndeny[msg] {\n  allowed := input.parameters.regions\n  not region_allowed(allowed, input.region)\n  msg := sprintf("Region ''%s'' is not in the allowed list", [input.region])\n}\n\nregion_allowed(allowed, region) {\n  allowed[_] == region\n}',
  'deny', 'Restrict resources to allowed regions', 'Deploy resources only in approved regions.', '{"regions": ["us-east-1", "us-west-2", "eu-west-1"]}');

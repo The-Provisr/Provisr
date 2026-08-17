@@ -23,6 +23,7 @@ import (
 
 const maxBody = 1 << 20
 
+// error strings
 var (
 	errIdempotencyKeyMissing = errors.New("idempotency key missing")
 	errIdempotencyKeyUsed    = errors.New("idempotency key already used")
@@ -79,8 +80,15 @@ type policySettings struct {
 }
 
 type updateSettingsRequest struct {
-	EnabledPackIDs []string `json:"enabled_pack_ids"`
-	Mode           *string  `json:"mode"`
+	EnabledPackIDs *[]string `json:"enabled_pack_ids"`
+	Mode           *string   `json:"mode"`
+}
+
+type createPackRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
 }
 
 type policyRule struct {
@@ -119,6 +127,7 @@ func New(db *sql.DB, log zerolog.Logger) http.Handler {
 	mux.Handle("/health/", health.Handler())
 
 	mux.HandleFunc("GET /v1/policy-packs", s.handleListPacks)
+	mux.HandleFunc("POST /v1/policy-packs", s.handleCreatePack)
 	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /v1/workspaces/{workspace_id}/policy-settings", s.handleUpdateSettings)
 	mux.HandleFunc("GET /v1/policy-packs/{pack_id}", s.handleGetPack)
@@ -141,7 +150,6 @@ func (s *server) handleListPacks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return system packs (workspace_id IS NULL) plus workspace-specific packs
 	rows, err := s.db.Query(
 		`SELECT id, workspace_id, name, description, category, is_system_pack, is_enabled, created_at, updated_at
 		 FROM provisr_policy.policy_packs
@@ -179,6 +187,85 @@ func (s *server) handleListPacks(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, packs)
 }
 
+func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	var req createPackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
+		return
+	}
+	if req.WorkspaceID == "" || req.Name == "" || req.Category == "" {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "workspace_id, name, and category are required")
+		return
+	}
+	if _, err := uuid.Parse(req.WorkspaceID); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
+		return
+	}
+	switch req.Category {
+	case "security", "cost", "compliance", "environment":
+		// valid
+	default:
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "category must be one of: security, cost, compliance, environment")
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to begin tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to create policy pack")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := s.claimIdempotencyKey(r.Context(), tx, r, req.WorkspaceID, "create_policy_pack"); err != nil {
+		s.writeIdempotencyError(w, r, err)
+		return
+	}
+
+	var p policyPack
+	var wsID sql.NullString
+	err = tx.QueryRow(
+		`INSERT INTO provisr_policy.policy_packs (workspace_id, name, description, category, is_system_pack, is_enabled)
+		 SELECT id, $2, $3, $4::provisr_policy.pack_category, false, true
+		 FROM provisr_identity.workspaces WHERE id = $1
+		 RETURNING id, workspace_id, name, description, category, is_system_pack, is_enabled, created_at, updated_at`,
+		req.WorkspaceID, req.Name, req.Description, req.Category,
+	).Scan(&p.ID, &wsID, &p.Name, &p.Description, &p.Category, &p.IsSystemPack, &p.IsEnabled, &p.CreatedAt, &p.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		s.writeError(r, w, http.StatusBadRequest, "workspace_not_found", "workspace does not exist")
+		return
+	}
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to create policy pack")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to create policy pack")
+		return
+	}
+	if wsID.Valid {
+		p.WorkspaceID = &wsID.String
+	}
+
+	auditPayload := map[string]any{
+		"pack_id": p.ID,
+		"name": p.Name,
+		"category": p.Category,
+	}
+	if err := s.emitAudit(r.Context(), tx, req.WorkspaceID, "state_transition", p.ID, auditPayload); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to create policy pack")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to commit tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to create policy pack")
+		return
+	}
+
+	s.writeJSON(w, http.StatusCreated, p)
+}
+
 func (s *server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspace_id")
 	if _, err := uuid.Parse(workspaceID); err != nil {
@@ -195,14 +282,26 @@ func (s *server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		workspaceID,
 	).Scan(&settings.WorkspaceID, &packIDs, &settings.Mode, &settings.CreatedAt, &settings.UpdatedAt)
 	if err == sql.ErrNoRows {
-		// Return defaults: no packs enabled, enforced mode
-		s.writeJSON(w, http.StatusOK, policySettings{
-			WorkspaceID:    workspaceID,
-			EnabledPackIDs: []string{},
-			Mode:           "enforced",
-			CreatedAt:      time.Now().UTC().Format(time.RFC3339),
-			UpdatedAt:      time.Now().UTC().Format(time.RFC3339),
-		})
+		err = s.db.QueryRow(
+			`INSERT INTO provisr_policy.workspace_policy_settings (workspace_id, enabled_pack_ids, mode)
+			 SELECT id, ARRAY['a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000003']::uuid[], 'enforced'::provisr_policy.policy_mode
+			 FROM provisr_identity.workspaces
+			 WHERE id = $1
+			 ON CONFLICT (workspace_id) DO UPDATE SET updated_at = provisr_policy.workspace_policy_settings.updated_at
+			 RETURNING workspace_id, enabled_pack_ids, mode, created_at, updated_at`,
+			workspaceID,
+		).Scan(&settings.WorkspaceID, &packIDs, &settings.Mode, &settings.CreatedAt, &settings.UpdatedAt)
+		if err == sql.ErrNoRows {
+			s.writeError(r, w, http.StatusNotFound, "workspace_not_found", "workspace does not exist")
+			return
+		}
+		if err != nil {
+			zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to initialize policy settings")
+			s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to initialize policy settings")
+			return
+		}
+		settings.EnabledPackIDs = []string(packIDs)
+		s.writeJSON(w, http.StatusOK, settings)
 		return
 	}
 	if err != nil {
@@ -232,62 +331,97 @@ func (s *server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate pack IDs are valid UUIDs
-	for _, id := range req.EnabledPackIDs {
-		if _, err := uuid.Parse(id); err != nil {
-			s.writeError(r, w, http.StatusBadRequest, "validation_error", fmt.Sprintf("invalid pack id: %s", id))
-			return
-		}
-	}
-
-	mode := "enforced"
 	if req.Mode != nil {
 		if *req.Mode != "enforced" && *req.Mode != "audit_only" {
 			s.writeError(r, w, http.StatusBadRequest, "validation_error", "mode must be enforced or audit_only")
 			return
 		}
-		mode = *req.Mode
 	}
 
-	if req.EnabledPackIDs == nil {
-		req.EnabledPackIDs = []string{}
+	if req.EnabledPackIDs != nil {
+		for _, id := range *req.EnabledPackIDs {
+			if _, err := uuid.Parse(id); err != nil {
+				s.writeError(r, w, http.StatusBadRequest, "validation_error", fmt.Sprintf("invalid pack id: %s", id))
+				return
+			}
+		}
+
+		for _, packID := range *req.EnabledPackIDs {
+			var exists bool
+			err := s.db.QueryRow(
+				`SELECT EXISTS(SELECT 1 FROM provisr_policy.policy_packs WHERE id = $1 AND (workspace_id IS NULL OR workspace_id = $2))`,
+				packID, workspaceID,
+			).Scan(&exists)
+			if err != nil {
+				zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to verify pack")
+				s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
+				return
+			}
+			if !exists {
+				s.writeError(r, w, http.StatusBadRequest, "pack_not_found", fmt.Sprintf("policy pack %s not found", packID))
+				return
+			}
+		}
 	}
 
-	// Verify all pack IDs exist
-	for _, packID := range req.EnabledPackIDs {
-		var exists bool
-		err := s.db.QueryRow(
-			`SELECT EXISTS(SELECT 1 FROM provisr_policy.policy_packs WHERE id = $1 AND (workspace_id IS NULL OR workspace_id = $2))`,
-			packID, workspaceID,
-		).Scan(&exists)
-		if err != nil {
-			zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to verify pack")
-			s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
-			return
-		}
-		if !exists {
-			s.writeError(r, w, http.StatusBadRequest, "pack_not_found", fmt.Sprintf("policy pack %s not found", packID))
-			return
-		}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to begin tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "update_policy_settings"); err != nil {
+		s.writeIdempotencyError(w, r, err)
+		return
+	}
+
+	var existingPackIDs pq.StringArray
+	var existingMode string
+	err = tx.QueryRow(
+		`SELECT enabled_pack_ids, mode
+		 FROM provisr_policy.workspace_policy_settings
+		 WHERE workspace_id = $1 FOR UPDATE`,
+		workspaceID,
+	).Scan(&existingPackIDs, &existingMode)
+
+	finalMode := "enforced"
+	finalPacks := []string{"a0000000-0000-0000-0000-000000000001", "a0000000-0000-0000-0000-000000000002", "a0000000-0000-0000-0000-000000000003"}
+	if err == nil {
+		finalMode = existingMode
+		finalPacks = []string(existingPackIDs)
+	} else if err != sql.ErrNoRows {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to read existing settings")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
+		return
+	}
+
+	if req.Mode != nil {
+		finalMode = *req.Mode
+	}
+	if req.EnabledPackIDs != nil {
+		finalPacks = *req.EnabledPackIDs
 	}
 
 	var settings policySettings
 	var packIDs pq.StringArray
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO provisr_policy.workspace_policy_settings (workspace_id, enabled_pack_ids, mode)
-		 VALUES ($1, $2, $3::provisr_policy.policy_mode)
+		 SELECT id, $2, $3::provisr_policy.policy_mode
+		 FROM provisr_identity.workspaces WHERE id = $1
 		 ON CONFLICT (workspace_id) DO UPDATE SET
 		   enabled_pack_ids = EXCLUDED.enabled_pack_ids,
 		   mode = EXCLUDED.mode,
 		   updated_at = now()
 		 RETURNING workspace_id, enabled_pack_ids, mode, created_at, updated_at`,
-		workspaceID, pq.Array(req.EnabledPackIDs), mode,
+		workspaceID, pq.Array(finalPacks), finalMode,
 	).Scan(&settings.WorkspaceID, &packIDs, &settings.Mode, &settings.CreatedAt, &settings.UpdatedAt)
+	if err == sql.ErrNoRows {
+		s.writeError(r, w, http.StatusBadRequest, "workspace_not_found", "workspace does not exist")
+		return
+	}
 	if err != nil {
-		if isForeignKeyViolation(err) {
-			s.writeError(r, w, http.StatusBadRequest, "workspace_not_found", "workspace does not exist")
-			return
-		}
 		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to update policy settings")
 		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
 		return
@@ -295,6 +429,22 @@ func (s *server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	settings.EnabledPackIDs = []string(packIDs)
 	if settings.EnabledPackIDs == nil {
 		settings.EnabledPackIDs = []string{}
+	}
+
+	auditPayload := map[string]any{
+		"enabled_pack_ids": settings.EnabledPackIDs,
+		"mode":             settings.Mode,
+	}
+	if err := s.emitAudit(r.Context(), tx, workspaceID, "state_transition", workspaceID, auditPayload); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to commit tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update settings")
+		return
 	}
 
 	s.writeJSON(w, http.StatusOK, settings)

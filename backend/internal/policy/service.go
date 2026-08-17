@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,10 +23,17 @@ import (
 
 const maxBody = 1 << 20
 
+var (
+	errIdempotencyKeyMissing = errors.New("idempotency key missing")
+	errIdempotencyKeyUsed    = errors.New("idempotency key already used")
+	errIdempotencyKeyInvalid = errors.New("idempotency key invalid")
+)
+
 type contextKey string
 
 const (
-	principalKey contextKey = "principal"
+	correlationIDKey contextKey = "correlation_id"
+	principalKey     contextKey = "principal"
 )
 
 type Principal struct {
@@ -399,31 +407,95 @@ func (s *server) handleUpdateRuleParameters(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var rule policyRule
-	var paramsSchema []byte
-	var regoRule string
-	err := s.db.QueryRow(
-		`UPDATE provisr_policy.policy_rules
-		 SET parameters_schema = $1::jsonb
-		 WHERE id = $2
-		 RETURNING id, pack_id, rule_key, rego_rule, severity, description, remediation_hint, is_enabled, parameters_schema, created_at`,
-		req.ParametersSchema, ruleID,
-	).Scan(&rule.ID, &rule.PackID, &rule.RuleKey, &regoRule, &rule.Severity, &rule.Description, &rule.RemediationHint, &rule.IsEnabled, &paramsSchema, &rule.CreatedAt)
-	
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to begin tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 1. Fetch rule and pack workspace_id
+	var wsID sql.NullString
+	var existingRule policyRule
+	var existingParamsSchema []byte
+	var existingRego string
+	err = tx.QueryRowContext(r.Context(),
+		`SELECT r.id, r.pack_id, p.workspace_id, r.rule_key, r.rego_rule, r.severity, r.description, r.remediation_hint, r.is_enabled, r.parameters_schema, r.created_at
+		 FROM provisr_policy.policy_rules r
+		 JOIN provisr_policy.policy_packs p ON p.id = r.pack_id
+		 WHERE r.id = $1
+		 FOR UPDATE`,
+		ruleID,
+	).Scan(&existingRule.ID, &existingRule.PackID, &wsID, &existingRule.RuleKey, &existingRego, &existingRule.Severity, &existingRule.Description, &existingRule.RemediationHint, &existingRule.IsEnabled, &existingParamsSchema, &existingRule.CreatedAt)
+
 	if err == sql.ErrNoRows {
 		s.writeError(r, w, http.StatusNotFound, "not_found", "policy rule not found")
 		return
 	}
 	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to find policy rule")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+
+	workspaceID := ""
+	if wsID.Valid && wsID.String != "" {
+		workspaceID = wsID.String
+	} else if p, ok := PrincipalFromContext(r.Context()); ok && p.WorkspaceID != "" {
+		workspaceID = p.WorkspaceID
+	} else if q := r.URL.Query().Get("workspace_id"); q != "" {
+		workspaceID = q
+	}
+
+	// 2. Claim Idempotency Key
+	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "policy_rule.update_parameters"); err != nil {
+		s.writeIdempotencyError(w, r, err)
+		return
+	}
+
+	// 3. Update the parameters_schema
+	var updatedRule policyRule
+	var updatedParamsSchema []byte
+	var updatedRego string
+	err = tx.QueryRowContext(r.Context(),
+		`UPDATE provisr_policy.policy_rules
+		 SET parameters_schema = $1::jsonb
+		 WHERE id = $2
+		 RETURNING id, pack_id, rule_key, rego_rule, severity, description, remediation_hint, is_enabled, parameters_schema, created_at`,
+		req.ParametersSchema, ruleID,
+	).Scan(&updatedRule.ID, &updatedRule.PackID, &updatedRule.RuleKey, &updatedRego, &updatedRule.Severity, &updatedRule.Description, &updatedRule.RemediationHint, &updatedRule.IsEnabled, &updatedParamsSchema, &updatedRule.CreatedAt)
+
+	if err != nil {
 		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to update policy rule")
 		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
 		return
 	}
-	
-	rule.ParametersSchema = string(paramsSchema)
-	rule.RegoRule = regoRule // Returning updated rule back to admin
-	
-	s.writeJSON(w, http.StatusOK, rule)
+
+	updatedRule.ParametersSchema = string(updatedParamsSchema)
+	updatedRule.RegoRule = updatedRego
+
+	// 4. Emit Audit Event
+	auditPayload := map[string]any{
+		"rule_id":           ruleID,
+		"pack_id":           updatedRule.PackID,
+		"rule_key":          updatedRule.RuleKey,
+		"parameters_schema": schemaObj,
+	}
+	if err := s.emitAudit(r.Context(), tx, workspaceID, "state_transition", ruleID, auditPayload); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+
+	// 5. Commit transaction
+	if err := tx.Commit(); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to commit tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, updatedRule)
 }
 
 func (s *server) handleGetPolicyRequirements(w http.ResponseWriter, r *http.Request) {
@@ -482,19 +554,125 @@ func (s *server) recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Request, workspaceID, mutation string) error {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" {
+		return errIdempotencyKeyMissing
+	}
+	if len(key) > 128 {
+		return errIdempotencyKeyInvalid
+	}
+	if workspaceID == "" {
+		return nil
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO provisr_idempotency.keys (workspace_id, key, mutation)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (workspace_id, key) DO NOTHING`,
+		workspaceID, key, mutation,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errIdempotencyKeyUsed
+	}
+	return nil
+}
+
+func (s *server) writeIdempotencyError(w http.ResponseWriter, r *http.Request, err error) {
+	log := zerolog.Ctx(r.Context())
+	switch {
+	case errors.Is(err, errIdempotencyKeyMissing):
+		s.writeError(r, w, http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required for mutations")
+	case errors.Is(err, errIdempotencyKeyInvalid):
+		s.writeError(r, w, http.StatusBadRequest, "idempotency_key_invalid", "Idempotency-Key header must not exceed 128 characters")
+	case errors.Is(err, errIdempotencyKeyUsed):
+		s.writeError(r, w, http.StatusConflict, "duplicate_idempotency_key", "Idempotency-Key was already used for a mutation")
+	default:
+		log.Error().Err(err).Msg("failed to claim idempotency key")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to process mutation")
+	}
+}
+
+func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventType, resourceID string, payload map[string]any) error {
+	if workspaceID == "" {
+		return nil
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal audit payload: %w", err)
+	}
+
+	var previousHash sql.NullString
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('provisr_audit.chain'), 0)`); err != nil {
+		return fmt.Errorf("acquire audit chain lock: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT hash FROM provisr_audit.audit_events ORDER BY seq DESC LIMIT 1`,
+	).Scan(&previousHash); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read previous audit hash: %w", err)
+	}
+
+	corrID := correlationID(ctx)
+	actorID := "policy-service"
+	actorType := "system"
+	resourceType := "policy"
+
+	sum := sha256.New()
+	sum.Write([]byte(previousHash.String + "\x00"))
+	sum.Write([]byte(workspaceID + "\x00"))
+	sum.Write([]byte(actorID + "\x00"))
+	sum.Write([]byte(actorType + "\x00"))
+	sum.Write([]byte(resourceType + "\x00"))
+	sum.Write([]byte(resourceID + "\x00"))
+	sum.Write([]byte(eventType + "\x00"))
+	sum.Write(payloadJSON)
+	sum.Write([]byte("\x00" + corrID))
+	eventHash := hex.EncodeToString(sum.Sum(nil))
+
+	var prev any
+	if previousHash.Valid {
+		prev = previousHash.String
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO provisr_audit.audit_events
+		   (workspace_id, event_type, actor_id, actor_type, resource_type, resource_id,
+		    payload, hash, previous_hash, correlation_id)
+		 VALUES ($1, $2::provisr_audit.event_type, $3, $4::provisr_audit.actor_type, $5, $6, $7, $8, $9, $10)`,
+		workspaceID, eventType, actorID, actorType, resourceType, resourceID, payloadJSON, eventHash, prev, corrID,
+	)
+	if err != nil {
+		return fmt.Errorf("insert audit event: %w", err)
+	}
+	return nil
+}
+
+func correlationID(ctx context.Context) string {
+	if v, ok := ctx.Value(correlationIDKey).(string); ok && v != "" {
+		return v
+	}
+	return uuid.NewString()
+}
+
 func loggingMiddleware(base zerolog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
 		if requestID == "" {
 			requestID = uuid.NewString()
 		}
-		correlationID := r.Header.Get("X-Correlation-ID")
-		if _, err := uuid.Parse(correlationID); err != nil {
-			correlationID = requestID
+		corrID := r.Header.Get("X-Correlation-ID")
+		if _, err := uuid.Parse(corrID); err != nil {
+			corrID = requestID
 		}
 
-		l := base.With().Str("request_id", requestID).Str("correlation_id", correlationID).Logger()
+		l := base.With().Str("request_id", requestID).Str("correlation_id", corrID).Logger()
 		ctx := l.WithContext(r.Context())
+		ctx = context.WithValue(ctx, correlationIDKey, corrID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

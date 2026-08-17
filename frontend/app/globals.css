@@ -346,7 +346,7 @@ body {
 .provisr-spinner {
   width: .875rem;
   height: .875rem;
-  border: 2px solid currentColor;
+  border: 2px solid currentcolor;
   border-top-color: transparent;
   border-radius: 9999px;
   animation: spin .8s linear infinite;

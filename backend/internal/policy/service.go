@@ -27,7 +27,31 @@ var (
 )
 
 type contextKey string
-const correlationIDKey contextKey = "correlation_id"
+
+const (
+	correlationIDKey contextKey = "correlation_id"
+	principalKey     contextKey = "principal"
+)
+
+type Principal struct {
+	ID          string `json:"id"`
+	Role        string `json:"role"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+func ContextWithPrincipal(ctx context.Context, p Principal) context.Context {
+	return context.WithValue(ctx, principalKey, p)
+}
+
+func PrincipalFromContext(ctx context.Context) (Principal, bool) {
+	p, ok := ctx.Value(principalKey).(Principal)
+	return p, ok
+}
+
+func isAdmin(ctx context.Context) bool {
+	p, ok := PrincipalFromContext(ctx)
+	return ok && p.Role == "admin"
+}
 
 // --- Models ---
 
@@ -428,8 +452,7 @@ func (s *server) handleGetPack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role := r.Header.Get("X-User-Role")
-	isAdmin := role == "admin"
+	admin := isAdmin(r.Context())
 
 	// Fetch pack
 	var pack policyPackWithRules
@@ -483,7 +506,7 @@ func (s *server) handleGetPack(w http.ResponseWriter, r *http.Request) {
 		rule.ParametersSchema = string(paramsSchema)
 		
 		// PRD §15: access control for raw Rego
-		if isAdmin {
+		if admin {
 			rule.RegoRule = regoRule
 		}
 		
@@ -505,8 +528,7 @@ func (s *server) handleUpdateRuleParameters(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	role := r.Header.Get("X-User-Role")
-	if role != "admin" {
+	if !isAdmin(r.Context()) {
 		s.writeError(r, w, http.StatusForbidden, "forbidden", "only admins can update policy rule parameters")
 		return
 	}

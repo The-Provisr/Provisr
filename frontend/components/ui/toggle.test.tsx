@@ -25,12 +25,15 @@ describe("Toggle", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("allows keyboard activation", () => {
+  it("activates via keyboard and fires onChange once through the native click", () => {
     const onChange = vi.fn();
     render(<Toggle checked={false} onChange={onChange} />);
     const toggle = screen.getByRole("switch");
     toggle.focus();
     fireEvent.keyDown(toggle, { key: " " });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith(true);
   });
 });

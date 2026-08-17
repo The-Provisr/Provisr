@@ -43,9 +43,7 @@ export function Toggle({
       onKeyDown={(event) => {
         onKeyDown?.(event);
         if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
           event.stopPropagation();
-          onChange?.(!checked);
         }
       }}
       role="switch"

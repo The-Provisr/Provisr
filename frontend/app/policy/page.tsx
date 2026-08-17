@@ -1,5 +1,6 @@
 "use client";
 
+import { useUser } from "@clerk/nextjs";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { BracesIcon, LayoutGridIcon } from "@/components/ui/icons";
@@ -18,13 +19,16 @@ import { resetPolicyPack, savePolicyDraft } from "@/lib/policy/api";
 import { policyPacks } from "@/lib/policy/mock-data";
 import type { PolicyPack, PolicyPackDraft, PolicyViewState } from "@/lib/policy/types";
 
-// @migration: derive from the Clerk session role (Workspace Admin) once roles
-// are unified in the frontend. For now the editor is admin-gated via this seam.
-const POLICY_EDITOR_IS_ADMIN = true;
-
 type ToastState = { tone: "success" | "error"; message: string };
 
+// @migration: roles are not yet unified in the frontend — the Clerk session
+// carries no role claim until backend workspace membership roles are exposed.
+// Default to non-admin until that lands; server-side policy endpoints must
+// enforce the same admin check.
 export default function PolicySettingsPage() {
+  const { user } = useUser();
+  const policyEditorIsAdmin = user?.publicMetadata?.role === "admin";
+
   const [draft, setDraft] = useState<PolicyPack[]>(() =>
     policyPacks.map((pack) => ({
       ...pack,
@@ -229,7 +233,7 @@ export default function PolicySettingsPage() {
                   <PolicyRuleRow
                     defaultExpanded={index === 0}
                     enabled={rule.enabled}
-                    isAdmin={POLICY_EDITOR_IS_ADMIN}
+                    isAdmin={policyEditorIsAdmin}
                     key={rule.key}
                     onEnabledChange={(ruleKey, enabled) =>
                       updatePack(selectedPack.id, (current) => ({
@@ -260,13 +264,13 @@ export default function PolicySettingsPage() {
                     {regoRule.key}
                   </code>
                   <p className="text-xs text-gray-500">
-                    {POLICY_EDITOR_IS_ADMIN
+                    {policyEditorIsAdmin
                       ? "Editable for workspace admins."
                       : "Read-only unless you are a workspace admin."}
                   </p>
                 </div>
                 <RegoEditor
-                  isAdmin={POLICY_EDITOR_IS_ADMIN}
+                  isAdmin={policyEditorIsAdmin}
                   onChange={(source) =>
                     updatePack(selectedPack.id, (current) => ({
                       ...current,

@@ -46,3 +46,14 @@ func TestPolicyRequirementsSerialization(t *testing.T) {
 		t.Fatalf("expected max_monthly_budget_usd:500 to be present, got: %s", string(bytesPositiveBudget))
 	}
 }
+
+func TestContainsHelper(t *testing.T) {
+	slice := []string{"tag1", "tag2"}
+	if !contains(slice, "tag1") {
+		t.Fatal("expected true for tag1")
+	}
+	if contains(slice, "tag3") {
+		t.Fatal("expected false for tag3")
+	}
+}
+

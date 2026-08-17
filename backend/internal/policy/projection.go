@@ -4,9 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
+
+var ErrPolicyConflict = errors.New("conflicting policy rules: allowed_regions intersection is empty")
 
 type PolicyRequirements struct {
 	AllowedRegions          []string `json:"allowed_regions,omitempty"`
@@ -80,6 +84,8 @@ func ProjectPolicyRequirements(ctx context.Context, db *sql.DB, workspaceID stri
 	defer rows.Close()
 
 	hasComplexRules := false
+	var allowedRegionsSet map[string]struct{}
+	hasAllowedRegionsRule := false
 
 	// 3. Project rules into constraints
 	for rows.Next() {
@@ -97,29 +103,52 @@ func ProjectPolicyRequirements(ctx context.Context, db *sql.DB, workspaceID stri
 		switch ruleKey {
 		case "allowed_regions":
 			if regions, ok := params["regions"].([]any); ok {
+				currentSet := make(map[string]struct{})
 				for _, r := range regions {
-					if str, ok := r.(string); ok {
-						reqs.AllowedRegions = append(reqs.AllowedRegions, str)
+					if str, ok := r.(string); ok && str != "" {
+						currentSet[str] = struct{}{}
+					}
+				}
+				if !hasAllowedRegionsRule {
+					allowedRegionsSet = currentSet
+					hasAllowedRegionsRule = true
+				} else {
+					intersected := make(map[string]struct{})
+					for region := range allowedRegionsSet {
+						if _, exists := currentSet[region]; exists {
+							intersected[region] = struct{}{}
+						}
+					}
+					allowedRegionsSet = intersected
+					if len(allowedRegionsSet) == 0 {
+						return reqs, ErrPolicyConflict
 					}
 				}
 			}
 		case "budget_max":
 			if maxUSD, ok := params["max_usd"].(float64); ok {
-				val := maxUSD
-				reqs.MaxMonthlyBudgetUSD = &val
+				if reqs.MaxMonthlyBudgetUSD == nil || maxUSD < *reqs.MaxMonthlyBudgetUSD {
+					val := maxUSD
+					reqs.MaxMonthlyBudgetUSD = &val
+				}
 			}
 		case "required_tags":
 			if tags, ok := params["tags"].([]any); ok {
 				for _, t := range tags {
-					if str, ok := t.(string); ok {
-						reqs.RequiredTags = append(reqs.RequiredTags, str)
+					if str, ok := t.(string); ok && str != "" {
+						if !contains(reqs.RequiredTags, str) {
+							reqs.RequiredTags = append(reqs.RequiredTags, str)
+						}
 					}
 				}
 			}
 		case "require_encryption":
 			reqs.RequiredEncryption = true
 		case "no_public_s3":
-			reqs.ProhibitedResourceTypes = append(reqs.ProhibitedResourceTypes, "aws_s3_bucket_public_access_block:public")
+			prohibited := "aws_s3_bucket_public_access_block:public"
+			if !contains(reqs.ProhibitedResourceTypes, prohibited) {
+				reqs.ProhibitedResourceTypes = append(reqs.ProhibitedResourceTypes, prohibited)
+			}
 		case "iam_no_wildcard":
 			hasComplexRules = true
 		default:
@@ -131,9 +160,27 @@ func ProjectPolicyRequirements(ctx context.Context, db *sql.DB, workspaceID stri
 		return reqs, fmt.Errorf("failed to iterate policy rules: %w", err)
 	}
 
+	if hasAllowedRegionsRule {
+		regions := make([]string, 0, len(allowedRegionsSet))
+		for r := range allowedRegionsSet {
+			regions = append(regions, r)
+		}
+		sort.Strings(regions)
+		reqs.AllowedRegions = regions
+	}
+
 	if hasComplexRules {
 		reqs.Warnings = append(reqs.Warnings, "Additional complex policies will be evaluated during the formal policy check phase. Proceed with caution for IAM and custom configurations.")
 	}
 
 	return reqs, nil
+}
+
+func contains(slice []string, val string) bool {
+	for _, item := range slice {
+		if item == val {
+			return true
+		}
+	}
+	return false
 }

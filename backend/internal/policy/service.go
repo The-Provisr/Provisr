@@ -404,6 +404,10 @@ func (s *server) handleGetPolicyRequirements(w http.ResponseWriter, r *http.Requ
 
 	reqs, err := ProjectPolicyRequirements(r.Context(), s.db, workspaceID)
 	if err != nil {
+		if errors.Is(err, ErrPolicyConflict) {
+			s.writeError(r, w, http.StatusConflict, "policy_conflict", err.Error())
+			return
+		}
 		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to project policy requirements")
 		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to project policy requirements")
 		return

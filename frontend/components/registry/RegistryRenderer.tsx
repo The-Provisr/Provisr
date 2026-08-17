@@ -6,7 +6,7 @@ import { resolvePayload } from "./dispatch";
 import { UnknownComponentFallback } from "./fallbacks/UnknownComponentFallback";
 import { InvalidPayloadFallback } from "./fallbacks/InvalidPayloadFallback";
 
-export function RegistryRenderer({ payload }: { payload: ComponentPayload }) {
+export function RegistryRenderer({ payload }: { payload: ComponentPayload | unknown }) {
   const registry = useRegistry();
   const result = resolvePayload(registry, payload);
 

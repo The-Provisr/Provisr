@@ -111,4 +111,36 @@ describe("resolvePayload", () => {
       data: { text: "hello" },
     });
   });
+
+  describe("envelope validation", () => {
+    it("returns invalid/schema when payload is null or not an object", () => {
+      const registry = createRegistry();
+      const nullResult = resolvePayload(registry, null);
+      expect(nullResult.kind).toBe("invalid");
+      if (nullResult.kind !== "invalid") throw new Error("expected invalid");
+      expect(nullResult.type).toBe("unknown");
+      expect(nullResult.reason).toBe("schema");
+
+      const stringResult = resolvePayload(registry, "not-an-object");
+      expect(stringResult.kind).toBe("invalid");
+      if (stringResult.kind !== "invalid") throw new Error("expected invalid");
+      expect(stringResult.type).toBe("unknown");
+    });
+
+    it("returns invalid/schema when envelope fields are missing", () => {
+      const registry = createRegistry();
+      const result = resolvePayload(registry, { type: "test_type" });
+      expect(result.kind).toBe("invalid");
+      if (result.kind !== "invalid") throw new Error("expected invalid");
+      expect(result.type).toBe("test_type");
+      expect(result.reason).toBe("schema");
+      expect(result.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: "version" }),
+          expect.objectContaining({ field: "requestId" }),
+        ]),
+      );
+    });
+  });
 });
+

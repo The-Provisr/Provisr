@@ -19,7 +19,7 @@ export function Toast({ message, tone = "success", onDismiss }: ToastProps) {
   const classes = toneClasses[tone];
   return (
     <div
-      aria-live="polite"
+      aria-live={tone === "error" ? "assertive" : "polite"}
       className={cn("fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-lg border p-4 shadow-sm", classes.card)}
       data-testid="toast"
       role={tone === "error" ? "alert" : "status"}

@@ -7,7 +7,7 @@ export type MigrateFn<T> = (data: T, fromVersion: string) => T;
 export interface RegistryEntry<T = unknown> {
   type: string;
   version: string;
-  schema: ZodType<T>;
+  schema: ZodType<T, any, any>;
   component: ReactComponentType<{ data: T }>;
   migrate?: MigrateFn<T>;
 }

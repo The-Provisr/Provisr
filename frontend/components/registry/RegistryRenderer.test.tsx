@@ -140,4 +140,74 @@ describe("RegistryRenderer", () => {
     expect(screen.getByText(hostile)).toBeInTheDocument();
     expect(document.querySelector("img")).toBeNull();
   });
+
+  it("renders a known component through defaultRegistry via RegistryProvider without custom registry", () => {
+    render(
+      <RegistryProvider>
+        <RegistryRenderer
+          payload={{
+            type: "chat_message",
+            version: "1.0",
+            requestId: "req_default",
+            data: {
+              id: "msg-default-1",
+              role: "assistant",
+              content: "Default registry test message",
+              senderName: "Provisr Bot",
+            },
+          }}
+        />
+      </RegistryProvider>,
+    );
+
+    expect(screen.getByText("Default registry test message")).toBeInTheDocument();
+    expect(screen.getByText("Provisr Bot")).toBeInTheDocument();
+    expect(screen.queryByText(/no renderer is registered/i)).not.toBeInTheDocument();
+  });
+
+  it("registers all 23 FE-C component types into defaultRegistry", () => {
+    const expectedComponentTypes: ComponentType[] = [
+      "chat_message",
+      "clarification_question",
+      "architecture_summary",
+      "compute_plan",
+      "container_card",
+      "networking_topology",
+      "database_config",
+      "database_engine_selector",
+      "storage_card",
+      "monitoring_card",
+      "loadbalancer_card",
+      "region_selector",
+      "resource_table",
+      "cost_estimate",
+      "policy_result",
+      "security_warning",
+      "terraform_review",
+      "terraform_plan_diff",
+      "approval_request",
+      "execution_timeline",
+      "cloud_state",
+      "drift_status",
+      "artifact_viewer",
+    ];
+
+    function RegistryInspector() {
+      const reg = useRegistry();
+      for (const type of expectedComponentTypes) {
+        expect(reg.has(type)).toBe(true);
+        expect(reg.get(type)).toBeDefined();
+      }
+      return <div data-testid="all-registered">OK</div>;
+    }
+
+    render(
+      <RegistryProvider>
+        <RegistryInspector />
+      </RegistryProvider>,
+    );
+
+    expect(screen.getByTestId("all-registered")).toHaveTextContent("OK");
+  });
 });
+

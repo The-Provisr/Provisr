@@ -328,6 +328,11 @@ func (s *server) handleGetPack(w http.ResponseWriter, r *http.Request) {
 		
 		pack.Rules = append(pack.Rules, rule)
 	}
+	if err := rows.Err(); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to iterate policy rules")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to get policy pack rules")
+		return
+	}
 
 	s.writeJSON(w, http.StatusOK, pack)
 }

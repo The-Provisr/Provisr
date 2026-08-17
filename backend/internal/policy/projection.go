@@ -127,6 +127,9 @@ func ProjectPolicyRequirements(ctx context.Context, db *sql.DB, workspaceID stri
 			hasComplexRules = true
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return reqs, fmt.Errorf("failed to iterate policy rules: %w", err)
+	}
 
 	if hasComplexRules {
 		reqs.Warnings = append(reqs.Warnings, "Additional complex policies will be evaluated during the formal policy check phase. Proceed with caution for IAM and custom configurations.")

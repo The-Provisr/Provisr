@@ -41,9 +41,19 @@ export function PolicyRuleRow({
   const [parameters, setParameters] = useState(rule.parameters);
 
   const updateParameter = (key: string, value: PolicyParameter["value"]) => {
-    const next = parameters.map((parameter) =>
-      parameter.key === key ? { ...parameter, value } : parameter,
-    );
+    const next = parameters.map((parameter) => {
+      if (parameter.key !== key) return parameter;
+      switch (parameter.type) {
+        case "text":
+          return { ...parameter, value: value as string };
+        case "number":
+          return { ...parameter, value: value as number };
+        case "multi_select":
+          return { ...parameter, value: value as string[] };
+        case "boolean":
+          return { ...parameter, value: value as boolean };
+      }
+    });
     setParameters(next);
     onParametersChange?.(rule.key, next);
   };

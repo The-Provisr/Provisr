@@ -10,16 +10,43 @@ export type PolicySeverity = "deny" | "warn" | "approval";
 
 export type PolicyParameterType = "text" | "number" | "multi_select" | "boolean";
 
-export type PolicyParameter = {
+export type PolicyTextParameter = {
   key: string;
   label: string;
-  type: PolicyParameterType;
-  value: string | number | boolean | string[];
-  options?: string[];
+  type: "text";
+  value: string;
+};
+
+export type PolicyNumberParameter = {
+  key: string;
+  label: string;
+  type: "number";
+  value: number;
   min?: number;
   max?: number;
   step?: number;
 };
+
+export type PolicyMultiSelectParameter = {
+  key: string;
+  label: string;
+  type: "multi_select";
+  value: string[];
+  options: string[];
+};
+
+export type PolicyBooleanParameter = {
+  key: string;
+  label: string;
+  type: "boolean";
+  value: boolean;
+};
+
+export type PolicyParameter =
+  | PolicyTextParameter
+  | PolicyNumberParameter
+  | PolicyMultiSelectParameter
+  | PolicyBooleanParameter;
 
 export type PolicyRule = {
   key: string;

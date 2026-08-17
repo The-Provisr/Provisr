@@ -132,6 +132,7 @@ func New(db *sql.DB, log zerolog.Logger) http.Handler {
 	mux.HandleFunc("PUT /v1/workspaces/{workspace_id}/policy-settings", s.handleUpdateSettings)
 	mux.HandleFunc("GET /v1/policy-packs/{pack_id}", s.handleGetPack)
 	mux.HandleFunc("PATCH /v1/policy-rules/{rule_id}/parameters", s.handleUpdateRuleParameters)
+	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-requirements", s.handleGetPolicyRequirements)
 
 	return loggingMiddleware(log, s.recoveryMiddleware(authMiddleware(mux)))
 }
@@ -231,7 +232,7 @@ func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
 		 RETURNING id, workspace_id, name, description, category, is_system_pack, is_enabled, created_at, updated_at`,
 		req.WorkspaceID, req.Name, req.Description, req.Category,
 	).Scan(&p.ID, &wsID, &p.Name, &p.Description, &p.Category, &p.IsSystemPack, &p.IsEnabled, &p.CreatedAt, &p.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		s.writeError(r, w, http.StatusBadRequest, "workspace_not_found", "workspace does not exist")
 		return
@@ -556,31 +557,122 @@ func (s *server) handleUpdateRuleParameters(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var rule policyRule
-	var paramsSchema []byte
-	var regoRule string
-	err := s.db.QueryRow(
-		`UPDATE provisr_policy.policy_rules
-		 SET parameters_schema = $1::jsonb
-		 WHERE id = $2
-		 RETURNING id, pack_id, rule_key, rego_rule, severity, description, remediation_hint, is_enabled, parameters_schema, created_at`,
-		req.ParametersSchema, ruleID,
-	).Scan(&rule.ID, &rule.PackID, &rule.RuleKey, &regoRule, &rule.Severity, &rule.Description, &rule.RemediationHint, &rule.IsEnabled, &paramsSchema, &rule.CreatedAt)
-	
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to begin tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 1. Fetch rule and pack workspace_id
+	var wsID sql.NullString
+	var existingRule policyRule
+	var existingParamsSchema []byte
+	var existingRego string
+	err = tx.QueryRowContext(r.Context(),
+		`SELECT r.id, r.pack_id, p.workspace_id, r.rule_key, r.rego_rule, r.severity, r.description, r.remediation_hint, r.is_enabled, r.parameters_schema, r.created_at
+		 FROM provisr_policy.policy_rules r
+		 JOIN provisr_policy.policy_packs p ON p.id = r.pack_id
+		 WHERE r.id = $1
+		 FOR UPDATE`,
+		ruleID,
+	).Scan(&existingRule.ID, &existingRule.PackID, &wsID, &existingRule.RuleKey, &existingRego, &existingRule.Severity, &existingRule.Description, &existingRule.RemediationHint, &existingRule.IsEnabled, &existingParamsSchema, &existingRule.CreatedAt)
+
 	if err == sql.ErrNoRows {
 		s.writeError(r, w, http.StatusNotFound, "not_found", "policy rule not found")
 		return
 	}
 	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to find policy rule")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+
+	workspaceID := ""
+	if wsID.Valid && wsID.String != "" {
+		workspaceID = wsID.String
+	} else if p, ok := PrincipalFromContext(r.Context()); ok && p.WorkspaceID != "" {
+		workspaceID = p.WorkspaceID
+	} else if q := r.URL.Query().Get("workspace_id"); q != "" {
+		workspaceID = q
+	}
+
+	// 2. Validate parameter schema against the rule's expected shape
+	if err := validateRuleParameters(existingRule.RuleKey, schemaObj); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", err.Error())
+		return
+	}
+
+	// 3. Claim Idempotency Key
+	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "policy_rule.update_parameters"); err != nil {
+		s.writeIdempotencyError(w, r, err)
+		return
+	}
+
+	// 3. Update the parameters_schema
+	var updatedRule policyRule
+	var updatedParamsSchema []byte
+	var updatedRego string
+	err = tx.QueryRowContext(r.Context(),
+		`UPDATE provisr_policy.policy_rules
+		 SET parameters_schema = $1::jsonb
+		 WHERE id = $2
+		 RETURNING id, pack_id, rule_key, rego_rule, severity, description, remediation_hint, is_enabled, parameters_schema, created_at`,
+		req.ParametersSchema, ruleID,
+	).Scan(&updatedRule.ID, &updatedRule.PackID, &updatedRule.RuleKey, &updatedRego, &updatedRule.Severity, &updatedRule.Description, &updatedRule.RemediationHint, &updatedRule.IsEnabled, &updatedParamsSchema, &updatedRule.CreatedAt)
+
+	if err != nil {
 		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to update policy rule")
 		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
 		return
 	}
-	
-	rule.ParametersSchema = string(paramsSchema)
-	rule.RegoRule = regoRule // Returning updated rule back to admin
-	
-	s.writeJSON(w, http.StatusOK, rule)
+
+	updatedRule.ParametersSchema = string(updatedParamsSchema)
+	updatedRule.RegoRule = updatedRego
+
+	// 4. Emit Audit Event
+	auditPayload := map[string]any{
+		"rule_id":           ruleID,
+		"pack_id":           updatedRule.PackID,
+		"rule_key":          updatedRule.RuleKey,
+		"parameters_schema": schemaObj,
+	}
+	if err := s.emitAudit(r.Context(), tx, workspaceID, "state_transition", ruleID, auditPayload); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+
+	// 5. Commit transaction
+	if err := tx.Commit(); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to commit tx")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, updatedRule)
+}
+
+func (s *server) handleGetPolicyRequirements(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspace_id")
+	if _, err := uuid.Parse(workspaceID); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
+		return
+	}
+
+	reqs, err := ProjectPolicyRequirements(r.Context(), s.db, workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrPolicyConflict) {
+			s.writeError(r, w, http.StatusConflict, "policy_conflict", err.Error())
+			return
+		}
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to project policy requirements")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to project policy requirements")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, reqs)
 }
 
 // --- Helpers ---
@@ -601,6 +693,69 @@ func (s *server) writeError(r *http.Request, w http.ResponseWriter, status int, 
 	})
 }
 
+func validateRuleParameters(ruleKey string, params map[string]any) error {
+	switch ruleKey {
+	case "allowed_regions":
+		val, ok := params["regions"]
+		if !ok {
+			return errors.New("regions field is required for allowed_regions rule")
+		}
+		regions, ok := val.([]any)
+		if !ok {
+			return errors.New("regions must be an array of strings")
+		}
+		if len(regions) == 0 {
+			return errors.New("regions array must not be empty")
+		}
+		for _, r := range regions {
+			s, ok := r.(string)
+			if !ok || strings.TrimSpace(s) == "" {
+				return errors.New("each region must be a non-empty string")
+			}
+		}
+	case "budget_max":
+		val, ok := params["max_usd"]
+		if !ok {
+			return errors.New("max_usd field is required for budget_max rule")
+		}
+		maxUSD, ok := val.(float64)
+		if !ok {
+			return errors.New("max_usd must be a numeric value")
+		}
+		if maxUSD < 0 {
+			return errors.New("max_usd must not be negative")
+		}
+	case "required_tags":
+		val, ok := params["tags"]
+		if !ok {
+			return errors.New("tags field is required for required_tags rule")
+		}
+		tags, ok := val.([]any)
+		if !ok {
+			return errors.New("tags must be an array of strings")
+		}
+		for _, t := range tags {
+			s, ok := t.(string)
+			if !ok || strings.TrimSpace(s) == "" {
+				return errors.New("each tag must be a non-empty string")
+			}
+		}
+	}
+	return nil
+}
+
+func (s *server) recoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				zerolog.Ctx(r.Context()).Error().Interface("panic", rec).Str("path", r.URL.Path).Msg("panic recovered")
+				s.writeError(r, w, http.StatusInternalServerError, "internal_error", "unexpected server error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Request, workspaceID, mutation string) error {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" {
@@ -608,6 +763,9 @@ func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Re
 	}
 	if len(key) > 128 {
 		return errIdempotencyKeyInvalid
+	}
+	if workspaceID == "" {
+		return nil
 	}
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO provisr_idempotency.keys (workspace_id, key, mutation)
@@ -644,6 +802,9 @@ func (s *server) writeIdempotencyError(w http.ResponseWriter, r *http.Request, e
 }
 
 func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventType, resourceID string, payload map[string]any) error {
+	if workspaceID == "" {
+		return nil
+	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal audit payload: %w", err)
@@ -659,7 +820,7 @@ func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventTy
 		return fmt.Errorf("read previous audit hash: %w", err)
 	}
 
-	correlationID := correlationID(ctx)
+	corrID := correlationID(ctx)
 	actorID := "policy-service"
 	actorType := "system"
 	resourceType := "policy"
@@ -673,7 +834,7 @@ func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventTy
 	sum.Write([]byte(resourceID + "\x00"))
 	sum.Write([]byte(eventType + "\x00"))
 	sum.Write(payloadJSON)
-	sum.Write([]byte("\x00" + correlationID))
+	sum.Write([]byte("\x00" + corrID))
 	eventHash := hex.EncodeToString(sum.Sum(nil))
 
 	var prev any
@@ -685,7 +846,7 @@ func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventTy
 		   (workspace_id, event_type, actor_id, actor_type, resource_type, resource_id,
 		    payload, hash, previous_hash, correlation_id)
 		 VALUES ($1, $2::provisr_audit.event_type, $3, $4::provisr_audit.actor_type, $5, $6, $7, $8, $9, $10)`,
-		workspaceID, eventType, actorID, actorType, resourceType, resourceID, payloadJSON, eventHash, prev, correlationID,
+		workspaceID, eventType, actorID, actorType, resourceType, resourceID, payloadJSON, eventHash, prev, corrID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert audit event: %w", err)
@@ -698,18 +859,6 @@ func correlationID(ctx context.Context) string {
 		return v
 	}
 	return uuid.NewString()
-}
-
-func (s *server) recoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				zerolog.Ctx(r.Context()).Error().Interface("panic", rec).Str("path", r.URL.Path).Msg("panic recovered")
-				s.writeError(r, w, http.StatusInternalServerError, "internal_error", "unexpected server error")
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
 }
 
 func loggingMiddleware(base zerolog.Logger, next http.Handler) http.Handler {

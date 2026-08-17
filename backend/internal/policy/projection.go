@@ -67,9 +67,10 @@ func ProjectPolicyRequirements(ctx context.Context, db *sql.DB, workspaceID stri
 	}
 
 	query := fmt.Sprintf(`
-		SELECT rule_key, parameters_schema
-		FROM provisr_policy.policy_rules
-		WHERE is_enabled = true AND pack_id IN (%s)
+		SELECT r.rule_key, r.parameters_schema
+		FROM provisr_policy.policy_rules r
+		JOIN provisr_policy.policy_packs p ON p.id = r.pack_id
+		WHERE r.is_enabled = true AND p.is_enabled = true AND r.pack_id IN (%s)
 	`, strings.Join(placeholders, ","))
 
 	rows, err := db.QueryContext(ctx, query, args...)

@@ -2,14 +2,18 @@ package policy
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -27,7 +31,31 @@ var (
 )
 
 type contextKey string
-const correlationIDKey contextKey = "correlation_id"
+
+const (
+	correlationIDKey contextKey = "correlation_id"
+	principalKey     contextKey = "principal"
+)
+
+type Principal struct {
+	ID          string `json:"id"`
+	Role        string `json:"role"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+func ContextWithPrincipal(ctx context.Context, p Principal) context.Context {
+	return context.WithValue(ctx, principalKey, p)
+}
+
+func PrincipalFromContext(ctx context.Context) (Principal, bool) {
+	p, ok := ctx.Value(principalKey).(Principal)
+	return p, ok
+}
+
+func isAdmin(ctx context.Context) bool {
+	p, ok := PrincipalFromContext(ctx)
+	return ok && p.Role == "admin"
+}
 
 // --- Models ---
 
@@ -63,6 +91,28 @@ type createPackRequest struct {
 	Category    string `json:"category"`
 }
 
+type policyRule struct {
+	ID               string `json:"id"`
+	PackID           string `json:"pack_id"`
+	RuleKey          string `json:"rule_key"`
+	RegoRule         string `json:"rego_rule,omitempty"` // Omitted for non-admins
+	Severity         string `json:"severity"`
+	Description      string `json:"description"`
+	RemediationHint  string `json:"remediation_hint"`
+	IsEnabled        bool   `json:"is_enabled"`
+	ParametersSchema string `json:"parameters_schema"`
+	CreatedAt        string `json:"created_at"`
+}
+
+type policyPackWithRules struct {
+	policyPack
+	Rules []policyRule `json:"rules"`
+}
+
+type updateRuleParametersRequest struct {
+	ParametersSchema string `json:"parameters_schema"`
+}
+
 // --- Server ---
 
 type server struct {
@@ -77,12 +127,13 @@ func New(db *sql.DB, log zerolog.Logger) http.Handler {
 	mux.Handle("/health/", health.Handler())
 
 	mux.HandleFunc("GET /v1/policy-packs", s.handleListPacks)
-	mux.HandleFunc("GET /v1/policy-packs/{pack_id}", s.handleGetPack)
 	mux.HandleFunc("POST /v1/policy-packs", s.handleCreatePack)
 	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /v1/workspaces/{workspace_id}/policy-settings", s.handleUpdateSettings)
+	mux.HandleFunc("GET /v1/policy-packs/{pack_id}", s.handleGetPack)
+	mux.HandleFunc("PATCH /v1/policy-rules/{rule_id}/parameters", s.handleUpdateRuleParameters)
 
-	return loggingMiddleware(log, s.recoveryMiddleware(mux))
+	return loggingMiddleware(log, s.recoveryMiddleware(authMiddleware(mux)))
 }
 
 // --- Handlers ---
@@ -133,37 +184,6 @@ func (s *server) handleListPacks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, packs)
-}
-
-func (s *server) handleGetPack(w http.ResponseWriter, r *http.Request) {
-	packID := r.PathValue("pack_id")
-	if _, err := uuid.Parse(packID); err != nil {
-		s.writeError(r, w, http.StatusBadRequest, "validation_error", "pack_id must be a valid UUID")
-		return
-	}
-
-	var p policyPack
-	var wsID sql.NullString
-	err := s.db.QueryRow(
-		`SELECT id, workspace_id, name, description, category, is_system_pack, is_enabled, created_at, updated_at
-		 FROM provisr_policy.policy_packs
-		 WHERE id = $1`,
-		packID,
-	).Scan(&p.ID, &wsID, &p.Name, &p.Description, &p.Category, &p.IsSystemPack, &p.IsEnabled, &p.CreatedAt, &p.UpdatedAt)
-	if err == sql.ErrNoRows {
-		s.writeError(r, w, http.StatusNotFound, "pack_not_found", "policy pack not found")
-		return
-	}
-	if err != nil {
-		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to get policy pack")
-		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to get policy pack")
-		return
-	}
-	if wsID.Valid {
-		p.WorkspaceID = &wsID.String
-	}
-
-	s.writeJSON(w, http.StatusOK, p)
 }
 
 func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
@@ -429,28 +449,156 @@ func (s *server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, settings)
 }
 
+func (s *server) handleGetPack(w http.ResponseWriter, r *http.Request) {
+	packID := r.PathValue("pack_id")
+	if _, err := uuid.Parse(packID); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "pack_id must be a valid UUID")
+		return
+	}
+
+	admin := isAdmin(r.Context())
+
+	// Fetch pack
+	var pack policyPackWithRules
+	var wsID sql.NullString
+	err := s.db.QueryRow(
+		`SELECT id, workspace_id, name, description, category, is_system_pack, is_enabled, created_at, updated_at
+		 FROM provisr_policy.policy_packs
+		 WHERE id = $1`,
+		packID,
+	).Scan(&pack.ID, &wsID, &pack.Name, &pack.Description, &pack.Category, &pack.IsSystemPack, &pack.IsEnabled, &pack.CreatedAt, &pack.UpdatedAt)
+	
+	if err == sql.ErrNoRows {
+		s.writeError(r, w, http.StatusNotFound, "not_found", "policy pack not found")
+		return
+	}
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to get policy pack")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to get policy pack")
+		return
+	}
+	if wsID.Valid {
+		pack.WorkspaceID = &wsID.String
+	}
+
+	// Fetch rules
+	rows, err := s.db.Query(
+		`SELECT id, pack_id, rule_key, rego_rule, severity, description, remediation_hint, is_enabled, parameters_schema, created_at
+		 FROM provisr_policy.policy_rules
+		 WHERE pack_id = $1
+		 ORDER BY rule_key`,
+		packID,
+	)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to list policy rules")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to list policy rules")
+		return
+	}
+	defer rows.Close()
+
+	pack.Rules = []policyRule{}
+	for rows.Next() {
+		var rule policyRule
+		var paramsSchema []byte
+		var regoRule string
+		if err := rows.Scan(&rule.ID, &rule.PackID, &rule.RuleKey, &regoRule, &rule.Severity, &rule.Description, &rule.RemediationHint, &rule.IsEnabled, &paramsSchema, &rule.CreatedAt); err != nil {
+			zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to scan policy rule")
+			s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to get policy pack rules")
+			return
+		}
+		
+		rule.ParametersSchema = string(paramsSchema)
+		
+		// PRD §15: access control for raw Rego
+		if admin {
+			rule.RegoRule = regoRule
+		}
+		
+		pack.Rules = append(pack.Rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to iterate policy rules")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to get policy pack rules")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, pack)
+}
+
+func (s *server) handleUpdateRuleParameters(w http.ResponseWriter, r *http.Request) {
+	ruleID := r.PathValue("rule_id")
+	if _, err := uuid.Parse(ruleID); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "rule_id must be a valid UUID")
+		return
+	}
+
+	if !isAdmin(r.Context()) {
+		s.writeError(r, w, http.StatusForbidden, "forbidden", "only admins can update policy rule parameters")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	var req updateRuleParametersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
+		return
+	}
+
+	if req.ParametersSchema == "" {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "parameters_schema is required")
+		return
+	}
+
+	// Validate JSON object
+	var schemaObj map[string]any
+	if err := json.Unmarshal([]byte(req.ParametersSchema), &schemaObj); err != nil || schemaObj == nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "parameters_schema must be a valid JSON object")
+		return
+	}
+
+	var rule policyRule
+	var paramsSchema []byte
+	var regoRule string
+	err := s.db.QueryRow(
+		`UPDATE provisr_policy.policy_rules
+		 SET parameters_schema = $1::jsonb
+		 WHERE id = $2
+		 RETURNING id, pack_id, rule_key, rego_rule, severity, description, remediation_hint, is_enabled, parameters_schema, created_at`,
+		req.ParametersSchema, ruleID,
+	).Scan(&rule.ID, &rule.PackID, &rule.RuleKey, &regoRule, &rule.Severity, &rule.Description, &rule.RemediationHint, &rule.IsEnabled, &paramsSchema, &rule.CreatedAt)
+	
+	if err == sql.ErrNoRows {
+		s.writeError(r, w, http.StatusNotFound, "not_found", "policy rule not found")
+		return
+	}
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to update policy rule")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to update policy rule parameters")
+		return
+	}
+	
+	rule.ParametersSchema = string(paramsSchema)
+	rule.RegoRule = regoRule // Returning updated rule back to admin
+	
+	s.writeJSON(w, http.StatusOK, rule)
+}
+
 // --- Helpers ---
 
 func (s *server) writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		// Log the encoding error
-		// At this point status is written, so we can't change it, just log.
-		fmt.Printf("failed to encode json response: %v\n", err)
+		s.log.Error().Err(err).Msg("failed to encode response")
 	}
 }
 
 func (s *server) writeError(r *http.Request, w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(map[string]any{
+	s.writeJSON(w, status, map[string]any{
 		"error":   code,
 		"message": message,
 		"status":  status,
-	}); err != nil {
-		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to encode json error response")
-	}
+	})
 }
 
 func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Request, workspaceID, mutation string) error {
@@ -580,4 +728,136 @@ func loggingMiddleware(base zerolog.Logger, next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, correlationIDKey, corrID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		// 1. Check Authorization header
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		if authHeader != "" {
+			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				token := strings.TrimSpace(authHeader[7:])
+				jwtSecret := os.Getenv("JWT_SECRET")
+				if jwtSecret == "" {
+					jwtSecret = os.Getenv("POLICY_JWT_SECRET")
+				}
+
+				serviceSecret := os.Getenv("POLICY_SERVICE_SECRET")
+				if serviceSecret != "" && token == serviceSecret {
+					ctx = ContextWithPrincipal(ctx, Principal{ID: "policy-service", Role: "admin"})
+				} else if jwtSecret != "" {
+					if p, err := verifyAndParseJWT(token, jwtSecret); err == nil {
+						ctx = ContextWithPrincipal(ctx, p)
+					}
+				}
+			}
+		}
+
+		// 2. Dev bypass mode for local development and testing only
+		if os.Getenv("AUTH_DEV_BYPASS") == "true" {
+			if _, ok := PrincipalFromContext(ctx); !ok {
+				authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+				if authHeader == "Bearer admin-token" {
+					ctx = ContextWithPrincipal(ctx, Principal{ID: "dev-admin", Role: "admin"})
+				} else {
+					role := r.Header.Get("X-Dev-Role")
+					if role == "" {
+						role = r.Header.Get("X-User-Role")
+					}
+					if role == "" {
+						role = os.Getenv("DEV_USER_ROLE")
+					}
+					if role == "" {
+						role = "admin"
+					}
+					userID := os.Getenv("DEV_USER_ID")
+					if userID == "" {
+						userID = "dev-user"
+					}
+					ctx = ContextWithPrincipal(ctx, Principal{ID: userID, Role: role})
+				}
+			}
+		}
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func verifyAndParseJWT(token string, secret string) (Principal, error) {
+	if secret == "" {
+		return Principal{}, errors.New("jwt secret not configured")
+	}
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return Principal{}, errors.New("invalid jwt format")
+	}
+
+	// 1. Verify HMAC-SHA256 signature
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	expectedSig := mac.Sum(nil)
+
+	actualSig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		actualSig, err = base64.URLEncoding.DecodeString(parts[2])
+		if err != nil {
+			return Principal{}, errors.New("invalid signature encoding")
+		}
+	}
+
+	if !hmac.Equal(expectedSig, actualSig) {
+		return Principal{}, errors.New("jwt signature mismatch")
+	}
+
+	// 2. Parse payload
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		payloadBytes, err = base64.URLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return Principal{}, errors.New("invalid payload encoding")
+		}
+	}
+
+	var claims struct {
+		Sub         string         `json:"sub"`
+		Role        string         `json:"role"`
+		OrgRole     string         `json:"org_role"`
+		WorkspaceID string         `json:"workspace_id"`
+		Exp         int64          `json:"exp"`
+		Nbf         int64          `json:"nbf"`
+		Metadata    map[string]any `json:"metadata"`
+	}
+
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return Principal{}, errors.New("invalid claims json")
+	}
+
+	// 3. Expiry and Not-Before verification
+	now := time.Now().Unix()
+	if claims.Exp > 0 && now > claims.Exp {
+		return Principal{}, errors.New("jwt expired")
+	}
+	if claims.Nbf > 0 && now < claims.Nbf {
+		return Principal{}, errors.New("jwt not valid yet")
+	}
+
+	role := claims.Role
+	if role == "" {
+		if claims.OrgRole == "org:admin" || claims.OrgRole == "admin" {
+			role = "admin"
+		} else if claims.OrgRole == "org:member" || claims.OrgRole == "member" {
+			role = "engineer"
+		} else if mRole, ok := claims.Metadata["role"].(string); ok && mRole != "" {
+			role = mRole
+		}
+	}
+
+	return Principal{
+		ID:          claims.Sub,
+		Role:        role,
+		WorkspaceID: claims.WorkspaceID,
+	}, nil
 }

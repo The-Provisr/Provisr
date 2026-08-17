@@ -74,5 +74,5 @@ export type PolicyPack = {
 export type PolicyViewState = "loading" | "default" | "empty";
 
 export type PolicyPackDraft = Pick<PolicyPack, "id" | "enabled"> & {
-  rules: Array<Pick<PolicyRule, "key" | "enabled"> & { parameters: PolicyParameter[] }>;
+  rules: Array<Pick<PolicyRule, "key" | "enabled" | "regoSource"> & { parameters: PolicyParameter[] }>;
 };

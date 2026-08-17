@@ -84,6 +84,7 @@ export default function PolicySettingsPage() {
           key: rule.key,
           enabled: rule.enabled,
           parameters: rule.parameters,
+          regoSource: rule.regoSource,
         })),
       };
       await savePolicyDraft(draftPayload);

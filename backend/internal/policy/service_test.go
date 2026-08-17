@@ -81,6 +81,47 @@ func TestValidateParametersSchema(t *testing.T) {
 	}
 }
 
+func TestValidateRuleParameters(t *testing.T) {
+	testCases := []struct {
+		name    string
+		ruleKey string
+		params  map[string]any
+		wantErr bool
+	}{
+		// allowed_regions
+		{"valid allowed_regions", "allowed_regions", map[string]any{"regions": []any{"us-east-1", "us-west-2"}}, false},
+		{"allowed_regions missing regions key", "allowed_regions", map[string]any{}, true},
+		{"allowed_regions boolean regions", "allowed_regions", map[string]any{"regions": true}, true},
+		{"allowed_regions empty array", "allowed_regions", map[string]any{"regions": []any{}}, true},
+		{"allowed_regions non-string element", "allowed_regions", map[string]any{"regions": []any{"us-east-1", 123}}, true},
+		{"allowed_regions empty string element", "allowed_regions", map[string]any{"regions": []any{"us-east-1", "  "}}, true},
+
+		// budget_max
+		{"valid budget_max positive", "budget_max", map[string]any{"max_usd": 500.0}, false},
+		{"valid budget_max zero", "budget_max", map[string]any{"max_usd": 0.0}, false},
+		{"budget_max missing key", "budget_max", map[string]any{}, true},
+		{"budget_max negative", "budget_max", map[string]any{"max_usd": -10.0}, true},
+		{"budget_max string instead of float", "budget_max", map[string]any{"max_usd": "500"}, true},
+
+		// required_tags
+		{"valid required_tags", "required_tags", map[string]any{"tags": []any{"Environment", "Owner"}}, false},
+		{"required_tags missing tags key", "required_tags", map[string]any{}, true},
+		{"required_tags non-string element", "required_tags", map[string]any{"tags": []any{true}}, true},
+
+		// generic / custom rules
+		{"generic rule passes arbitrary object", "custom_rule", map[string]any{"custom": 123}, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateRuleParameters(tc.ruleKey, tc.params)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("for ruleKey=%s, params=%+v, expected wantErr=%v, got err=%v", tc.ruleKey, tc.params, tc.wantErr, err)
+			}
+		})
+	}
+}
+
 func generateTestJWT(claimsJSON, secret string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(claimsJSON))

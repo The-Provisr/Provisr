@@ -448,7 +448,13 @@ func (s *server) handleUpdateRuleParameters(w http.ResponseWriter, r *http.Reque
 		workspaceID = q
 	}
 
-	// 2. Claim Idempotency Key
+	// 2. Validate parameter schema against the rule's expected shape
+	if err := validateRuleParameters(existingRule.RuleKey, schemaObj); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", err.Error())
+		return
+	}
+
+	// 3. Claim Idempotency Key
 	if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "policy_rule.update_parameters"); err != nil {
 		s.writeIdempotencyError(w, r, err)
 		return
@@ -535,6 +541,57 @@ func (s *server) writeError(r *http.Request, w http.ResponseWriter, status int, 
 		"message": message,
 		"status":  status,
 	})
+}
+
+func validateRuleParameters(ruleKey string, params map[string]any) error {
+	switch ruleKey {
+	case "allowed_regions":
+		val, ok := params["regions"]
+		if !ok {
+			return errors.New("regions field is required for allowed_regions rule")
+		}
+		regions, ok := val.([]any)
+		if !ok {
+			return errors.New("regions must be an array of strings")
+		}
+		if len(regions) == 0 {
+			return errors.New("regions array must not be empty")
+		}
+		for _, r := range regions {
+			s, ok := r.(string)
+			if !ok || strings.TrimSpace(s) == "" {
+				return errors.New("each region must be a non-empty string")
+			}
+		}
+	case "budget_max":
+		val, ok := params["max_usd"]
+		if !ok {
+			return errors.New("max_usd field is required for budget_max rule")
+		}
+		maxUSD, ok := val.(float64)
+		if !ok {
+			return errors.New("max_usd must be a numeric value")
+		}
+		if maxUSD < 0 {
+			return errors.New("max_usd must not be negative")
+		}
+	case "required_tags":
+		val, ok := params["tags"]
+		if !ok {
+			return errors.New("tags field is required for required_tags rule")
+		}
+		tags, ok := val.([]any)
+		if !ok {
+			return errors.New("tags must be an array of strings")
+		}
+		for _, t := range tags {
+			s, ok := t.(string)
+			if !ok || strings.TrimSpace(s) == "" {
+				return errors.New("each tag must be a non-empty string")
+			}
+		}
+	}
+	return nil
 }
 
 func isForeignKeyViolation(err error) bool {

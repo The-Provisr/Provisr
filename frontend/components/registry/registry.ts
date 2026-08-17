@@ -2,7 +2,7 @@ import type { ComponentType as ReactComponentType } from "react";
 import type { ZodType } from "zod";
 import type { ComponentType } from "@provisr/shared-contracts";
 
-export type MigrateFn<T> = (data: T, fromVersion: string) => T;
+export type MigrateFn<T> = (data: unknown, fromVersion: string) => T;
 
 export interface RegistryEntry<T = unknown> {
   type: string;

@@ -63,8 +63,8 @@ describe("resolvePayload", () => {
 
   it("runs the migrator and renders on version mismatch when a migrator is provided", () => {
     const registry = createRegistry();
-    const migrate = vi.fn((data: { text: string }, fromVersion: string) => ({
-      text: `${data.text} (migrated from ${fromVersion})`,
+    const migrate = vi.fn((data: unknown, fromVersion: string) => ({
+      text: `${(data as { text: string }).text} (migrated from ${fromVersion})`,
     }));
 
     registry.register({
@@ -87,6 +87,78 @@ describe("resolvePayload", () => {
       Component: StubComponent,
       data: { text: "hello (migrated from 1.0)" },
     });
+  });
+
+  it("migrates payload whose old shape differs from the current schema", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "test_type",
+      version: "2.0",
+      schema: z.object({ text: z.string() }),
+      component: StubComponent,
+      migrate: (oldData: unknown) => {
+        const old = oldData as { legacy_content: string };
+        return { text: old.legacy_content };
+      },
+    });
+
+    const result = resolvePayload(
+      registry,
+      payload({ version: "1.0", data: { legacy_content: "from old schema" } }),
+    );
+
+    expect(result).toEqual({
+      kind: "render",
+      type: "test_type",
+      Component: StubComponent,
+      data: { text: "from old schema" },
+    });
+  });
+
+  it("returns invalid/schema when migrated data fails current schema validation", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "test_type",
+      version: "2.0",
+      schema: z.object({ text: z.string() }),
+      component: StubComponent,
+      migrate: () => ({ text: 12345 } as unknown as { text: string }),
+    });
+
+    const result = resolvePayload(
+      registry,
+      payload({ version: "1.0", data: { legacy_content: "hello" } }),
+    );
+
+    expect(result.kind).toBe("invalid");
+    if (result.kind !== "invalid") throw new Error("expected invalid");
+    expect(result.reason).toBe("schema");
+    expect(result.issues).toEqual([{ field: "text", message: expect.any(String) }]);
+  });
+
+  it("returns invalid/version when migrator throws an exception", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "test_type",
+      version: "2.0",
+      schema: z.object({ text: z.string() }),
+      component: StubComponent,
+      migrate: () => {
+        throw new Error("Cannot migrate legacy data from v1.0");
+      },
+    });
+
+    const result = resolvePayload(
+      registry,
+      payload({ version: "1.0", data: { legacy_content: "hello" } }),
+    );
+
+    expect(result.kind).toBe("invalid");
+    if (result.kind !== "invalid") throw new Error("expected invalid");
+    expect(result.reason).toBe("version");
+    expect(result.issues).toEqual([
+      { field: "migration", message: "Cannot migrate legacy data from v1.0" },
+    ]);
   });
 
   it("renders directly when data is valid and version matches, without calling migrate", () => {

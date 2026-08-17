@@ -53,7 +53,7 @@ describe("RegistryRenderer", () => {
       version: "2.0",
       schema: z.object({ text: z.string() }),
       component: TextComponent,
-      migrate: (data: { text: string }) => ({ text: `${data.text}-migrated` }),
+      migrate: (data: unknown) => ({ text: `${(data as { text: string }).text}-migrated` }),
     });
 
     renderWithRegistry(registry, payload({ version: "1.0" }));

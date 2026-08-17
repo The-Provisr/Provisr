@@ -42,20 +42,19 @@ export function resolvePayload(
   const entry = registry.get(payload.type);
   if (!entry) return { kind: "unknown", type: payload.type };
 
-  const parsed = entry.schema.safeParse(payload.data);
-  if (!parsed.success) {
-    return {
-      kind: "invalid",
-      type: payload.type,
-      reason: "schema",
-      issues: parsed.error.issues.map((issue) => ({
-        field: issue.path.join(".") || "(root)",
-        message: issue.message,
-      })),
-    };
-  }
-
   if (payload.version === entry.version) {
+    const parsed = entry.schema.safeParse(payload.data);
+    if (!parsed.success) {
+      return {
+        kind: "invalid",
+        type: payload.type,
+        reason: "schema",
+        issues: parsed.error.issues.map((issue) => ({
+          field: issue.path.join(".") || "(root)",
+          message: issue.message,
+        })),
+      };
+    }
     return { kind: "render", type: payload.type, Component: entry.component, data: parsed.data };
   }
 
@@ -73,7 +72,36 @@ export function resolvePayload(
     };
   }
 
-  const migrated = entry.migrate(parsed.data, payload.version);
-  return { kind: "render", type: payload.type, Component: entry.component, data: migrated };
+  let migrated: unknown;
+  try {
+    migrated = entry.migrate(payload.data, payload.version);
+  } catch (err) {
+    return {
+      kind: "invalid",
+      type: payload.type,
+      reason: "version",
+      issues: [
+        {
+          field: "migration",
+          message: err instanceof Error ? err.message : "Migration failed",
+        },
+      ],
+    };
+  }
+
+  const parsedMigrated = entry.schema.safeParse(migrated);
+  if (!parsedMigrated.success) {
+    return {
+      kind: "invalid",
+      type: payload.type,
+      reason: "schema",
+      issues: parsedMigrated.error.issues.map((issue) => ({
+        field: issue.path.join(".") || "(root)",
+        message: issue.message,
+      })),
+    };
+  }
+
+  return { kind: "render", type: payload.type, Component: entry.component, data: parsedMigrated.data };
 }
 

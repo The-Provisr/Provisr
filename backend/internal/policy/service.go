@@ -744,11 +744,6 @@ func validateRuleParameters(ruleKey string, params map[string]any) error {
 	return nil
 }
 
-func isForeignKeyViolation(err error) bool {
-	var pqErr *pq.Error
-	return errors.As(err, &pqErr) && pqErr.Code == "23503"
-}
-
 func (s *server) recoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

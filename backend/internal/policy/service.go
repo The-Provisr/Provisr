@@ -99,7 +99,6 @@ func New(db *sql.DB, log zerolog.Logger) http.Handler {
 	mux.Handle("/health/", health.Handler())
 
 	mux.HandleFunc("GET /v1/policy-packs", s.handleListPacks)
-	mux.HandleFunc("GET /v1/policy-packs/{pack_id}", s.handleGetPack)
 	mux.HandleFunc("POST /v1/policy-packs", s.handleCreatePack)
 	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /v1/workspaces/{workspace_id}/policy-settings", s.handleUpdateSettings)
@@ -157,37 +156,6 @@ func (s *server) handleListPacks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, packs)
-}
-
-func (s *server) handleGetPack(w http.ResponseWriter, r *http.Request) {
-	packID := r.PathValue("pack_id")
-	if _, err := uuid.Parse(packID); err != nil {
-		s.writeError(r, w, http.StatusBadRequest, "validation_error", "pack_id must be a valid UUID")
-		return
-	}
-
-	var p policyPack
-	var wsID sql.NullString
-	err := s.db.QueryRow(
-		`SELECT id, workspace_id, name, description, category, is_system_pack, is_enabled, created_at, updated_at
-		 FROM provisr_policy.policy_packs
-		 WHERE id = $1`,
-		packID,
-	).Scan(&p.ID, &wsID, &p.Name, &p.Description, &p.Category, &p.IsSystemPack, &p.IsEnabled, &p.CreatedAt, &p.UpdatedAt)
-	if err == sql.ErrNoRows {
-		s.writeError(r, w, http.StatusNotFound, "pack_not_found", "policy pack not found")
-		return
-	}
-	if err != nil {
-		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to get policy pack")
-		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to get policy pack")
-		return
-	}
-	if wsID.Valid {
-		p.WorkspaceID = &wsID.String
-	}
-
-	s.writeJSON(w, http.StatusOK, p)
 }
 
 func (s *server) handleCreatePack(w http.ResponseWriter, r *http.Request) {
@@ -589,22 +557,16 @@ func (s *server) writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		// Log the encoding error
-		// At this point status is written, so we can't change it, just log.
-		fmt.Printf("failed to encode json response: %v\n", err)
+		s.log.Error().Err(err).Msg("failed to encode response")
 	}
 }
 
 func (s *server) writeError(r *http.Request, w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(map[string]any{
+	s.writeJSON(w, status, map[string]any{
 		"error":   code,
 		"message": message,
 		"status":  status,
-	}); err != nil {
-		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to encode json error response")
-	}
+	})
 }
 
 func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Request, workspaceID, mutation string) error {

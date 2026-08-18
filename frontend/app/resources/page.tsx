@@ -35,6 +35,12 @@ export default function ResourcesPage() {
   const [viewState, setViewState] = useState<ResourceViewState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [resources, setResources] = useState<ResourceItem[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   const load = async () => {
     setViewState("loading");
@@ -76,6 +82,68 @@ export default function ResourcesPage() {
     load();
   }, []);
 
+  const handleExport = () => {
+    if (resources.length === 0 || isExporting) return;
+    setIsExporting(true);
+    setFeedback(null);
+    try {
+      const reportData = {
+        reportTitle: "Provisr Cloud Resource Inventory",
+        generatedAt: new Date().toISOString(),
+        totalResources: resources.length,
+        driftCount: driftCount(resources),
+        providers: providerCounts(resources),
+        resources,
+      };
+      const blob = new Blob([JSON.stringify(reportData, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `provisr-resources-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setFeedback({
+        type: "success",
+        message: `Resource report exported successfully (${resources.length} resources).`,
+      });
+    } catch (err) {
+      setFeedback({
+        type: "error",
+        message:
+          err instanceof Error ? err.message : "Failed to export resource report.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleSync = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    setFeedback(null);
+    try {
+      await load();
+      setFeedback({
+        type: "success",
+        message: "State synchronization complete. Inventory is up to date.",
+      });
+    } catch (err) {
+      setFeedback({
+        type: "error",
+        message:
+          err instanceof Error
+            ? err.message
+            : "State synchronization failed.",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const counts = providerCounts(resources);
   const drift = driftCount(resources);
 
@@ -84,13 +152,28 @@ export default function ResourcesPage() {
       <PageHeader
         actions={
           <>
-            <Button variant="secondary">
-              <DownloadIcon className="size-4" />
-              Export report
+            <Button
+              aria-busy={isExporting}
+              disabled={
+                resources.length === 0 || isExporting || viewState === "loading"
+              }
+              onClick={handleExport}
+              variant="secondary"
+            >
+              <DownloadIcon
+                className={cn("size-4", isExporting && "animate-pulse")}
+              />
+              {isExporting ? "Exporting..." : "Export report"}
             </Button>
-            <Button onClick={load}>
-              <RotateCcwIcon className="size-4" />
-              Run state sync
+            <Button
+              aria-busy={isSyncing}
+              disabled={isSyncing || viewState === "loading"}
+              onClick={handleSync}
+            >
+              <RotateCcwIcon
+                className={cn("size-4", isSyncing && "animate-spin")}
+              />
+              {isSyncing ? "Syncing state..." : "Run state sync"}
             </Button>
           </>
         }
@@ -99,6 +182,40 @@ export default function ResourcesPage() {
       />
       <PageBody>
         <div className="mx-auto max-w-[1180px] space-y-6">
+          {feedback ? (
+            <SectionCard>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <div
+                    className={cn(
+                      "size-2 rounded-full",
+                      feedback.type === "success"
+                        ? "bg-green-500"
+                        : "bg-red-500"
+                    )}
+                  />
+                  <span
+                    className={
+                      feedback.type === "success"
+                        ? "text-green-700 font-medium"
+                        : "text-red-900 font-medium"
+                    }
+                  >
+                    {feedback.message}
+                  </span>
+                </div>
+                <button
+                  aria-label="Dismiss feedback"
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  onClick={() => setFeedback(null)}
+                  type="button"
+                >
+                  ✕
+                </button>
+              </div>
+            </SectionCard>
+          ) : null}
+
           {error || viewState === "error" ? (
             <SectionCard>
               <div className="flex flex-wrap items-center gap-3">

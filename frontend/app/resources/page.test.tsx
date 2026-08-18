@@ -73,4 +73,65 @@ describe("ResourcesPage", () => {
       expect(screen.getByText("Resource inventory")).toBeInTheDocument();
     });
   });
+
+  it("handles export report action and displays feedback", async () => {
+    // Mock createObjectURL and revokeObjectURL
+    const createObjectURLMock = vi.fn(() => "blob:http://localhost/test-blob");
+    const revokeObjectURLMock = vi.fn();
+    window.URL.createObjectURL = createObjectURLMock;
+    window.URL.revokeObjectURL = revokeObjectURLMock;
+
+    render(<ResourcesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Resource inventory")).toBeInTheDocument();
+    });
+
+    const exportButton = screen.getByRole("button", { name: /export report/i });
+    expect(exportButton).toBeEnabled();
+
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Resource report exported successfully/i)
+      ).toBeInTheDocument();
+    });
+
+    // Dismiss feedback
+    const dismissButton = screen.getByRole("button", { name: "Dismiss feedback" });
+    fireEvent.click(dismissButton);
+    expect(screen.queryByText(/Resource report exported successfully/i)).not.toBeInTheDocument();
+  });
+
+  it("disables export button when inventory is empty", async () => {
+    window.location.search = "?scenario=empty";
+    render(<ResourcesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("No resources yet")).toBeInTheDocument();
+    });
+
+    const exportButton = screen.getByRole("button", { name: /export report/i });
+    expect(exportButton).toBeDisabled();
+  });
+
+  it("handles run state sync action and displays feedback", async () => {
+    render(<ResourcesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Resource inventory")).toBeInTheDocument();
+    });
+
+    const syncButton = screen.getByRole("button", { name: /run state sync/i });
+    expect(syncButton).toBeEnabled();
+
+    fireEvent.click(syncButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("State synchronization complete. Inventory is up to date.")
+      ).toBeInTheDocument();
+    });
+  });
 });

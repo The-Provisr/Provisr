@@ -1,3 +1,7 @@
+ALTER TABLE provisr_state.provisioning_runs
+    ADD CONSTRAINT uq_provisioning_runs_id_session_workspace
+    UNIQUE (id, session_id, workspace_id);
+
 CREATE TYPE provisr_state.chat_turn_status AS ENUM ('accepted', 'running', 'completed', 'failed', 'cancelled');
 CREATE TYPE provisr_state.chat_message_role AS ENUM ('user', 'assistant', 'system');
 
@@ -12,7 +16,7 @@ CREATE TABLE provisr_state.chat_turns (
     status provisr_state.chat_turn_status NOT NULL DEFAULT 'accepted',
     input JSONB NOT NULL,
     correlation_id UUID NOT NULL,
-    provisioning_run_id UUID NOT NULL REFERENCES provisr_state.provisioning_runs(id) ON DELETE CASCADE,
+    provisioning_run_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (session_id, client_message_id),
@@ -20,7 +24,9 @@ CREATE TABLE provisr_state.chat_turns (
     UNIQUE (id, session_id, workspace_id),
     UNIQUE (provisioning_run_id),
     FOREIGN KEY (session_id, workspace_id)
-        REFERENCES provisr_state.chat_sessions(id, workspace_id) ON DELETE CASCADE
+        REFERENCES provisr_state.chat_sessions(id, workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (provisioning_run_id, session_id, workspace_id)
+        REFERENCES provisr_state.provisioning_runs(id, session_id, workspace_id) ON DELETE CASCADE
 );
 
 CREATE TABLE provisr_state.chat_messages (

@@ -42,7 +42,7 @@ export default function ResourcesPage() {
     message: string;
   } | null>(null);
 
-  const load = async () => {
+  const load = async (): Promise<boolean> => {
     setViewState("loading");
     setError(null);
 
@@ -58,23 +58,27 @@ export default function ResourcesPage() {
         setError(result.error);
         setResources([]);
         setViewState("error");
+        return false;
       } else if (result.data.length === 0) {
         setResources([]);
         setError(null);
         setViewState("empty");
+        return true;
       } else {
         setResources(result.data);
         setError(null);
         setViewState("default");
+        return true;
       }
     } catch (err) {
-      setError(
+      const msg =
         err instanceof Error
           ? err.message
-          : "An unexpected error occurred while loading resources."
-      );
+          : "An unexpected error occurred while loading resources.";
+      setError(msg);
       setResources([]);
       setViewState("error");
+      return false;
     }
   };
 
@@ -126,11 +130,18 @@ export default function ResourcesPage() {
     setIsSyncing(true);
     setFeedback(null);
     try {
-      await load();
-      setFeedback({
-        type: "success",
-        message: "State synchronization complete. Inventory is up to date.",
-      });
+      const ok = await load();
+      if (ok) {
+        setFeedback({
+          type: "success",
+          message: "State synchronization complete. Inventory is up to date.",
+        });
+      } else {
+        setFeedback({
+          type: "error",
+          message: "State synchronization failed. Please check credentials and retry.",
+        });
+      }
     } catch (err) {
       setFeedback({
         type: "error",

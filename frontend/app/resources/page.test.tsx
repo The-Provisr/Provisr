@@ -134,4 +134,29 @@ describe("ResourcesPage", () => {
       ).toBeInTheDocument();
     });
   });
+
+  it("handles run state sync failure and displays error feedback without reporting success", async () => {
+    render(<ResourcesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Resource inventory")).toBeInTheDocument();
+    });
+
+    const syncButton = screen.getByRole("button", { name: /run state sync/i });
+    expect(syncButton).toBeEnabled();
+
+    // Force error scenario during sync
+    window.location.search = "?scenario=error";
+    fireEvent.click(syncButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("State synchronization failed. Please check credentials and retry.")
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByText("State synchronization complete. Inventory is up to date.")
+    ).not.toBeInTheDocument();
+  });
 });

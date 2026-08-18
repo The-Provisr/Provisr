@@ -42,18 +42,62 @@ function typeIcon(type: string) {
   return <ServerStackIcon className={className} />;
 }
 
-export function diffLines(left: ResourceMetadata, right: ResourceMetadata): {
+export function diffLines(
+  left: ResourceMetadata,
+  right: ResourceMetadata,
+): {
   left: string[];
   right: string[];
 } {
-  const leftLines = JSON.stringify(left, null, 2).split("\n");
-  const rightLines = JSON.stringify(right, null, 2).split("\n");
-  const width = Math.max(leftLines.length, rightLines.length);
-  const differ = (a: string | undefined, b: string | undefined) =>
-    a !== undefined && b !== undefined && a === b ? "" : "changed";
+  const leftLines = JSON.stringify(left ?? {}, null, 2).split("\n");
+  const rightLines = JSON.stringify(right ?? {}, null, 2).split("\n");
+
+  const m = leftLines.length;
+  const n = rightLines.length;
+
+  // Build DP table for Longest Common Subsequence (LCS)
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    new Array<number>(n + 1).fill(0),
+  );
+
+  for (let i = 1; i <= m; i++) {
+    const row = dp[i]!;
+    const prevRow = dp[i - 1]!;
+    for (let j = 1; j <= n; j++) {
+      if (leftLines[i - 1] === rightLines[j - 1]) {
+        row[j] = (prevRow[j - 1] ?? 0) + 1;
+      } else {
+        row[j] = Math.max(prevRow[j] ?? 0, row[j - 1] ?? 0);
+      }
+    }
+  }
+
+  // Backtrack to find aligned matching lines
+  const leftMatched = new Array<boolean>(m).fill(false);
+  const rightMatched = new Array<boolean>(n).fill(false);
+
+  let i = m;
+  let j = n;
+  while (i > 0 && j > 0) {
+    if (leftLines[i - 1] === rightLines[j - 1]) {
+      leftMatched[i - 1] = true;
+      rightMatched[j - 1] = true;
+      i--;
+      j--;
+    } else {
+      const up = dp[i - 1]?.[j] ?? 0;
+      const leftVal = dp[i]?.[j - 1] ?? 0;
+      if (up >= leftVal) {
+        i--;
+      } else {
+        j--;
+      }
+    }
+  }
+
   return {
-    left: leftLines.map((line, index) => differ(line, rightLines[index])),
-    right: rightLines.map((line, index) => differ(leftLines[index], line)),
+    left: leftLines.map((_, idx) => (leftMatched[idx] ? "" : "changed")),
+    right: rightLines.map((_, idx) => (rightMatched[idx] ? "" : "changed")),
   };
 }
 

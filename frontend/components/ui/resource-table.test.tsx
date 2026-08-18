@@ -138,4 +138,59 @@ describe("diffLines", () => {
     expect(left.filter((flag) => flag === "changed")).toHaveLength(1);
     expect(right.filter((flag) => flag === "changed")).toHaveLength(1);
   });
+
+  it("aligns array values when items are added without marking unchanged delimiters as changed", () => {
+    const expected = {
+      scheme: "internet-facing",
+      securityGroups: ["sg-0a1b2c3d"],
+    };
+    const actual = {
+      scheme: "internet-facing",
+      securityGroups: ["sg-0a1b2c3d", "sg-9f8e7d6c"],
+    };
+    const { left, right } = diffLines(expected, actual);
+
+    // Left lines: {, "scheme"..., "securityGroups": [, "sg-0a1b2c3d", ], }
+    // Right lines: {, "scheme"..., "securityGroups": [, "sg-0a1b2c3d",, "sg-9f8e7d6c", ], }
+    // Closing delimiters (], }) must NOT be marked changed
+    expect(left[0]).toBe(""); // "{"
+    expect(left[1]).toBe(""); // '  "scheme": "internet-facing",'
+    expect(left[2]).toBe(""); // '  "securityGroups": ['
+    expect(left[4]).toBe(""); // '  ]'
+    expect(left[5]).toBe(""); // '}'
+
+    expect(right[0]).toBe(""); // "{"
+    expect(right[1]).toBe(""); // '  "scheme": "internet-facing",'
+    expect(right[2]).toBe(""); // '  "securityGroups": ['
+    expect(right[4]).toBe("changed"); // '    "sg-9f8e7d6c"'
+    expect(right[5]).toBe(""); // '  ]'
+    expect(right[6]).toBe(""); // '}'
+  });
+
+  it("aligns array values when items are removed without shifting closing delimiters", () => {
+    const expected = {
+      tags: ["alpha", "beta", "gamma"],
+    };
+    const actual = {
+      tags: ["alpha", "gamma"],
+    };
+    const { left, right } = diffLines(expected, actual);
+
+    // Left lines: {, "tags": [, "alpha",, "beta",, "gamma", ], }
+    // Right lines: {, "tags": [, "alpha",, "gamma", ], }
+    expect(left[0]).toBe(""); // "{"
+    expect(left[1]).toBe(""); // '  "tags": ['
+    expect(left[2]).toBe(""); // '    "alpha",'
+    expect(left[3]).toBe("changed"); // '    "beta",'
+    expect(left[4]).toBe(""); // '    "gamma"'
+    expect(left[5]).toBe(""); // '  ]'
+    expect(left[6]).toBe(""); // '}'
+
+    expect(right[0]).toBe(""); // "{"
+    expect(right[1]).toBe(""); // '  "tags": ['
+    expect(right[2]).toBe(""); // '    "alpha",'
+    expect(right[3]).toBe(""); // '    "gamma"'
+    expect(right[4]).toBe(""); // '  ]'
+    expect(right[5]).toBe(""); // '}'
+  });
 });

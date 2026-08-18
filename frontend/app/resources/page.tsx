@@ -20,27 +20,64 @@ import { ResourceDonut } from "@/components/ui/resource-donut";
 import { ResourceDriftBanner } from "@/components/ui/resource-drift-banner";
 import { ResourceTable } from "@/components/ui/resource-table";
 import { cn } from "@/lib/cn";
-import { driftCount, mockResources, providerCounts } from "@/lib/resources/mock-data";
-import { providerMeta, type ResourceViewState } from "@/lib/resources/types";
+import {
+  driftCount,
+  fetchResources,
+  providerCounts,
+} from "@/lib/resources/mock-data";
+import {
+  providerMeta,
+  type ResourceItem,
+  type ResourceViewState,
+} from "@/lib/resources/types";
 
 export default function ResourcesPage() {
   const [viewState, setViewState] = useState<ResourceViewState>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [resources, setResources] = useState<ResourceItem[]>([]);
 
-  const load = () => {
+  const load = async () => {
     setViewState("loading");
     setError(null);
-    window.setTimeout(() => {
-      setViewState(mockResources.length > 0 ? "default" : "empty");
-    }, 600);
+
+    const scenario =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("scenario") ||
+          new URLSearchParams(window.location.search).get("state")
+        : null;
+
+    try {
+      const result = await fetchResources(scenario);
+      if (!result.success) {
+        setError(result.error);
+        setResources([]);
+        setViewState("error");
+      } else if (result.data.length === 0) {
+        setResources([]);
+        setError(null);
+        setViewState("empty");
+      } else {
+        setResources(result.data);
+        setError(null);
+        setViewState("default");
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "An unexpected error occurred while loading resources."
+      );
+      setResources([]);
+      setViewState("error");
+    }
   };
 
   useEffect(() => {
     load();
   }, []);
 
-  const counts = providerCounts(mockResources);
-  const drift = driftCount(mockResources);
+  const counts = providerCounts(resources);
+  const drift = driftCount(resources);
 
   return (
     <AppShell>
@@ -51,7 +88,7 @@ export default function ResourcesPage() {
               <DownloadIcon className="size-4" />
               Export report
             </Button>
-            <Button>
+            <Button onClick={load}>
               <RotateCcwIcon className="size-4" />
               Run state sync
             </Button>
@@ -62,14 +99,16 @@ export default function ResourcesPage() {
       />
       <PageBody>
         <div className="mx-auto max-w-[1180px] space-y-6">
-          {error ? (
+          {error || viewState === "error" ? (
             <SectionCard>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-red-900">
                     Could not load resources
                   </div>
-                  <div className="mt-0.5 text-xs text-gray-500">{error}</div>
+                  <div className="mt-0.5 text-xs text-gray-500">
+                    {error ?? "An unknown error occurred."}
+                  </div>
                 </div>
                 <Button onClick={load} variant="secondary">
                   Retry
@@ -97,7 +136,7 @@ export default function ResourcesPage() {
                     detail={`across ${counts.length} provider${counts.length === 1 ? "" : "s"}`}
                     label="Total resources"
                     tone="neutral"
-                    value={String(mockResources.length)}
+                    value={String(resources.length)}
                   />
                   <div className="flex flex-wrap gap-8">
                     {counts.map(({ count, provider }) => (
@@ -126,7 +165,7 @@ export default function ResourcesPage() {
                   eyebrow="Resource inventory"
                   title="Search, filter, and sort the resources Provisr manages."
                 >
-                  <ResourceTable resources={mockResources} />
+                  <ResourceTable resources={resources} />
                 </SectionCard>
               </div>
             </>
@@ -135,11 +174,17 @@ export default function ResourcesPage() {
           {viewState === "empty" ? (
             <SectionCard>
               <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
-                <div className={cn("flex size-12 items-center justify-center rounded-full bg-gray-100")}>
+                <div
+                  className={cn(
+                    "flex size-12 items-center justify-center rounded-full bg-gray-100"
+                  )}
+                >
                   <LayoutGridIcon className="size-6 text-gray-400" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-gray-900">No resources yet</div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    No resources yet
+                  </div>
                   <div className="mt-1 text-xs text-gray-500">
                     Resources appear here after a provisioning request completes.
                   </div>

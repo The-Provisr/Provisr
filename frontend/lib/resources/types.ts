@@ -23,7 +23,11 @@ export type ResourceItem = {
   actual?: ResourceMetadata;
 };
 
-export type ResourceViewState = "loading" | "default" | "empty";
+export type ResourceViewState = "loading" | "default" | "empty" | "error";
+
+export type ResourceLoaderResult =
+  | { success: true; data: ResourceItem[] }
+  | { success: false; error: string };
 
 export type ResourceSortKey = "name" | "region" | "lastSynced";
 

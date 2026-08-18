@@ -1,4 +1,4 @@
-import type { ProviderId, ResourceItem } from "./types";
+import type { ProviderId, ResourceItem, ResourceLoaderResult } from "./types";
 
 export const mockResources: ResourceItem[] = [
   {
@@ -143,3 +143,29 @@ export const providerCounts = (resources: ResourceItem[]) =>
 
 export const driftCount = (resources: ResourceItem[]) =>
   resources.filter((resource) => resource.drift).length;
+
+export const fetchResources = async (
+  scenario?: "default" | "empty" | "error" | string | null
+): Promise<ResourceLoaderResult> => {
+  // Simulate asynchronous data retrieval
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  if (scenario === "error") {
+    return {
+      success: false,
+      error: "Failed to connect to cloud state provider. Please check your credentials and retry.",
+    };
+  }
+
+  if (scenario === "empty") {
+    return {
+      success: true,
+      data: [],
+    };
+  }
+
+  return {
+    success: true,
+    data: mockResources,
+  };
+};

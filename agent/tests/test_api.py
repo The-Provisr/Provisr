@@ -8,8 +8,8 @@ from app.integrations.state import InMemoryStateStore
 from app.main import Resources, create_app
 from app.profiles.catalog import build_profile_selector
 from app.prompts.catalog import build_prompt_registry
-from app.prompts.provisioning import PROVISIONING_AGENT_V1_1
-from tests.fakes import FakeLanguageModel
+from app.prompts.provisioning import PROVISIONING_AGENT_V1_2
+from tests.fakes import FakeLanguageModel, FakePolicyRequirementsTool
 
 REQUEST_ID = "8b8c64dc-6607-4a45-aa71-f51b2d381cdf"
 
@@ -35,14 +35,17 @@ def build_client(raw_output: str) -> TestClient:
     model = FakeLanguageModel(raw_output)
     prompt_registry = build_prompt_registry()
     profile_selector = build_profile_selector(prompt_registry)
+    policy_tool = FakePolicyRequirementsTool()
     resources = Resources(
         state=state,
         prompt_registry=prompt_registry,
         profile_selector=profile_selector,
+        policy_tool=policy_tool,
         agent_service=AgentService(
             state=state,
             model=model,
             profile_selector=profile_selector,
+            policy_tool=policy_tool,
         ),
     )
     app = create_app(settings=Settings(environment="test"), resources=resources)
@@ -65,8 +68,8 @@ def test_clarification_turn_generates_replayable_sse_events() -> None:
         assert session["status"] == "ACTIVE"
         assert session["profile_id"] == "provisioning"
         assert session["prompt_profile"] == "provisioning_agent"
-        assert session["prompt_version"] == "1.1.0"
-        assert session["prompt_hash"] == PROVISIONING_AGENT_V1_1.content_hash
+        assert session["prompt_version"] == "1.2.0"
+        assert session["prompt_hash"] == PROVISIONING_AGENT_V1_2.content_hash
         assert session["temperature"] == 0.0
         assert session["max_tokens"] == 2048
 
@@ -83,10 +86,11 @@ def test_clarification_turn_generates_replayable_sse_events() -> None:
         assert events.headers["content-type"].startswith("text/event-stream")
         assert "event: turn.started" in events.text
         assert '"profileId":"provisioning"' in events.text
-        assert '"promptVersion":"1.1.0"' in events.text
-        assert f'"promptHash":"{PROVISIONING_AGENT_V1_1.content_hash}"' in events.text
+        assert '"promptVersion":"1.2.0"' in events.text
+        assert f'"promptHash":"{PROVISIONING_AGENT_V1_2.content_hash}"' in events.text
         assert '"temperature":0.0' in events.text
         assert '"maxTokens":2048' in events.text
+        assert "event: policy.requirements.loaded" in events.text
         assert "event: clarification.required" in events.text
         assert "event: stream.completed" in events.text
 

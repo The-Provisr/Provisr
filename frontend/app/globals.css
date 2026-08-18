@@ -273,7 +273,7 @@ body {
 .text-red-900 { color: var(--provisr-danger-ink); }
 
 .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-.whitespace-pre-wrap { white-space: pre-wrap; word-break: break-word; }
+.whitespace-pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 .line-through { text-decoration: line-through; }
 .bg-green-500 { background-color: var(--provisr-success); }
 .bg-red-500 { background-color: var(--provisr-danger); }

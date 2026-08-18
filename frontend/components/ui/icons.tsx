@@ -300,20 +300,20 @@ export function ChevronLeftIcon(props: IconProps) {
   );
 }
 
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m9 6 6 6-6 6" />
+    </IconBase>
+  );
+}
+
 export function DatabaseIcon(props: IconProps) {
   return (
     <IconBase {...props}>
       <ellipse cx="12" cy="5" rx="9" ry="3" />
       <path d="M3 5v14a9 3 0 0 0 18 0V5" />
       <path d="M3 12a9 3 0 0 0 18 0" />
-    </IconBase>
-  );
-}
-
-export function ChevronRightIcon(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <path d="m9 6 6 6-6 6" />
     </IconBase>
   );
 }
@@ -342,11 +342,21 @@ export function SaveIcon(props: IconProps) {
 export function NetworkIcon(props: IconProps) {
   return (
     <IconBase {...props}>
-      <rect x="16" y="16" width="6" height="6" rx="1" />
-      <rect x="2" y="16" width="6" height="6" rx="1" />
-      <rect x="9" y="2" width="6" height="6" rx="1" />
+      <rect height="6" rx="1" width="6" x="16" y="16" />
+      <rect height="6" rx="1" width="6" x="2" y="16" />
+      <rect height="6" rx="1" width="6" x="9" y="2" />
       <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" />
       <path d="M12 12V8" />
+    </IconBase>
+  );
+}
+
+export function DownloadIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M12 15V3" />
     </IconBase>
   );
 }
@@ -376,7 +386,7 @@ export function EditIcon(props: IconProps) {
 export function LockIcon(props: IconProps) {
   return (
     <IconBase {...props}>
-      <rect width="18" height="11" x="3" y="11" rx="2" />
+      <rect height="11" rx="2" width="18" x="3" y="11" />
       <path d="M7 11V7a5 5 0 0 1 10 0v4" />
     </IconBase>
   );

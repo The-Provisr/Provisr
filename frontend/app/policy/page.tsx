@@ -25,10 +25,11 @@ type ToastState = { tone: "success" | "error"; message: string };
 // carries no role claim until backend workspace membership roles are exposed.
 // Default to non-admin until that lands; server-side policy endpoints must
 // enforce the same admin check.
-export default function PolicySettingsPage() {
-  const { user } = useUser();
-  const policyEditorIsAdmin = user?.publicMetadata?.role === "admin";
-
+function PolicySettingsContent({
+  policyEditorIsAdmin,
+}: {
+  policyEditorIsAdmin: boolean;
+}) {
   const [draft, setDraft] = useState<PolicyPack[]>(() =>
     policyPacks.map((pack) => ({
       ...pack,
@@ -352,4 +353,20 @@ function RulesSkeleton() {
       ))}
     </div>
   );
+}
+
+function ClerkPolicySettings() {
+  const { user } = useUser();
+  const policyEditorIsAdmin = user?.publicMetadata?.role === "admin";
+  return <PolicySettingsContent policyEditorIsAdmin={policyEditorIsAdmin} />;
+}
+
+export default function PolicySettingsPage() {
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
+  if (clerkEnabled) {
+    return <ClerkPolicySettings />;
+  }
+
+  return <PolicySettingsContent policyEditorIsAdmin={false} />;
 }

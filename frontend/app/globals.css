@@ -284,6 +284,14 @@ body {
 .text-green-700 { color: var(--provisr-success-ink); }
 .text-red-900 { color: var(--provisr-danger-ink); }
 
+.font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+.whitespace-pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.line-through { text-decoration: line-through; }
+.bg-green-500 { background-color: var(--provisr-success); }
+.bg-red-500 { background-color: var(--provisr-danger); }
+.bg-amber-500 { background-color: var(--provisr-warning); }
+.hover\:text-blue-800:hover { color: var(--provisr-accent-blue); }
+
 .shadow-sm { box-shadow: inset 0 .5px 0 rgba(255,255,255,.1), 0 10px 30px rgba(0,0,0,.25); }
 .border-l-2 { border-left-width: 2px; border-left-style: solid; }
 .mt-1 { margin-top: .25rem; }

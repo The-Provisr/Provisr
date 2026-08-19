@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Injectable } from "@nestjs/common";
-import { ConflictError, NotFoundError, ValidationError } from "../common/errors/typed-errors";
+import { ConflictError, NotFoundError } from "../common/errors/typed-errors";
 import { DbService } from "../db/db.service";
 import { ChatEventsService } from "./chat-events.service";
 

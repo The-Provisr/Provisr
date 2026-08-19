@@ -127,6 +127,10 @@ export class ChatPersistenceService {
     try {
       await client.query("BEGIN");
       await this.assertMembership(params.workspaceId, params.userId, client);
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext($1))",
+        [`chat_turn:${params.workspaceId}:${params.userId}:${params.idempotencyKey}`],
+      );
       const existing = await client.query<{ id: string; provisioning_run_id: string; request_fingerprint: string }>(
         `SELECT id, provisioning_run_id, request_fingerprint FROM provisr_state.chat_turns
          WHERE workspace_id = $1 AND requester_id = $2 AND idempotency_key = $3`,
@@ -166,7 +170,27 @@ export class ChatPersistenceService {
       await client.query("COMMIT");
       return { turnId: turn.rows[0]!.id, runId: run.rows[0]!.id, replayed: false };
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => {});
+      if (error instanceof ConflictError) {
+        throw error;
+      }
+      try {
+        const fallback = await this.db.query<{ id: string; provisioning_run_id: string; request_fingerprint: string }>(
+          `SELECT id, provisioning_run_id, request_fingerprint FROM provisr_state.chat_turns
+           WHERE workspace_id = $1 AND requester_id = $2 AND idempotency_key = $3`,
+          [params.workspaceId, params.userId, params.idempotencyKey],
+        );
+        if (fallback.rows[0]) {
+          if (fallback.rows[0].request_fingerprint !== fingerprint) {
+            throw new ConflictError("idempotency key was already used for a different request");
+          }
+          return { turnId: fallback.rows[0].id, runId: fallback.rows[0].provisioning_run_id, replayed: true };
+        }
+      } catch (fallbackError) {
+        if (fallbackError instanceof ConflictError) {
+          throw fallbackError;
+        }
+      }
       throw error;
     } finally { client.release(); }
   }

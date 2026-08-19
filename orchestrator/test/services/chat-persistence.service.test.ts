@@ -216,4 +216,76 @@ describe("ChatPersistenceService", () => {
       replayed: true,
     });
   });
+
+  it("deletes session within transaction when no active runs exist", async () => {
+    const executedQueries: string[] = [];
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        executedQueries.push(sql);
+        if (sql.includes("SELECT 1 FROM provisr_state.chat_sessions")) {
+          return { rows: [{ "?column?": 1 }] };
+        }
+        if (sql.includes("SELECT state FROM provisr_state.provisioning_runs")) {
+          return { rows: [] };
+        }
+        if (sql.includes("UPDATE provisr_state.chat_sessions")) {
+          return { rowCount: 1, rows: [] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+
+    const db = {
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
+    } as unknown as DbService;
+
+    const events = {} as ChatEventsService;
+    const service = new ChatPersistenceService(db, events);
+
+    await service.deleteSession("session-1", "workspace-1", "user-1");
+
+    expect(executedQueries[0]).toBe("BEGIN");
+    expect(executedQueries[1]).toContain("SELECT 1 FROM provisr_state.chat_sessions");
+    expect(executedQueries[1]).toContain("FOR UPDATE");
+    expect(executedQueries[2]).toContain("SELECT state FROM provisr_state.provisioning_runs");
+    expect(executedQueries[3]).toContain("UPDATE provisr_state.chat_sessions");
+    expect(executedQueries[4]).toBe("COMMIT");
+    expect(poolClient.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects session deletion with ConflictError when active runs exist", async () => {
+    const executedQueries: string[] = [];
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        executedQueries.push(sql);
+        if (sql.includes("SELECT 1 FROM provisr_state.chat_sessions")) {
+          return { rows: [{ "?column?": 1 }] };
+        }
+        if (sql.includes("SELECT state FROM provisr_state.provisioning_runs")) {
+          return { rows: [{ state: "running" }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+
+    const db = {
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
+    } as unknown as DbService;
+
+    const events = {} as ChatEventsService;
+    const service = new ChatPersistenceService(db, events);
+
+    await expect(service.deleteSession("session-1", "workspace-1", "user-1")).rejects.toThrow(
+      ConflictError,
+    );
+
+    expect(executedQueries[0]).toBe("BEGIN");
+    expect(executedQueries[1]).toContain("FOR UPDATE");
+    expect(executedQueries[executedQueries.length - 1]).toBe("ROLLBACK");
+    expect(poolClient.release).toHaveBeenCalledTimes(1);
+  });
 });

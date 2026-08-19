@@ -80,20 +80,31 @@ export class ChatPersistenceService {
   }
 
   async deleteSession(id: string, workspaceId: string, userId: string): Promise<void> {
-    const runs = await this.db.query<{ state: string }>(
-      `SELECT state FROM provisr_state.provisioning_runs
-       WHERE session_id = $1 AND workspace_id = $2 AND state NOT IN ('completed', 'failed', 'cancelled', 'rejected')`,
-      [id, workspaceId]
-    );
-    if (runs.rows.length > 0) {
-      throw new ConflictError("Cannot delete session with active runs");
+    const client = await this.db.connect();
+    try {
+      await client.query("BEGIN");
+      await this.assertSessionOwner(id, workspaceId, userId, client);
+      const runs = await client.query<{ state: string }>(
+        `SELECT state FROM provisr_state.provisioning_runs
+         WHERE session_id = $1 AND workspace_id = $2 AND state NOT IN ('completed', 'failed', 'cancelled', 'rejected')`,
+        [id, workspaceId],
+      );
+      if (runs.rows.length > 0) {
+        throw new ConflictError("Cannot delete session with active runs");
+      }
+      const result = await client.query(
+        `UPDATE provisr_state.chat_sessions SET status = 'deleted', updated_at = now()
+         WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND status = 'active'`,
+        [id, workspaceId, userId],
+      );
+      if (result.rowCount !== 1) throw new NotFoundError("chat session");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
     }
-    const result = await this.db.query(
-      `UPDATE provisr_state.chat_sessions SET status = 'deleted', updated_at = now()
-       WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND status = 'active'`,
-      [id, workspaceId, userId],
-    );
-    if (result.rowCount !== 1) throw new NotFoundError("chat session");
   }
 
   async listMessages(sessionId: string, workspaceId: string, userId: string): Promise<ChatMessageRecord[]> {

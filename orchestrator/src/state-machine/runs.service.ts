@@ -26,6 +26,24 @@ export const ALL_RUN_STATES = [
 
 export type RunState = typeof ALL_RUN_STATES[number];
 
+export const ALLOWED_STATE_TRANSITIONS: Readonly<Record<RunState, ReadonlySet<RunState>>> = {
+  received: new Set<RunState>(["pending_policy", "failed", "cancelled"]),
+  pending_policy: new Set<RunState>(["pending_cloud_context", "failed", "cancelled"]),
+  pending_cloud_context: new Set<RunState>(["pending_agent", "failed", "cancelled"]),
+  pending_agent: new Set<RunState>(["manifest_ready", "pending_agent", "failed", "cancelled"]),
+  manifest_ready: new Set<RunState>(["pending_iac", "pending_agent", "failed", "cancelled"]),
+  pending_iac: new Set<RunState>(["plan_ready", "failed", "cancelled"]),
+  plan_ready: new Set<RunState>(["pending_policy_check", "failed", "cancelled"]),
+  pending_policy_check: new Set<RunState>(["pending_confirmation", "pending_agent", "failed", "cancelled"]),
+  pending_confirmation: new Set<RunState>(["pending_approval", "pending_agent", "failed", "cancelled"]),
+  pending_approval: new Set<RunState>(["pending_execution", "pending_agent", "failed", "cancelled"]),
+  pending_execution: new Set<RunState>(["executing", "failed", "cancelled"]),
+  executing: new Set<RunState>(["completed", "failed", "cancelled"]),
+  completed: new Set<RunState>([]),
+  failed: new Set<RunState>([]),
+  cancelled: new Set<RunState>([]),
+};
+
 export interface ProvisioningRun {
   id: string;
   sessionId: string;
@@ -130,6 +148,18 @@ export class RunsService {
   }
 
   async transitionState(id: string, workspaceId: string, expectedVersion: number, newState: RunState, actorId: string): Promise<ProvisioningRun> {
+    const currentRun = await this.getRun(id, workspaceId);
+    if (currentRun.stateVersion !== expectedVersion) {
+      throw new ConflictException("State version conflict");
+    }
+
+    const allowedNextStates = ALLOWED_STATE_TRANSITIONS[currentRun.state];
+    if (!allowedNextStates || !allowedNextStates.has(newState)) {
+      throw new ConflictException(
+        `Invalid state transition from '${currentRun.state}' to '${newState}'`,
+      );
+    }
+
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
@@ -169,7 +199,7 @@ export class RunsService {
       await client.query('COMMIT');
       return run;
     } catch (e) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       throw e;
     } finally {
       client.release();

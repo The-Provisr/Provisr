@@ -6,16 +6,22 @@ describe("ResourcesPage", () => {
   const originalLocation = window.location;
 
   beforeEach(() => {
-    // Reset window.location.search before each test
-    delete (window as any).location;
-    window.location = {
-      ...originalLocation,
-      search: "",
-    } as any;
+    Object.defineProperty(window, "location", {
+      value: {
+        ...originalLocation,
+        search: "",
+      },
+      writable: true,
+      configurable: true,
+    });
   });
 
   afterEach(() => {
-    window.location = originalLocation;
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
     vi.restoreAllMocks();
   });
 

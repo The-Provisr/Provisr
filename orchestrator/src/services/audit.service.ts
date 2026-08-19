@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { Injectable } from "@nestjs/common";
 import { DbService } from "../db/db.service";
 
 type Queryable = { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> };
 
-@Injectable()
+export function createAuditService(db: DbService): AuditService {
+  return new AuditService(db);
+}
+
 export class AuditService {
   constructor(private readonly db: DbService) {}
 

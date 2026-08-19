@@ -31,7 +31,13 @@ type SessionRow = {
   status: ChatSessionRecord["status"]; run_ids: string[]; created_at: string; updated_at: string;
 };
 
-@Injectable()
+export function createChatPersistenceService(
+  db: DbService,
+  events: ChatEventsService,
+): ChatPersistenceService {
+  return new ChatPersistenceService(db, events);
+}
+
 export class ChatPersistenceService {
   constructor(private readonly db: DbService, private readonly events: ChatEventsService) {}
 

@@ -291,3 +291,141 @@ export function ArrowUpIcon(props: IconProps) {
     </IconBase>
   );
 }
+
+export function ChevronLeftIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m15 6-6 6 6 6" />
+    </IconBase>
+  );
+}
+
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m9 6 6 6-6 6" />
+    </IconBase>
+  );
+}
+
+export function DatabaseIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+      <path d="M3 12a9 3 0 0 0 18 0" />
+    </IconBase>
+  );
+}
+
+export function HardDriveIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <line x1="22" x2="2" y1="12" y2="12" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+      <line x1="6" x2="6.01" y1="16" y2="16" />
+      <line x1="10" x2="10.01" y1="16" y2="16" />
+    </IconBase>
+  );
+}
+
+export function SaveIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+      <path d="M17 21v-8H7v8" />
+      <path d="M7 3v5h8" />
+    </IconBase>
+  );
+}
+
+export function NetworkIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect height="6" rx="1" width="6" x="16" y="16" />
+      <rect height="6" rx="1" width="6" x="2" y="16" />
+      <rect height="6" rx="1" width="6" x="9" y="2" />
+      <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" />
+      <path d="M12 12V8" />
+    </IconBase>
+  );
+}
+
+export function DownloadIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M12 15V3" />
+    </IconBase>
+  );
+}
+
+export function TuneIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 6h16" />
+      <path d="M4 12h16" />
+      <path d="M4 18h16" />
+      <circle cx="9" cy="6" r="2" />
+      <circle cx="15" cy="12" r="2" />
+      <circle cx="9" cy="18" r="2" />
+    </IconBase>
+  );
+}
+
+export function EditIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </IconBase>
+  );
+}
+
+export function LockIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect height="11" rx="2" width="18" x="3" y="11" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </IconBase>
+  );
+}
+
+export function ExternalLinkIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </IconBase>
+  );
+}
+
+export function RuleIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 3h16a1 1 0 0 1 1 1v5a2 2 0 0 0 0 6v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5a2 2 0 0 0 0-6V4a1 1 0 0 1 1-1Z" />
+      <path d="M8.5 9.5 11 12l4.5-5" />
+    </IconBase>
+  );
+}
+
+export function BracesIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1" />
+      <path d="M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1" />
+    </IconBase>
+  );
+}
+
+export function AlertTriangleIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </IconBase>
+  );
+}

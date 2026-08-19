@@ -148,21 +148,38 @@ export class RunsService {
   }
 
   async transitionState(id: string, workspaceId: string, expectedVersion: number, newState: RunState, actorId: string): Promise<ProvisioningRun> {
-    const currentRun = await this.getRun(id, workspaceId);
-    if (currentRun.stateVersion !== expectedVersion) {
-      throw new ConflictException("State version conflict");
-    }
-
-    const allowedNextStates = ALLOWED_STATE_TRANSITIONS[currentRun.state];
-    if (!allowedNextStates || !allowedNextStates.has(newState)) {
-      throw new ConflictException(
-        `Invalid state transition from '${currentRun.state}' to '${newState}'`,
-      );
-    }
-
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
+
+      const current = await client.query<ProvisioningRun>(
+        `SELECT id, session_id as "sessionId", workspace_id as "workspaceId", requester_id as "requesterId",
+                 state, state_version as "stateVersion", prompt, manifest_version as "manifestVersion",
+                 policy_decision as "policyDecision", approval_status as "approvalStatus",
+                 execution_status as "executionStatus", idempotency_key as "idempotencyKey",
+                 correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
+                 created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"
+         FROM provisr_state.provisioning_runs
+         WHERE id = $1 AND workspace_id = $2
+         FOR UPDATE`,
+        [id, workspaceId],
+      );
+
+      const currentRun = current.rows[0];
+      if (!currentRun) {
+        throw new NotFoundException("Run not found");
+      }
+
+      if (currentRun.stateVersion !== expectedVersion) {
+        throw new ConflictException("State version conflict");
+      }
+
+      const allowedNextStates = ALLOWED_STATE_TRANSITIONS[currentRun.state];
+      if (!allowedNextStates || !allowedNextStates.has(newState)) {
+        throw new ConflictException(
+          `Invalid state transition from '${currentRun.state}' to '${newState}'`,
+        );
+      }
       
       const updateRes = await client.query<ProvisioningRun>(
         `UPDATE provisr_state.provisioning_runs 

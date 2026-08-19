@@ -172,6 +172,9 @@ describe("RunsService", () => {
     const poolClient = {
       query: vi.fn().mockImplementation(async (sql: string) => {
         executedQueries.push(sql);
+        if (sql.includes("FOR UPDATE")) {
+          return { rows: [mockRun] };
+        }
         if (sql.includes("UPDATE provisr_state.provisioning_runs")) {
           return { rows: [{ ...mockRun, state: "pending_policy", stateVersion: 1 }] };
         }
@@ -182,7 +185,7 @@ describe("RunsService", () => {
 
     const db = {
       connect: vi.fn().mockResolvedValue(poolClient),
-      query: vi.fn().mockResolvedValue({ rows: [mockRun] }),
+      query: vi.fn(),
     } as unknown as DbService;
 
     const service = new RunsService(db);
@@ -197,17 +200,28 @@ describe("RunsService", () => {
     expect(updated.state).toBe("pending_policy");
     expect(updated.stateVersion).toBe(1);
     expect(executedQueries[0]).toBe("BEGIN");
-    expect(executedQueries[1]).toContain("UPDATE provisr_state.provisioning_runs");
-    expect(executedQueries[2]).toContain("INSERT INTO provisr_audit.audit_events");
-    expect(executedQueries[3]).toContain("INSERT INTO provisr_events.events");
-    expect(executedQueries[4]).toBe("COMMIT");
+    expect(executedQueries[1]).toContain("FOR UPDATE");
+    expect(executedQueries[2]).toContain("UPDATE provisr_state.provisioning_runs");
+    expect(executedQueries[3]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[4]).toContain("INSERT INTO provisr_events.events");
+    expect(executedQueries[5]).toBe("COMMIT");
     expect(poolClient.release).toHaveBeenCalledTimes(1);
   });
 
   it("rejects invalid/skipped state transitions with ConflictException", async () => {
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes("FOR UPDATE")) {
+          return { rows: [mockRun] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+
     const db = {
-      connect: vi.fn(),
-      query: vi.fn().mockResolvedValue({ rows: [mockRun] }),
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
     } as unknown as DbService;
 
     const service = new RunsService(db);
@@ -220,13 +234,23 @@ describe("RunsService", () => {
       service.transitionState(runId, workspaceId, 0, "pending_approval", userId),
     ).rejects.toThrow("Invalid state transition from 'received' to 'pending_approval'");
 
-    expect(db.connect).not.toHaveBeenCalled();
+    expect(poolClient.release).toHaveBeenCalledTimes(2);
   });
 
   it("rejects state transitions on state version mismatch", async () => {
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes("FOR UPDATE")) {
+          return { rows: [mockRun] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+
     const db = {
-      connect: vi.fn(),
-      query: vi.fn().mockResolvedValue({ rows: [mockRun] }),
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
     } as unknown as DbService;
 
     const service = new RunsService(db);
@@ -235,13 +259,23 @@ describe("RunsService", () => {
       service.transitionState(runId, workspaceId, 5, "pending_policy", userId),
     ).rejects.toThrow("State version conflict");
 
-    expect(db.connect).not.toHaveBeenCalled();
+    expect(poolClient.release).toHaveBeenCalledTimes(1);
   });
 
   it("rejects transitions from terminal states", async () => {
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes("FOR UPDATE")) {
+          return { rows: [{ ...mockRun, state: "completed" }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+
     const db = {
-      connect: vi.fn(),
-      query: vi.fn().mockResolvedValue({ rows: [{ ...mockRun, state: "completed" }] }),
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
     } as unknown as DbService;
 
     const service = new RunsService(db);
@@ -250,6 +284,6 @@ describe("RunsService", () => {
       service.transitionState(runId, workspaceId, 0, "executing", userId),
     ).rejects.toThrow("Invalid state transition from 'completed' to 'executing'");
 
-    expect(db.connect).not.toHaveBeenCalled();
+    expect(poolClient.release).toHaveBeenCalledTimes(1);
   });
 });

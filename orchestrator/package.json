@@ -18,6 +18,7 @@
     "@nestjs/platform-express": "^11.0.0",
     "@provisr/shared-contracts": "workspace:*",
     "pino": "^9.0.0",
+    "pg": "^8.13.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0",
     "zod": "^3.24.0"
@@ -28,6 +29,7 @@
     "@nestjs/testing": "^11.0.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
     "@types/supertest": "^7.2.1",
     "eslint": "^9.0.0",
     "supertest": "^7.2.2",

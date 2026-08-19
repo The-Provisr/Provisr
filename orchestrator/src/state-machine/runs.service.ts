@@ -1,6 +1,10 @@
-import { Injectable, ConflictException, NotFoundException, Inject } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
+import { ConflictException, NotFoundException } from "@nestjs/common";
 import { DbService } from "../db/db.service";
-import { v4 as uuidv4 } from "uuid";
+
+export function createRunsService(db: DbService): RunsService {
+  return new RunsService(db);
+}
 
 export const ALL_RUN_STATES = [
   "received",
@@ -43,12 +47,11 @@ export interface ProvisioningRun {
   completedAt: Date | null;
 }
 
-@Injectable()
 export class RunsService {
   constructor(private readonly db: DbService) {}
 
   async createRun(sessionId: string, workspaceId: string, requesterId: string, prompt: string): Promise<ProvisioningRun> {
-    const correlationId = uuidv4();
+    const correlationId = randomUUID();
     const idempotencyKey = `run-${correlationId}`;
 
     const res = await this.db.query<ProvisioningRun>(
@@ -64,13 +67,18 @@ export class RunsService {
       [sessionId, workspaceId, requesterId, prompt, correlationId, idempotencyKey]
     );
     
+    const run = res.rows[0];
+    if (!run) {
+      throw new ConflictException("Failed to create run");
+    }
+    
     await this.db.query(
         `INSERT INTO provisr_audit.audit_events (workspace_id, actor_id, actor_type, action, resource_type, resource_id, event_data) 
          VALUES ($1, $2, 'user', 'run_created', 'provisioning_run', $3, $4)`,
-        [workspaceId, requesterId, res.rows[0].id, JSON.stringify({ state: 'received' })]
+        [workspaceId, requesterId, run.id, JSON.stringify({ state: 'received' })]
     ).catch(err => console.error("Audit log failed:", err));
 
-    return res.rows[0];
+    return run;
   }
 
   async listRuns(workspaceId: string, sessionId?: string, status?: string): Promise<ProvisioningRun[]> {
@@ -81,7 +89,7 @@ export class RunsService {
                  correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
                  created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"
              FROM provisr_state.provisioning_runs WHERE workspace_id = $1`;
-    const params: any[] = [workspaceId];
+    const params: unknown[] = [workspaceId];
     if (sessionId) {
       params.push(sessionId);
       q += ` AND session_id = $${params.length}`;
@@ -104,11 +112,12 @@ export class RunsService {
                  execution_status as "executionStatus", idempotency_key as "idempotencyKey",
                  correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
                  created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"
-       FROM provisr_state.provisioning_runs WHERE id = $1 AND workspace_id = $2`,
+        FROM provisr_state.provisioning_runs WHERE id = $1 AND workspace_id = $2`,
       [id, workspaceId]
     );
-    if (res.rows.length === 0) throw new NotFoundException("Run not found");
-    return res.rows[0];
+    const run = res.rows[0];
+    if (!run) throw new NotFoundException("Run not found");
+    return run;
   }
 
   async transitionState(id: string, workspaceId: string, expectedVersion: number, newState: RunState, actorId: string): Promise<ProvisioningRun> {
@@ -129,11 +138,10 @@ export class RunsService {
         [newState, id, workspaceId, expectedVersion]
       );
 
-      if (updateRes.rows.length === 0) {
+      const run = updateRes.rows[0];
+      if (!run) {
         throw new ConflictException("State conflict or run not found");
       }
-
-      const run = updateRes.rows[0];
 
       // Audit transition
       await client.query(
@@ -146,7 +154,7 @@ export class RunsService {
       await client.query(
           `INSERT INTO provisr_events.events (id, aggregate_type, aggregate_id, event_type, payload)
            VALUES ($1, 'provisioning_run', $2, 'StateChangedEvent', $3)`,
-           [uuidv4(), run.id, JSON.stringify({ state: run.state, version: run.stateVersion })]
+           [randomUUID(), run.id, JSON.stringify({ state: run.state, version: run.stateVersion })]
       ).catch(e => console.error("Outbox failed:", e));
 
       await client.query('COMMIT');
@@ -165,5 +173,38 @@ export class RunsService {
       return run;
     }
     return this.transitionState(id, workspaceId, run.stateVersion, 'cancelled', actorId);
+  }
+
+  async confirmRun(
+    id: string,
+    workspaceId: string,
+    actorId: string,
+    _dto?: { manifestVersion?: string; planVersion?: string },
+  ): Promise<ProvisioningRun> {
+    const run = await this.getRun(id, workspaceId);
+    return this.transitionState(
+      id,
+      workspaceId,
+      run.stateVersion,
+      "pending_approval",
+      actorId,
+    );
+  }
+
+  async clarifyRun(
+    id: string,
+    workspaceId: string,
+    actorId: string,
+    _dto?: { answers?: Record<string, unknown> },
+  ): Promise<ProvisioningRun> {
+    const run = await this.getRun(id, workspaceId);
+    // Move from clarification to pending_agent
+    return this.transitionState(
+      id,
+      workspaceId,
+      run.stateVersion,
+      "pending_agent",
+      actorId,
+    );
   }
 }

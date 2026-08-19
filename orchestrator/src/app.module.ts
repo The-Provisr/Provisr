@@ -13,8 +13,14 @@ import { ProvisioningRunsController } from "./routes/provisioning-runs.controlle
 import { ApprovalsController } from "./routes/approvals.controller";
 import { ArtifactsController } from "./routes/artifacts.controller";
 import { SseController } from "./routes/sse.controller";
-import { DbService } from "./db/db.service";
-import { RunsService } from "./state-machine/runs.service";
+import {
+  DbConfig,
+  DB_CONFIG,
+  DbService,
+  createDbService,
+  loadDbConfig,
+} from "./db/db.service";
+import { RunsService, createRunsService } from "./state-machine/runs.service";
 
 @Module({
   imports: [],
@@ -28,8 +34,20 @@ import { RunsService } from "./state-machine/runs.service";
     SseController,
   ],
   providers: [
-    DbService,
-    RunsService,
+    {
+      provide: DB_CONFIG,
+      useFactory: () => loadDbConfig(),
+    },
+    {
+      provide: DbService,
+      useFactory: (config: DbConfig) => createDbService(config),
+      inject: [DB_CONFIG],
+    },
+    {
+      provide: RunsService,
+      useFactory: (db: DbService) => createRunsService(db),
+      inject: [DbService],
+    },
     {
       // Config read once at wiring time and passed in (never read from
       // process.env inside services). Fails fast in production without

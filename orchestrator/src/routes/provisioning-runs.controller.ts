@@ -77,25 +77,22 @@ export class ProvisioningRunsController {
   }
 
   @Post(":id/confirm")
-  async confirm(
+  confirm(
     @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
     @Param("id", new ParseUUIDPipe()) id: string,
-    @Body(new ZodValidationPipe(confirmRunSchema)) _dto: ConfirmRunDto,
-    @CurrentUser() user: RequestUser
+    @Body(new ZodValidationPipe(confirmRunSchema)) dto: ConfirmRunDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    const run = await this.runsService.getRun(id, workspaceId);
-    return this.runsService.transitionState(id, workspaceId, run.stateVersion, 'pending_approval', user.userId);
+    return this.runsService.confirmRun(id, workspaceId, user.userId, dto);
   }
 
   @Post(":id/clarify")
-  async clarify(
+  clarify(
     @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
     @Param("id", new ParseUUIDPipe()) id: string,
-    @Body(new ZodValidationPipe(clarifyRunSchema)) _dto: ClarifyRunDto,
-    @CurrentUser() user: RequestUser
+    @Body(new ZodValidationPipe(clarifyRunSchema)) dto: ClarifyRunDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    const run = await this.runsService.getRun(id, workspaceId);
-    // Move from clarification to pending_agent
-    return this.runsService.transitionState(id, workspaceId, run.stateVersion, 'pending_agent', user.userId);
+    return this.runsService.clarifyRun(id, workspaceId, user.userId, dto);
   }
 }

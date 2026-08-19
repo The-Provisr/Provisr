@@ -104,4 +104,66 @@ describe("RunsService", () => {
     expect(service.transitionState).not.toHaveBeenCalled();
     expect(result.state).toBe("completed");
   });
+
+  it("creates run atomically with audit log in one transaction", async () => {
+    const executedQueries: string[] = [];
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        executedQueries.push(sql);
+        if (sql.includes("INSERT INTO provisr_state.provisioning_runs")) {
+          return { rows: [mockRun] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+
+    const db = {
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
+    } as unknown as DbService;
+
+    const service = new RunsService(db);
+    const result = await service.createRun("s1", workspaceId, userId, "Deploy Postgres");
+
+    expect(result.id).toBe(runId);
+    expect(executedQueries[0]).toBe("BEGIN");
+    expect(executedQueries[1]).toContain("INSERT INTO provisr_state.provisioning_runs");
+    expect(executedQueries[2]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[3]).toBe("COMMIT");
+    expect(poolClient.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("rolls back and propagates error if audit log insert fails during run creation", async () => {
+    const executedQueries: string[] = [];
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        executedQueries.push(sql);
+        if (sql.includes("INSERT INTO provisr_state.provisioning_runs")) {
+          return { rows: [mockRun] };
+        }
+        if (sql.includes("INSERT INTO provisr_audit.audit_events")) {
+          throw new Error("Audit insert failure");
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+
+    const db = {
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
+    } as unknown as DbService;
+
+    const service = new RunsService(db);
+    await expect(
+      service.createRun("s1", workspaceId, userId, "Deploy Postgres"),
+    ).rejects.toThrow("Audit insert failure");
+
+    expect(executedQueries[0]).toBe("BEGIN");
+    expect(executedQueries[1]).toContain("INSERT INTO provisr_state.provisioning_runs");
+    expect(executedQueries[2]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[3]).toBe("ROLLBACK");
+    expect(poolClient.release).toHaveBeenCalledTimes(1);
+  });
 });

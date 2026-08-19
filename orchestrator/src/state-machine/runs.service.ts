@@ -53,32 +53,41 @@ export class RunsService {
   async createRun(sessionId: string, workspaceId: string, requesterId: string, prompt: string): Promise<ProvisioningRun> {
     const correlationId = randomUUID();
     const idempotencyKey = `run-${correlationId}`;
-
-    const res = await this.db.query<ProvisioningRun>(
-      `INSERT INTO provisr_state.provisioning_runs 
-       (session_id, workspace_id, requester_id, prompt, correlation_id, idempotency_key, state, state_version)
-       VALUES ($1, $2, $3, $4, $5, $6, 'received', 0)
-       RETURNING id, session_id as "sessionId", workspace_id as "workspaceId", requester_id as "requesterId",
-                 state, state_version as "stateVersion", prompt, manifest_version as "manifestVersion",
-                 policy_decision as "policyDecision", approval_status as "approvalStatus",
-                 execution_status as "executionStatus", idempotency_key as "idempotencyKey",
-                 correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
-                 created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"`,
-      [sessionId, workspaceId, requesterId, prompt, correlationId, idempotencyKey]
-    );
-    
-    const run = res.rows[0];
-    if (!run) {
-      throw new ConflictException("Failed to create run");
-    }
-    
-    await this.db.query(
+    const client = await this.db.connect();
+    try {
+      await client.query("BEGIN");
+      const res = await client.query<ProvisioningRun>(
+        `INSERT INTO provisr_state.provisioning_runs 
+         (session_id, workspace_id, requester_id, prompt, correlation_id, idempotency_key, state, state_version)
+         VALUES ($1, $2, $3, $4, $5, $6, 'received', 0)
+         RETURNING id, session_id as "sessionId", workspace_id as "workspaceId", requester_id as "requesterId",
+                   state, state_version as "stateVersion", prompt, manifest_version as "manifestVersion",
+                   policy_decision as "policyDecision", approval_status as "approvalStatus",
+                   execution_status as "executionStatus", idempotency_key as "idempotencyKey",
+                   correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
+                   created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"`,
+        [sessionId, workspaceId, requesterId, prompt, correlationId, idempotencyKey]
+      );
+      
+      const run = res.rows[0];
+      if (!run) {
+        throw new ConflictException("Failed to create run");
+      }
+      
+      await client.query(
         `INSERT INTO provisr_audit.audit_events (workspace_id, actor_id, actor_type, action, resource_type, resource_id, event_data) 
          VALUES ($1, $2, 'user', 'run_created', 'provisioning_run', $3, $4)`,
         [workspaceId, requesterId, run.id, JSON.stringify({ state: 'received' })]
-    ).catch(err => console.error("Audit log failed:", err));
+      );
 
-    return run;
+      await client.query("COMMIT");
+      return run;
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 
   async listRuns(workspaceId: string, sessionId?: string, status?: string): Promise<ProvisioningRun[]> {

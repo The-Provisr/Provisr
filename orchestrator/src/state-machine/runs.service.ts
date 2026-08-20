@@ -263,4 +263,20 @@ export class RunsService {
       actorId,
     );
   }
+
+  async decideApproval(
+    id: string,
+    workspaceId: string,
+    actorId: string,
+    dto: { decision: "approved" | "rejected"; reason?: string },
+  ): Promise<ProvisioningRun> {
+    const run = await this.getRun(id, workspaceId);
+    if (run.state !== "pending_approval") {
+      throw new ConflictException(
+        `Cannot decide approval for run in '${run.state}' state (expected 'pending_approval')`,
+      );
+    }
+    const nextState: RunState = dto.decision === "approved" ? "pending_execution" : "pending_agent";
+    return this.transitionState(id, workspaceId, run.stateVersion, nextState, actorId);
+  }
 }

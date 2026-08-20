@@ -32,6 +32,7 @@ import { ProvisioningRunsController } from "./routes/provisioning-runs.controlle
 import { ApprovalsController } from "./routes/approvals.controller";
 import { ArtifactsController } from "./routes/artifacts.controller";
 import { SseController } from "./routes/sse.controller";
+import { RunsService, createRunsService } from "./state-machine";
 
 @Module({
   imports: [],
@@ -85,6 +86,11 @@ import { SseController } from "./routes/sse.controller";
     {
       provide: AuditService,
       useFactory: (db: DbService) => createAuditService(db),
+      inject: [DbService],
+    },
+    {
+      provide: RunsService,
+      useFactory: (db: DbService) => createRunsService(db),
       inject: [DbService],
     },
     {

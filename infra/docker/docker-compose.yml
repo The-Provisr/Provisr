@@ -57,8 +57,10 @@ services:
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
       REDIS_URL: redis://redis:6379/0
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   state-service:
     profiles: [all, backend]
@@ -73,7 +75,8 @@ services:
       PORT: "8082"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
 
   provisioning-service:
     profiles: [all, backend]
@@ -89,8 +92,10 @@ services:
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
       AWS_ENDPOINT_URL: http://localstack:4566
     depends_on:
-      postgres: { condition: service_healthy }
-      localstack: { condition: service_started }
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
 
   approval-service:
     profiles: [all, backend]
@@ -105,7 +110,8 @@ services:
       PORT: "8084"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
 
   audit-service:
     profiles: [all, backend]
@@ -120,7 +126,8 @@ services:
       PORT: "8085"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
 
   notification-service:
     profiles: [all, backend]
@@ -135,7 +142,8 @@ services:
       PORT: "8086"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
 
   reconciler:
     profiles: [all, backend]
@@ -150,7 +158,8 @@ services:
       PORT: "8087"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
 
   workspace-service:
     profiles: [all, backend]
@@ -165,7 +174,8 @@ services:
       PORT: "8088"
       DATABASE_URL: postgres://provisr_app:provisr-app-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
 
   cloud-account-service:
     profiles: [all, backend]
@@ -183,7 +193,8 @@ services:
       # No fallback: an unset key must fail startup, never ship a known key.
       CLOUD_ACCOUNT_MASTER_KEY: ${CLOUD_ACCOUNT_MASTER_KEY:?CLOUD_ACCOUNT_MASTER_KEY must be set}
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
 
   # ── Agent layer (profile: agent) ──
   agent:
@@ -198,7 +209,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       ORCHESTRATOR_URL: http://orchestrator:4000
     depends_on:
-      redis: { condition: service_healthy }
+      redis:
+        condition: service_healthy
       orchestrator:
         condition: service_started
         required: false
@@ -215,7 +227,8 @@ services:
       BACKEND_URL: http://provisioning-service:8083
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
       provisioning-service:
         condition: service_started
         required: false
@@ -232,10 +245,14 @@ services:
       PORT: "4000"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      # Local dev only. Production must inject this via Vault/infra config.
+      # No fallback: an unset key must fail startup, never ship a known key.
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?CLERK_SECRET_KEY must be set}
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   # ── Frontend (profile: frontend) ──
   frontend:
@@ -246,8 +263,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
-      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      # Local dev only. Production must inject these via Vault/infra config.
+      # No fallback: an unset key must fail startup, never ship a known key.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY must be set}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?CLERK_SECRET_KEY must be set}
       NEXT_PUBLIC_ORCHESTRATOR_URL: http://localhost:4000
     depends_on:
       orchestrator:

@@ -286,4 +286,46 @@ describe("RunsService", () => {
 
     expect(poolClient.release).toHaveBeenCalledTimes(1);
   });
+
+  it("rolls back and propagates error if outbox insert fails during state transition", async () => {
+    const executedQueries: string[] = [];
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        executedQueries.push(sql);
+        if (sql.includes("FOR UPDATE")) {
+          return { rows: [mockRun] };
+        }
+        if (sql.includes("UPDATE provisr_state.provisioning_runs")) {
+          return { rows: [{ ...mockRun, state: "pending_policy", stateVersion: 1 }] };
+        }
+        if (sql.includes("INSERT INTO provisr_audit.audit_events")) {
+          return { rows: [] };
+        }
+        if (sql.includes("INSERT INTO provisr_events.events")) {
+          throw new Error("Outbox write failure");
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+
+    const db = {
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
+    } as unknown as DbService;
+
+    const service = new RunsService(db);
+
+    await expect(
+      service.transitionState(runId, workspaceId, 0, "pending_policy", userId),
+    ).rejects.toThrow("Outbox write failure");
+
+    expect(executedQueries[0]).toBe("BEGIN");
+    expect(executedQueries[1]).toContain("FOR UPDATE");
+    expect(executedQueries[2]).toContain("UPDATE provisr_state.provisioning_runs");
+    expect(executedQueries[3]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[4]).toContain("INSERT INTO provisr_events.events");
+    expect(executedQueries[5]).toBe("ROLLBACK");
+    expect(poolClient.release).toHaveBeenCalledTimes(1);
+  });
 });

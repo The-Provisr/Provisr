@@ -208,10 +208,10 @@ export class RunsService {
       
       // Outbox event (assuming provisr_events.events exists as per PRD OR-005)
       await client.query(
-          `INSERT INTO provisr_events.events (id, aggregate_type, aggregate_id, event_type, payload)
-           VALUES ($1, 'provisioning_run', $2, 'StateChangedEvent', $3)`,
-           [randomUUID(), run.id, JSON.stringify({ state: run.state, version: run.stateVersion })]
-      ).catch(e => console.error("Outbox failed:", e));
+        `INSERT INTO provisr_events.events (id, aggregate_type, aggregate_id, event_type, payload)
+         VALUES ($1, 'provisioning_run', $2, 'StateChangedEvent', $3)`,
+        [randomUUID(), run.id, JSON.stringify({ state: run.state, version: run.stateVersion })],
+      );
 
       await client.query('COMMIT');
       return run;

@@ -14,19 +14,25 @@ import { CurrentUser } from "../middleware/current-user.decorator";
 import type { RequestUser } from "../middleware/auth.types";
 import { requestStatuses } from "@provisr/shared-contracts";
 
-export const createRunSchema = z.object({
-  sessionId: z.string().uuid(),
-  prompt: z.string().min(1).max(20000),
-});
+export const createRunSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    prompt: z.string().min(1).max(20000),
+  })
+  .strict();
 
-export const confirmRunSchema = z.object({
-  manifestVersion: z.string().min(1),
-  planVersion: z.string().min(1),
-});
+export const confirmRunSchema = z
+  .object({
+    manifestVersion: z.string().min(1),
+    planVersion: z.string().min(1),
+  })
+  .strict();
 
-export const clarifyRunSchema = z.object({
-  answers: z.record(z.string(), z.unknown()),
-});
+export const clarifyRunSchema = z
+  .object({
+    answers: z.record(z.string(), z.unknown()),
+  })
+  .strict();
 
 export type CreateRunDto = z.infer<typeof createRunSchema>;
 export type ConfirmRunDto = z.infer<typeof confirmRunSchema>;

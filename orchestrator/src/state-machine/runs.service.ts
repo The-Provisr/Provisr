@@ -1,0 +1,305 @@
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
+import type { DbService } from "../db/db.service";
+
+export const ALL_RUN_STATES = [
+  "received",
+  "pending_policy",
+  "pending_cloud_context",
+  "pending_agent",
+  "manifest_ready",
+  "pending_iac",
+  "plan_ready",
+  "pending_policy_check",
+  "pending_confirmation",
+  "pending_approval",
+  "pending_execution",
+  "executing",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+
+export type RunState = typeof ALL_RUN_STATES[number];
+
+export const ALLOWED_STATE_TRANSITIONS: Readonly<Record<RunState, ReadonlySet<RunState>>> = {
+  received: new Set<RunState>(["pending_policy", "failed", "cancelled"]),
+  pending_policy: new Set<RunState>(["pending_cloud_context", "failed", "cancelled"]),
+  pending_cloud_context: new Set<RunState>(["pending_agent", "failed", "cancelled"]),
+  pending_agent: new Set<RunState>(["manifest_ready", "pending_agent", "failed", "cancelled"]),
+  manifest_ready: new Set<RunState>(["pending_iac", "pending_agent", "failed", "cancelled"]),
+  pending_iac: new Set<RunState>(["plan_ready", "failed", "cancelled"]),
+  plan_ready: new Set<RunState>(["pending_policy_check", "failed", "cancelled"]),
+  pending_policy_check: new Set<RunState>(["pending_confirmation", "pending_agent", "failed", "cancelled"]),
+  pending_confirmation: new Set<RunState>(["pending_approval", "pending_agent", "failed", "cancelled"]),
+  pending_approval: new Set<RunState>(["pending_execution", "pending_agent", "failed", "cancelled"]),
+  pending_execution: new Set<RunState>(["executing", "failed", "cancelled"]),
+  executing: new Set<RunState>(["completed", "failed", "cancelled"]),
+  completed: new Set<RunState>([]),
+  failed: new Set<RunState>([]),
+  cancelled: new Set<RunState>([]),
+};
+
+export interface ProvisioningRun {
+  id: string;
+  sessionId: string;
+  workspaceId: string;
+  requesterId: string;
+  state: RunState;
+  stateVersion: number;
+  prompt: string;
+  manifestVersion: number | null;
+  policyDecision: string | null;
+  approvalStatus: string;
+  executionStatus: string;
+  idempotencyKey: string | null;
+  correlationId: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
+}
+
+@Injectable()
+export class RunsService {
+  constructor(private readonly db: DbService) {}
+
+  async createRun(sessionId: string, workspaceId: string, requesterId: string, prompt: string): Promise<ProvisioningRun> {
+    const correlationId = randomUUID();
+    const idempotencyKey = randomUUID();
+
+    const client = await this.db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const res = await client.query<ProvisioningRun>(
+        `INSERT INTO provisr_state.provisioning_runs 
+         (session_id, workspace_id, requester_id, prompt, correlation_id, idempotency_key, state, state_version)
+         VALUES ($1, $2, $3, $4, $5, $6, 'received', 0)
+         RETURNING id, session_id as "sessionId", workspace_id as "workspaceId", requester_id as "requesterId",
+                   state, state_version as "stateVersion", prompt, manifest_version as "manifestVersion",
+                   policy_decision as "policyDecision", approval_status as "approvalStatus",
+                   execution_status as "executionStatus", idempotency_key as "idempotencyKey",
+                   correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
+                   created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"`,
+        [sessionId, workspaceId, requesterId, prompt, correlationId, idempotencyKey]
+      );
+      const run = res.rows[0];
+      if (!run) throw new ConflictException("Failed to create run");
+
+      await client.query(
+        `INSERT INTO provisr_audit.audit_events (workspace_id, actor_id, actor_type, action, resource_type, resource_id, event_data) 
+         VALUES ($1, $2, 'user', 'run_created', 'provisioning_run', $3, $4)`,
+        [workspaceId, requesterId, run.id, JSON.stringify({ prompt, sessionId })]
+      );
+
+      await client.query("COMMIT");
+      return run;
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listRuns(workspaceId: string, sessionId?: string, status?: string): Promise<ProvisioningRun[]> {
+    let query = `
+      SELECT id, session_id as "sessionId", workspace_id as "workspaceId", requester_id as "requesterId",
+             state, state_version as "stateVersion", prompt, manifest_version as "manifestVersion",
+             policy_decision as "policyDecision", approval_status as "approvalStatus",
+             execution_status as "executionStatus", idempotency_key as "idempotencyKey",
+             correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
+             created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"
+      FROM provisr_state.provisioning_runs 
+      WHERE workspace_id = $1
+    `;
+    const params: unknown[] = [workspaceId];
+
+    if (sessionId) {
+      params.push(sessionId);
+      query += ` AND session_id = $${params.length}`;
+    }
+
+    if (status) {
+      params.push(status);
+      query += ` AND state = $${params.length}`;
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT 50`;
+
+    const res = await this.db.query<ProvisioningRun>(query, params);
+    return res.rows;
+  }
+
+  async getRun(id: string, workspaceId: string): Promise<ProvisioningRun> {
+    const res = await this.db.query<ProvisioningRun>(
+      `SELECT id, session_id as "sessionId", workspace_id as "workspaceId", requester_id as "requesterId",
+              state, state_version as "stateVersion", prompt, manifest_version as "manifestVersion",
+              policy_decision as "policyDecision", approval_status as "approvalStatus",
+              execution_status as "executionStatus", idempotency_key as "idempotencyKey",
+              correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
+              created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"
+       FROM provisr_state.provisioning_runs WHERE id = $1 AND workspace_id = $2`,
+      [id, workspaceId]
+    );
+    const run = res.rows[0];
+    if (!run) throw new NotFoundException("Run not found");
+    return run;
+  }
+
+  async transitionState(
+    id: string,
+    workspaceId: string,
+    expectedVersion: number,
+    newState: RunState,
+    actorId: string,
+    extraUpdates?: { approvalStatus?: string; policyDecision?: string },
+  ): Promise<ProvisioningRun> {
+    const client = await this.db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const current = await client.query<ProvisioningRun>(
+        `SELECT id, session_id as "sessionId", workspace_id as "workspaceId", requester_id as "requesterId",
+                 state, state_version as "stateVersion", prompt, manifest_version as "manifestVersion",
+                 policy_decision as "policyDecision", approval_status as "approvalStatus",
+                 execution_status as "executionStatus", idempotency_key as "idempotencyKey",
+                 correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
+                 created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"
+         FROM provisr_state.provisioning_runs
+         WHERE id = $1 AND workspace_id = $2
+         FOR UPDATE`,
+        [id, workspaceId],
+      );
+
+      const currentRun = current.rows[0];
+      if (!currentRun) {
+        throw new NotFoundException("Run not found");
+      }
+
+      if (currentRun.stateVersion !== expectedVersion) {
+        throw new ConflictException("State version conflict");
+      }
+
+      const allowedNextStates = ALLOWED_STATE_TRANSITIONS[currentRun.state];
+      if (!allowedNextStates || !allowedNextStates.has(newState)) {
+        throw new ConflictException(
+          `Invalid state transition from '${currentRun.state}' to '${newState}'`,
+        );
+      }
+
+      const approvalStatus = extraUpdates?.approvalStatus ?? currentRun.approvalStatus;
+      const policyDecision = extraUpdates?.policyDecision ?? currentRun.policyDecision;
+      
+      const updateRes = await client.query<ProvisioningRun>(
+        `UPDATE provisr_state.provisioning_runs 
+         SET state = $1, state_version = state_version + 1, approval_status = $2, policy_decision = $3, updated_at = now()
+         WHERE id = $4 AND workspace_id = $5 AND state_version = $6
+         RETURNING id, session_id as "sessionId", workspace_id as "workspaceId", requester_id as "requesterId",
+                 state, state_version as "stateVersion", prompt, manifest_version as "manifestVersion",
+                 policy_decision as "policyDecision", approval_status as "approvalStatus",
+                 execution_status as "executionStatus", idempotency_key as "idempotencyKey",
+                 correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
+                 created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"`,
+        [newState, approvalStatus, policyDecision, id, workspaceId, expectedVersion]
+      );
+
+      const run = updateRes.rows[0];
+      if (!run) {
+        throw new ConflictException("State conflict or run not found");
+      }
+
+      // Audit transition
+      await client.query(
+        `INSERT INTO provisr_audit.audit_events (workspace_id, actor_id, actor_type, action, resource_type, resource_id, event_data) 
+         VALUES ($1, $2, 'user', 'run_transitioned', 'provisioning_run', $3, $4)`,
+        [workspaceId, actorId, run.id, JSON.stringify({ state: run.state, stateVersion: run.stateVersion })]
+      );
+      
+      // Outbox event
+      await client.query(
+        `INSERT INTO provisr_events.events (id, aggregate_type, aggregate_id, event_type, payload)
+         VALUES ($1, 'provisioning_run', $2, 'StateChangedEvent', $3)`,
+        [randomUUID(), run.id, JSON.stringify({ state: run.state, version: run.stateVersion })]
+      );
+
+      await client.query("COMMIT");
+      return run;
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async handleApprovalEvent(
+    id: string,
+    workspaceId: string,
+    actorId: string,
+    decision: "approved" | "rejected",
+    reason?: string,
+  ): Promise<ProvisioningRun> {
+    const run = await this.getRun(id, workspaceId);
+    if (run.state !== "pending_approval") {
+      throw new ConflictException(
+        `Cannot process approval decision for run in '${run.state}' state (expected 'pending_approval')`,
+      );
+    }
+
+    if (decision === "rejected" && (!reason || reason.trim().length === 0)) {
+      throw new ConflictException("Reason is required when rejecting an approval");
+    }
+
+    const nextState: RunState = decision === "approved" ? "pending_execution" : "pending_agent";
+    return this.transitionState(id, workspaceId, run.stateVersion, nextState, actorId, {
+      approvalStatus: decision,
+    });
+  }
+
+  async cancelRun(id: string, workspaceId: string, actorId: string): Promise<ProvisioningRun> {
+    const run = await this.getRun(id, workspaceId);
+    if (run.state === "cancelled" || run.state === "completed" || run.state === "failed") {
+      return run;
+    }
+    return this.transitionState(id, workspaceId, run.stateVersion, "cancelled", actorId);
+  }
+
+  async confirmRun(
+    id: string,
+    workspaceId: string,
+    actorId: string,
+    _dto?: { manifestVersion?: string; planVersion?: string },
+  ): Promise<ProvisioningRun> {
+    const run = await this.getRun(id, workspaceId);
+    return this.transitionState(
+      id,
+      workspaceId,
+      run.stateVersion,
+      "pending_approval",
+      actorId,
+    );
+  }
+
+  async clarifyRun(
+    id: string,
+    workspaceId: string,
+    actorId: string,
+    _dto?: { answers?: Record<string, unknown> },
+  ): Promise<ProvisioningRun> {
+    const run = await this.getRun(id, workspaceId);
+    return this.transitionState(
+      id,
+      workspaceId,
+      run.stateVersion,
+      "pending_agent",
+      actorId,
+    );
+  }
+}
+
+export function createRunsService(db: DbService): RunsService {
+  return new RunsService(db);
+}

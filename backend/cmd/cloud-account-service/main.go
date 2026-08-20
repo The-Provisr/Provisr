@@ -9,13 +9,13 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/provisr/backend/internal/cloudaccount"
 	"github.com/provisr/backend/pkg/cloudcrypto"
-	"github.com/rs/zerolog"
+	"github.com/provisr/backend/pkg/middleware"
 )
 
 const defaultPort = "8089"
 
 func main() {
-	logger := zerolog.New(os.Stdout).With().Timestamp().Str("service", "cloud-account-service").Logger()
+	logger := middleware.New("cloud-account-service")
 
 	port := os.Getenv("PORT")
 	if port == "" {

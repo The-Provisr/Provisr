@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/provisr/backend/pkg/middleware"
 	"github.com/rs/zerolog"
 )
 
@@ -41,7 +42,7 @@ func setupTestServerWithDB(t *testing.T, db *sql.DB) (*server, string) {
 	}
 	logger := zerolog.New(out).With().Str("service", "workspace-service").Logger()
 	s := &server{db: db, log: logger}
-	ts := httptest.NewServer(requestLoggingMiddleware(logger, recoveryMiddleware(logger, s.routes())))
+	ts := httptest.NewServer(middleware.RequestLogger(logger, middleware.Recover(logger, s.routes())))
 	t.Cleanup(ts.Close)
 	return s, ts.URL
 }

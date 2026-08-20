@@ -4,9 +4,7 @@ package cloudaccount
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,21 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/provisr/backend/pkg/cloudcrypto"
 	"github.com/provisr/backend/pkg/health"
+	"github.com/provisr/backend/pkg/middleware"
 	"github.com/rs/zerolog"
 )
 
 const maxBody = 1 << 20
-
-type contextKey string
-
-const (
-	requestIDKey     contextKey = "request_id"
-	correlationIDKey contextKey = "correlation_id"
-)
 
 type cloudAccount struct {
 	ID          string  `json:"id"`
@@ -93,10 +84,10 @@ func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Hand
 	mux.HandleFunc("PATCH /v1/cloud-accounts/{id}/status", s.handleUpdateStatus)
 	mux.HandleFunc("DELETE /v1/cloud-accounts/{id}", s.handleDelete)
 
-	// loggingMiddleware wraps recoveryMiddleware so panic handling runs inside
-	// the request-scoped logger and panic logs carry request_id and
+	// RequestLogger wraps Recover so panic handling runs inside the
+	// request-scoped logger and panic logs carry request_id and
 	// correlation_id.
-	return loggingMiddleware(log, s.recoveryMiddleware(mux))
+	return middleware.RequestLogger(log, middleware.Recover(log, mux))
 }
 
 type server struct {
@@ -122,7 +113,7 @@ func (s *server) requireWorkspaceID(w http.ResponseWriter, r *http.Request) (str
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "workspace_id query parameter is required")
 		return "", false
 	}
-	if _, err := uuid.Parse(workspaceID); err != nil {
+	if !validWorkspaceID(workspaceID) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
 		return "", false
 	}
@@ -139,22 +130,22 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !validProviders[req.Provider] {
+	if !validProvider(req.Provider) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "provider must be aws, azure, or gcp")
 		return
 	}
-	if strings.TrimSpace(req.Label) == "" || len(req.Label) > 255 {
+	if !validLabel(req.Label) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "label must be between 1 and 255 characters")
 		return
 	}
-	if _, err := uuid.Parse(req.WorkspaceID); err != nil {
+	if !validWorkspaceID(req.WorkspaceID) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
 		return
 	}
 	if req.Metadata == nil {
 		req.Metadata = map[string]any{}
 	}
-	if req.ExternalAccountID != "" && req.Provider != "aws" {
+	if !validExternalAccountID(req.Provider, req.ExternalAccountID) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "external_account_id is only valid for aws accounts")
 		return
 	}
@@ -368,7 +359,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if _, err := uuid.Parse(id); err != nil {
+	if !validWorkspaceID(id) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
 		return
 	}
@@ -437,7 +428,7 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if _, err := uuid.Parse(id); err != nil {
+	if !validWorkspaceID(id) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
 		return
 	}
@@ -448,7 +439,7 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
 		return
 	}
-	if !validStatuses[req.Status] {
+	if !validStatus(req.Status) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "status must be pending, active, failed, or disconnected")
 		return
 	}
@@ -515,7 +506,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if _, err := uuid.Parse(id); err != nil {
+	if !validWorkspaceID(id) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
 		return
 	}
@@ -629,7 +620,7 @@ const (
 // rejected so a mutation is never applied twice.
 func (s *server) claimIdempotencyKey(ctx context.Context, tx *sql.Tx, r *http.Request, workspaceID, mutation string) error {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" || len(key) > 128 {
+	if !validIdempotencyKey(key) {
 		return errIdempotencyKeyMissing
 	}
 	res, err := tx.Exec(
@@ -688,13 +679,8 @@ func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventTy
 		return fmt.Errorf("read previous audit hash: %w", err)
 	}
 
-	correlationID := correlationID(ctx)
-	sum := sha256.New()
-	sum.Write([]byte(previousHash.String))
-	sum.Write([]byte(eventType))
-	sum.Write(payloadJSON)
-	sum.Write([]byte(correlationID))
-	eventHash := hex.EncodeToString(sum.Sum(nil))
+	correlationID := middleware.CorrelationID(ctx)
+	eventHash := computeAuditHash(previousHash.String, eventType, payloadJSON, correlationID)
 
 	var prev any
 	if previousHash.Valid {
@@ -713,13 +699,6 @@ func (s *server) emitAudit(ctx context.Context, tx *sql.Tx, workspaceID, eventTy
 	return nil
 }
 
-func correlationID(ctx context.Context) string {
-	if v, ok := ctx.Value(correlationIDKey).(string); ok && v != "" {
-		return v
-	}
-	return uuid.NewString()
-}
-
 func isUniqueViolation(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == sqlStateUniqueViolation
@@ -728,40 +707,6 @@ func isUniqueViolation(err error) bool {
 func isForeignKeyViolation(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == sqlStateForeignKeyViolation
-}
-
-func (s *server) recoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				zerolog.Ctx(r.Context()).Error().Interface("panic", rec).Str("path", r.URL.Path).Msg("panic recovered")
-				s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "unexpected server error")
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
-
-// loggingMiddleware derives a request-scoped logger carrying request_id and
-// correlation_id, read from headers or generated when absent, so every log
-// line can be correlated across services.
-func loggingMiddleware(base zerolog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" {
-			requestID = uuid.NewString()
-		}
-		correlationID := r.Header.Get("X-Correlation-ID")
-		if _, err := uuid.Parse(correlationID); err != nil {
-			correlationID = requestID
-		}
-
-		l := base.With().Str("request_id", requestID).Str("correlation_id", correlationID).Logger()
-		ctx := l.WithContext(r.Context())
-		ctx = context.WithValue(ctx, requestIDKey, requestID)
-		ctx = context.WithValue(ctx, correlationIDKey, correlationID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
 }
 
 func (s *server) writeJSON(ctx context.Context, w http.ResponseWriter, status int, v any) {

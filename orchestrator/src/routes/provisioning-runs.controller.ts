@@ -8,11 +8,11 @@ import {
   Query,
 } from "@nestjs/common";
 import { z } from "zod";
-import { NotImplementedError } from "../common/errors/typed-errors";
 import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 import { CurrentUser } from "../middleware/current-user.decorator";
 import type { RequestUser } from "../middleware/auth.types";
 import { requestStatuses } from "@provisr/shared-contracts";
+import { RunsService } from "../state-machine/runs.service";
 
 export const createRunSchema = z.object({
   sessionId: z.string().uuid(),
@@ -34,54 +34,65 @@ export type ClarifyRunDto = z.infer<typeof clarifyRunSchema>;
 
 const sessionIdQuerySchema = z.string().uuid().optional();
 const runStatusQuerySchema = z.enum(requestStatuses).optional();
+const workspaceIdQuerySchema = z.string().uuid();
 
 @Controller("runs")
 export class ProvisioningRunsController {
+  constructor(private readonly runsService: RunsService) {}
+
   @Post()
-  create(@Body(new ZodValidationPipe(createRunSchema)) _dto: CreateRunDto): never {
-    // TODO(OR-005): create run via workflow state machine
-    throw new NotImplementedError("Run creation");
+  create(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Body(new ZodValidationPipe(createRunSchema)) dto: CreateRunDto,
+    @CurrentUser() user: RequestUser
+  ) {
+    return this.runsService.createRun(dto.sessionId, workspaceId, user.userId, dto.prompt);
   }
 
   @Get()
   list(
-    @Query("sessionId", new ZodValidationPipe(sessionIdQuerySchema))
-    _sessionId: string | undefined,
-    @Query("status", new ZodValidationPipe(runStatusQuerySchema))
-    _status: string | undefined,
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Query("sessionId", new ZodValidationPipe(sessionIdQuerySchema)) sessionId: string | undefined,
+    @Query("status", new ZodValidationPipe(runStatusQuerySchema)) status: string | undefined,
     @CurrentUser() _user: RequestUser,
-  ): never {
-    // TODO(OR-005): list runs filtered by sessionId/status
-    throw new NotImplementedError("Run listing");
+  ) {
+    return this.runsService.listRuns(workspaceId, sessionId, status);
   }
 
   @Get(":id")
-  get(@Param("id", new ParseUUIDPipe()) _id: string): never {
-    // TODO(OR-005): return run detail + state
-    throw new NotImplementedError("Run retrieval");
+  get(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string
+  ) {
+    return this.runsService.getRun(id, workspaceId);
   }
 
   @Post(":id/cancel")
-  cancel(@Param("id", new ParseUUIDPipe()) _id: string): never {
-    // TODO(OR-005): cancel run before execution starts
-    throw new NotImplementedError("Run cancellation");
+  cancel(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: RequestUser
+  ) {
+    return this.runsService.cancelRun(id, workspaceId, user.userId);
   }
 
   @Post(":id/confirm")
   confirm(
-    @Param("id", new ParseUUIDPipe()) _id: string,
-    @Body(new ZodValidationPipe(confirmRunSchema)) _dto: ConfirmRunDto,
-  ): never {
-    // TODO(OR-005): bind confirmation to manifestVersion + planVersion (OR-016)
-    throw new NotImplementedError("Run confirmation");
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(confirmRunSchema)) dto: ConfirmRunDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runsService.confirmRun(id, workspaceId, user.userId, dto);
   }
 
   @Post(":id/clarify")
   clarify(
-    @Param("id", new ParseUUIDPipe()) _id: string,
-    @Body(new ZodValidationPipe(clarifyRunSchema)) _dto: ClarifyRunDto,
-  ): never {
-    // TODO(OR-005): store answers and resume the run (OR-010)
-    throw new NotImplementedError("Clarification submission");
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(clarifyRunSchema)) dto: ClarifyRunDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runsService.clarifyRun(id, workspaceId, user.userId, dto);
   }
 }

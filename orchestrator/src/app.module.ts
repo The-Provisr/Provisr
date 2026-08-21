@@ -32,13 +32,6 @@ import { ProvisioningRunsController } from "./routes/provisioning-runs.controlle
 import { ApprovalsController } from "./routes/approvals.controller";
 import { ArtifactsController } from "./routes/artifacts.controller";
 import { SseController } from "./routes/sse.controller";
-import {
-  DbConfig,
-  DB_CONFIG,
-  DbService,
-  createDbService,
-  loadDbConfig,
-} from "./db/db.service";
 import { RunsService, createRunsService } from "./state-machine/runs.service";
 
 @Module({

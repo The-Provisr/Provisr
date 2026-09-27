@@ -8,6 +8,7 @@ export const decideApprovalSchema = z
     decision: z.enum(["approved", "rejected"]),
     reason: z.string().trim().min(1).max(1000).optional(),
   })
+  .strict()
   .superRefine((value, ctx) => {
     if (value.decision === "rejected" && !value.reason) {
       ctx.addIssue({

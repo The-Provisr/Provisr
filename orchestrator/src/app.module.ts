@@ -103,6 +103,11 @@ import { RunsService, createRunsService } from "./state-machine/runs.service";
       inject: [DbService],
     },
     {
+      provide: RunsService,
+      useFactory: (db: DbService) => createRunsService(db),
+      inject: [DbService],
+    },
+    {
       // useFactory + inject instead of useClass so the guard works under
       // esbuild (vitest) as well as tsc (nest build): esbuild emits no
       // design:paramtypes metadata for constructor injection.

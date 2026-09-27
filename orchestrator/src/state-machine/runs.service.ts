@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import type { DbService } from "../db/db.service";
+import { DbService } from "../db/db.service";
 
 export const ALL_RUN_STATES = [
   "received",
@@ -67,7 +67,7 @@ export class RunsService {
 
   async createRun(sessionId: string, workspaceId: string, requesterId: string, prompt: string): Promise<ProvisioningRun> {
     const correlationId = randomUUID();
-    const idempotencyKey = randomUUID();
+    const idempotencyKey = `run-${correlationId}`;
 
     const client = await this.db.connect();
     try {
@@ -168,7 +168,7 @@ export class RunsService {
                  execution_status as "executionStatus", idempotency_key as "idempotencyKey",
                  correlation_id as "correlationId", error_code as "errorCode", error_message as "errorMessage",
                  created_at as "createdAt", updated_at as "updatedAt", completed_at as "completedAt"
-         FROM provisr_state.provisioning_runs
+         FROM provisr_state.provisioning_runs 
          WHERE id = $1 AND workspace_id = $2
          FOR UPDATE`,
         [id, workspaceId],

@@ -1,16 +1,22 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from app.domain.clarification import (
+    build_answered_context,
+    detect_gaps,
+)
 from app.domain.models import (
     AgentEvent,
     AgentEventType,
     AgentSession,
+    AnsweredQuestion,
     ConversationMessage,
     ModelTurnResult,
 )
 from app.integrations.anthropic_model import LanguageModel
 from app.integrations.state import StateStore
 from app.prompts.errors import ProfileNotFound, PromptIntegrityError, VersionNotFound
+from app.prompts.models import PromptBundle
 from app.prompts.registry import PromptRegistry
 
 _PROVISIONING_PROFILE = "provisioning_agent"
@@ -79,7 +85,52 @@ class AgentService:
             },
         )
 
-        result = await self._model.complete_turn(session, prompt)
+        # ------------------------------------------------------------------ #
+        # Gap detection: check for missing/ambiguous fields before the model  #
+        # call so we can emit structured questions immediately.               #
+        # ------------------------------------------------------------------ #
+        gaps = detect_gaps(message, answered_questions=session.answered_questions)
+        if gaps:
+            # Build a fast-path clarification result without calling the LLM.
+            questions_summary = "; ".join(q.question_text for q in gaps)
+            result = ModelTurnResult(
+                outcome="needs_clarification",
+                message=gaps[0].question_text,
+                clarification_questions=gaps,
+            )
+            completed_at = datetime.now(UTC)
+            session.messages.append(
+                ConversationMessage(
+                    role="assistant",
+                    content=questions_summary,
+                    created_at=completed_at,
+                )
+            )
+            session.updated_at = completed_at
+            await self._state.save_session(session)
+            await self._append_event(
+                session,
+                "clarification.required",
+                result.model_dump(mode="json", exclude_none=True),
+            )
+            await self._append_event(session, "stream.completed", {"outcome": result.outcome})
+            return result
+
+        # ------------------------------------------------------------------ #
+        # Inject confirmed answers as context so the model never re-asks.    #
+        # ------------------------------------------------------------------ #
+        augmented_prompt = _augment_prompt(prompt, session.answered_questions)
+        result = await self._model.complete_turn(session, augmented_prompt)
+
+        # If the model produced additional clarification questions, merge any
+        # new ones that are not already answered.
+        answered_fields = {aq.field_mapping for aq in session.answered_questions}
+        new_questions = [
+            q for q in result.clarification_questions if q.field_mapping not in answered_fields
+        ]
+        if new_questions != result.clarification_questions:
+            result = result.model_copy(update={"clarification_questions": new_questions})
+
         completed_at = datetime.now(UTC)
         session.messages.append(
             ConversationMessage(role="assistant", content=result.message, created_at=completed_at)
@@ -95,6 +146,34 @@ class AgentService:
         )
         await self._append_event(session, "stream.completed", {"outcome": result.outcome})
         return result
+
+    async def record_clarification_answers(
+        self,
+        *,
+        session_id: str,
+        answers: list[AnsweredQuestion],
+    ) -> AgentSession:
+        """Persist a batch of clarification answers into the session.
+
+        Call this when the frontend submits answers to a ``clarification.required``
+        event before the next ``run_turn``.  Duplicate ``field_mapping`` entries
+        are deduplicated (last value wins) to prevent state bloat.
+        """
+        session = await self._state.get_session(session_id)
+        # Build a dict keyed by field_mapping so last-write wins on duplicates.
+        merged: dict[str, AnsweredQuestion] = {
+            aq.field_mapping: aq for aq in session.answered_questions
+        }
+        for answer in answers:
+            merged[answer.field_mapping] = answer
+        session = session.model_copy(
+            update={
+                "answered_questions": list(merged.values()),
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        await self._state.save_session(session)
+        return session
 
     async def _append_event(
         self,
@@ -116,3 +195,23 @@ class AgentService:
                 data=data,
             )
         )
+
+
+def _augment_prompt(
+    prompt: PromptBundle,
+    answered_questions: list[AnsweredQuestion],
+) -> PromptBundle:
+    """Return a prompt with confirmed-answers context prepended to its content.
+
+    When there are no answered questions the original bundle is returned
+    unchanged (no allocation, no hash invalidation risk).
+    """
+    context_block = build_answered_context(answered_questions)
+    if not context_block:
+        return prompt
+    # Use object.__setattr__ to bypass the frozen dataclass constraint on the
+    # in-memory copy — we deliberately do not update content_hash because this
+    # is a runtime augmentation, not a permanent bundle change.
+    augmented = prompt.model_copy()
+    object.__setattr__(augmented, "content", context_block + prompt.content)
+    return augmented

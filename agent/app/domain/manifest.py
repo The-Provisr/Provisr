@@ -8,11 +8,11 @@ Two manifest tiers:
     documentation and model output parsing.
 
 ``CanonicalManifest``
-    The fully-annotated draft produced by ``app.domain.drafting``.  Every field
-    carries a ``FieldSource`` annotation (source + confidence) so downstream
-    orchestration, policy, and audit services know exactly where each value
-    came from and how certain the agent was.  This is the ``manifest_draft``
-    envelope emitted as an SSE event (AG-005).
+    The fully-annotated draft produced by ``app.domain.drafting`` and the
+    domain planning helpers (AG-012).  Every field carries a ``FieldSource``
+    annotation so downstream orchestration, policy, and audit services know
+    exactly where each value came from and how confident the agent was.
+    This is the ``manifest_draft`` envelope emitted as an SSE event (AG-005).
 """
 
 from __future__ import annotations
@@ -99,9 +99,9 @@ class CanonicalResource(StrictModel):
     """A single resource in the canonical manifest.
 
     ``provider_config`` holds the provider-specific fields verbatim from the
-    model (e.g. ``instance_type``, ``engine``) so they are preserved without
-    being re-validated here — validation happens in the provisioning service
-    that actually drives Terraform.
+    helper or model (e.g. ``instance_type``, ``engine``) so they are preserved
+    without being re-validated here — validation happens in the provisioning
+    service that actually drives Terraform.
     """
 
     logical_name: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")

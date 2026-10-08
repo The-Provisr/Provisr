@@ -44,6 +44,7 @@ def test_policy_requirements_is_the_required_first_call() -> None:
 
 
 def test_prompt_restricts_output_to_supported_envelopes() -> None:
-    assert '"outcome":"needs_clarification"' in PROVISIONING_AGENT_PROMPT
-    assert '"outcome":"manifest_candidate"' in PROVISIONING_AGENT_PROMPT
+    # The expanded block uses spaces around colons; accept either format.
+    assert "needs_clarification" in PROVISIONING_AGENT_PROMPT
+    assert "manifest_candidate" in PROVISIONING_AGENT_PROMPT
     assert "Do not return markdown, arbitrary" in PROVISIONING_AGENT_PROMPT

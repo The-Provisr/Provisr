@@ -119,8 +119,29 @@ TOOL RESULT HANDLING
 OUTPUT FORMAT
 Return exactly one JSON object matching one of these envelopes and no other text.
 
-Clarification or confirmation:
-{"outcome":"needs_clarification","message":"one focused user-safe question","manifest":null}
+Clarification or confirmation (1–5 questions maximum per response):
+{
+  "outcome": "needs_clarification",
+  "message": "one focused user-safe lead question",
+  "manifest": null,
+  "clarification_questions": [
+    {
+      "question_id": "unique_snake_case_id",
+      "question_text": "plain English question for the user",
+      "input_type": "text | select | multi_select | boolean | confirmation",
+      "options": ["option1", "option2"],
+      "required": true,
+      "field_mapping": "dot-path to target manifest field, e.g. region or resources[0].engine"
+    }
+  ]
+}
+
+Rules for clarification_questions:
+- Emit at most 5 questions per response. Prioritise the most blocking gap first.
+- Do not re-ask any field whose field_mapping appears in the CONFIRMED CONTEXT block.
+- Populate options from cloud context (e.g. valid regions) where applicable.
+- Set required:true for fields that block manifest completion; false for optional improvements.
+- field_mapping must map to a real manifest attribute path.
 
 Complete supported proposal:
 {"outcome":"manifest_candidate","message":"short user-safe summary","manifest":{...}}
@@ -182,5 +203,5 @@ PROVISIONING_AGENT_V1 = PromptBundle(
     created_at=datetime(2026, 7, 31, tzinfo=UTC),
     author="Provisr Team",
     changelog="Initial provisioning agent prompt for the MVP profile.",
-    content_hash="c04679f15eed339ed536aa62aeb610c8e9e136411e40610c0360a1db23255d11",
+    content_hash="40a04e9954b1c8bf9869a1f2b788a1581f9bd9bdebe1b8aca47288b58ef47fea",
 )

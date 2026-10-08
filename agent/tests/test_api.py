@@ -7,7 +7,7 @@ from app.integrations.state import InMemoryStateStore
 from app.main import Resources, create_app
 from app.prompts.catalog import build_prompt_registry
 from app.prompts.provisioning import PROVISIONING_AGENT_V1
-from tests.fakes import FakeLanguageModel
+from tests.fakes import FakeLanguageModel, FakePolicyTool
 
 
 def build_client(result: ModelTurnResult) -> TestClient:
@@ -22,6 +22,7 @@ def build_client(result: ModelTurnResult) -> TestClient:
             model=model,
             prompt_registry=prompt_registry,
         ),
+        policy_tool=FakePolicyTool(),
     )
     app = create_app(settings=Settings(environment="test"), resources=resources)
     return TestClient(app)

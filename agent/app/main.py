@@ -14,6 +14,7 @@ from app.config.settings import Settings, load_settings
 from app.domain.service import AgentService
 from app.integrations.anthropic_model import ClaudeModel, LanguageModel
 from app.integrations.gemini_model import GeminiModel
+from app.integrations.mcp_client import McpPolicyClient, PolicyRequirementsTool
 from app.integrations.state import InMemoryStateStore, RedisStateStore, StateStore
 from app.prompts.catalog import build_prompt_registry
 from app.prompts.registry import PromptRegistry
@@ -24,6 +25,7 @@ class Resources:
     state: StateStore
     prompt_registry: PromptRegistry
     agent_service: AgentService
+    policy_tool: PolicyRequirementsTool
 
     async def aclose(self) -> None:
         await self.state.aclose()
@@ -33,6 +35,7 @@ def create_resources(
     settings: Settings,
     model: LanguageModel | None = None,
     prompt_registry: PromptRegistry | None = None,
+    policy_tool: PolicyRequirementsTool | None = None,
 ) -> Resources:
     if settings.state_backend == "redis":
         redis = Redis.from_url(settings.redis_url, decode_responses=True)
@@ -42,6 +45,9 @@ def create_resources(
 
     language_model = model or _build_model(settings)
     resolved_prompt_registry = prompt_registry or build_prompt_registry()
+    resolved_policy_tool: PolicyRequirementsTool = policy_tool or McpPolicyClient(
+        base_url=settings.mcp_base_url
+    )
     return Resources(
         state=state,
         prompt_registry=resolved_prompt_registry,
@@ -50,6 +56,7 @@ def create_resources(
             model=language_model,
             prompt_registry=resolved_prompt_registry,
         ),
+        policy_tool=resolved_policy_tool,
     )
 
 
@@ -92,7 +99,11 @@ def create_app(
     )
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=[
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

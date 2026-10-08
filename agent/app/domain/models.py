@@ -4,13 +4,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.manifest import ResourceManifest
+from app.domain.manifest import CanonicalManifest, ResourceManifest
 
 type AgentEventType = Literal[
     "turn.started",
     "message.completed",
     "clarification.required",
     "manifest.proposed",
+    "manifest.draft",
     "turn.failed",
     "stream.completed",
 ]
@@ -55,3 +56,5 @@ class ModelTurnResult(DomainModel):
     outcome: Literal["needs_clarification", "manifest_candidate"]
     message: str = Field(min_length=1, max_length=10000)
     manifest: ResourceManifest | None = None
+    # Set by the service after successful drafting; not part of the model wire format.
+    canonical_manifest: CanonicalManifest | None = None

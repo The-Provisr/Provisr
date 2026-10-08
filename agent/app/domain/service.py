@@ -1,6 +1,12 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from app.domain.drafting import (
+    DraftingContext,
+    PolicyConstraints,
+    PolicyViolationError,
+    draft_manifest,
+)
 from app.domain.models import (
     AgentEvent,
     AgentEventType,
@@ -23,10 +29,16 @@ class AgentService:
         state: StateStore,
         model: LanguageModel,
         prompt_registry: PromptRegistry,
+        policy_constraints: PolicyConstraints | None = None,
+        workspace_id: str = "",
     ) -> None:
         self._state = state
         self._model = model
         self._prompt_registry = prompt_registry
+        # Policy constraints may be injected at construction (e.g. from MCP client)
+        # or remain empty (policies disabled / test mode).
+        self._policy_constraints = policy_constraints or PolicyConstraints()
+        self._workspace_id = workspace_id
 
     async def create_session(
         self,
@@ -80,21 +92,78 @@ class AgentService:
         )
 
         result = await self._model.complete_turn(session, prompt)
+
+        # ------------------------------------------------------------------ #
+        # Manifest drafting: when the model produces a manifest candidate,   #
+        # synthesise the fully-annotated CanonicalManifest (AG-005) and emit #
+        # a manifest.draft event alongside manifest.proposed.                #
+        # Policy violations are converted to a needs_clarification result so #
+        # the user receives a plain-language explanation.                     #
+        # ------------------------------------------------------------------ #
+        if result.outcome == "manifest_candidate" and result.manifest is not None:
+            result = await self._draft_canonical(result, session, message)
+
         completed_at = datetime.now(UTC)
         session.messages.append(
             ConversationMessage(role="assistant", content=result.message, created_at=completed_at)
         )
         session.updated_at = completed_at
         await self._state.save_session(session)
-        await self._append_event(
-            session,
-            "clarification.required"
-            if result.outcome == "needs_clarification"
-            else "manifest.proposed",
-            result.model_dump(mode="json", exclude_none=True),
-        )
+
+        if result.outcome == "needs_clarification":
+            await self._append_event(
+                session,
+                "clarification.required",
+                result.model_dump(mode="json", exclude_none=True),
+            )
+        else:
+            # Emit manifest.draft first (enriched), then manifest.proposed (raw summary)
+            if result.canonical_manifest is not None:
+                await self._append_event(
+                    session,
+                    "manifest.draft",
+                    result.canonical_manifest.model_dump(mode="json"),
+                )
+            await self._append_event(
+                session,
+                "manifest.proposed",
+                result.model_dump(mode="json", exclude_none=True),
+            )
+
         await self._append_event(session, "stream.completed", {"outcome": result.outcome})
         return result
+
+    async def _draft_canonical(
+        self,
+        result: ModelTurnResult,
+        session: AgentSession,
+        user_message: str,
+    ) -> ModelTurnResult:
+        """Run policy pre-flight and produce a ``CanonicalManifest``.
+
+        Returns the original result enriched with ``canonical_manifest``, or a
+        ``needs_clarification`` result if a policy violation is detected.
+        """
+        assert result.manifest is not None  # guaranteed by caller
+        ctx = DraftingContext(
+            request_id=session.request_id,
+            workspace_id=self._workspace_id or session.organization_id,
+            user_prompt=user_message,
+            policy=self._policy_constraints,
+        )
+        try:
+            canonical = draft_manifest(result.manifest, ctx)
+            return result.model_copy(update={"canonical_manifest": canonical})
+        except PolicyViolationError as exc:
+            violation_summary = " ".join(exc.violations)
+            return ModelTurnResult(
+                outcome="needs_clarification",
+                message=(
+                    "Your request conflicts with workspace policy: "
+                    f"{violation_summary} "
+                    "Please adjust your request to comply with the policy constraints."
+                ),
+            )
 
     async def _append_event(
         self,

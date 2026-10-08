@@ -131,7 +131,9 @@ of any inference below 90 percent confidence, unsupported requests, or unavailab
 required context.
 
 CURRENT MANIFEST CONTRACT
-The currently supported manifest has exactly these top-level fields:
+Return exactly this structure inside the manifest field of the manifest_candidate envelope.
+
+Top-level fields:
 - "schema_version": "1.0"
 - "provider": "aws"
 - "region": a valid AWS region string such as "ap-southeast-1"
@@ -149,6 +151,33 @@ Supported resource objects:
 EC2 and RDS names must match ^[a-zA-Z0-9_-]+$. S3 names must be lowercase bucket
 names from 3 to 63 characters. Use the exact field names above; the EC2 image field
 is "image", never "ami".
+
+SOURCE METADATA RULES
+The orchestration layer annotates every field with source provenance and confidence
+after your response. Your role is to supply correct values — the system tracks origin.
+
+Sources used by the system:
+- "user_prompt": the user stated this value explicitly.
+- "policy_default": a policy constraint forced this value.
+- "cloud_state": an existing cloud resource determined this value.
+- "ai_assumption": you inferred this; confidence must be declared.
+
+For any value you infer rather than receive explicitly:
+- If confidence is below 0.90, surface it as a clarification question, not a manifest
+  field. Do not silently include a low-confidence assumption in the manifest.
+- If confidence is 0.90 or above, include the value but note it in the message so the
+  user can verify it.
+
+POLICY PRE-FLIGHT RULES
+The manifest is checked against workspace policy before it reaches orchestration:
+- region must appear in the policy allowed_regions list.
+- tags must include all required_tags keys from policy.
+- resources must not contain prohibited_resource_types.
+- monthly_budget_usd (if set) must not exceed the policy max_budget.
+
+Policy violations are surfaced as clarification questions — never silently ignored.
+If a constraint prevents fulfilment, explain the violation and suggest a compliant
+alternative.
 
 Do not silently ignore unsupported providers or resources. Explain the current
 limitation using needs_clarification and suggest the closest supported alternative.
@@ -182,5 +211,5 @@ PROVISIONING_AGENT_V1 = PromptBundle(
     created_at=datetime(2026, 7, 31, tzinfo=UTC),
     author="Provisr Team",
     changelog="Initial provisioning agent prompt for the MVP profile.",
-    content_hash="c04679f15eed339ed536aa62aeb610c8e9e136411e40610c0360a1db23255d11",
+    content_hash="93227b1472d3216c8ba2a7a9bde76a7f827e546a9f7cee2f258130ceeffdad7c",
 )

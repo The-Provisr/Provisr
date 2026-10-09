@@ -13,9 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/provisr/backend/pkg/health"
+	"github.com/provisr/backend/pkg/middleware"
 	"github.com/rs/zerolog"
 )
 
@@ -121,7 +122,7 @@ func main() {
 		dbDSN = "postgres://provisr_app:provisr-app-dev@localhost:5432/provisr?sslmode=disable"
 	}
 
-	logger := zerolog.New(os.Stdout).With().Timestamp().Str("service", "workspace-service").Logger()
+	logger := middleware.New("workspace-service")
 
 	db, err := sql.Open("postgres", dbDSN)
 	if err != nil {
@@ -138,9 +139,9 @@ func main() {
 	mux := s.routes()
 	mux.Handle("/health/", health.Handler())
 
-	srv := &http.Server{
+srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      requestLoggingMiddleware(logger, recoveryMiddleware(logger, mux)),
+		Handler:      middleware.RequestLogger(logger, middleware.Recover(logger, mux)),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,
@@ -1557,35 +1558,6 @@ func generateInviteCode() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
-}
-
-func requestLoggingMiddleware(base zerolog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" {
-			requestID = uuid.NewString()
-		}
-		correlationID := r.Header.Get("X-Correlation-ID")
-		if _, err := uuid.Parse(correlationID); err != nil {
-			correlationID = requestID
-		}
-
-		l := base.With().Str("request_id", requestID).Str("correlation_id", correlationID).Logger()
-		ctx := l.WithContext(r.Context())
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-func recoveryMiddleware(log zerolog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				zerolog.Ctx(r.Context()).Error().Interface("panic", rec).Str("path", r.URL.Path).Msg("panic recovered")
-				writeError(w, http.StatusInternalServerError, "internal_error", "unexpected server error")
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

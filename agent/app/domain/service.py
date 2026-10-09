@@ -20,6 +20,9 @@ from app.outputs.models import (
     ToolSummaryEnvelope,
 )
 from app.outputs.validation import validate_envelope
+from app.policy.compliance import validate_manifest_policy
+from app.policy.errors import PolicyRequirementsUnavailableError
+from app.policy.tool import PolicyRequirementsTool
 from app.profiles.errors import ProfileNotAvailable
 from app.profiles.errors import ProfileNotFound as AgentProfileNotFound
 from app.profiles.registry import ProfileSelector
@@ -37,10 +40,12 @@ class AgentService:
         state: StateStore,
         model: LanguageModel,
         profile_selector: ProfileSelector,
+        policy_tool: PolicyRequirementsTool,
     ) -> None:
         self._state = state
         self._model = model
         self._profile_selector = profile_selector
+        self._policy_tool = policy_tool
 
     async def create_session(
         self,
@@ -114,6 +119,8 @@ class AgentService:
             },
         )
 
+        await self._ensure_policy_requirements(session)
+
         try:
             raw_output = await self._model.complete_turn(session, profile)
             validation = validate_envelope(raw_output)
@@ -127,8 +134,30 @@ class AgentService:
                 raise InvalidModelResponseError(
                     "Agent output request_id did not match the active request"
                 )
+            if isinstance(result, ManifestDraftEnvelope):
+                if session.policy_requirements is None:
+                    raise InvalidModelResponseError(
+                        "Manifest draft was produced before policy requirements were loaded"
+                    )
+                violations = validate_manifest_policy(
+                    result.data.manifest,
+                    session.policy_requirements,
+                )
+                if violations:
+                    details = "; ".join(
+                        f"{violation.message} Alternatives: {' '.join(violation.alternatives)}"
+                        for violation in violations
+                    )
+                    raise InvalidModelResponseError(
+                        f"Manifest draft conflicts with policy requirements: {details}"
+                    )
         except InvalidModelResponseError as error:
-            await self._fail_turn(session, str(error))
+            await self._fail_turn(
+                session,
+                code="INVALID_AGENT_OUTPUT",
+                message="Agent output failed structured envelope validation",
+                detail=str(error),
+            )
             raise
 
         completed_at = datetime.now(UTC)
@@ -165,7 +194,42 @@ class AgentService:
         )
         return result
 
-    async def _fail_turn(self, session: AgentSession, validation_error: str) -> None:
+    async def _ensure_policy_requirements(self, session: AgentSession) -> None:
+        if session.policy_requirements_loaded:
+            return
+
+        try:
+            requirements = await self._policy_tool.get_policy_requirements(session)
+        except PolicyRequirementsUnavailableError as error:
+            await self._fail_turn(
+                session,
+                code=error.code,
+                message="Policy requirements could not be loaded; manifest drafting is blocked",
+                detail=str(error),
+            )
+            raise
+
+        session.policy_requirements = requirements
+        session.policy_requirements_loaded = True
+        session.updated_at = datetime.now(UTC)
+        await self._state.save_session(session)
+        await self._append_event(
+            session,
+            "policy.requirements.loaded",
+            {
+                "tool": "get_policy_requirements",
+                "requirements": requirements.model_dump(mode="json"),
+            },
+        )
+
+    async def _fail_turn(
+        self,
+        session: AgentSession,
+        *,
+        code: str,
+        message: str,
+        detail: str,
+    ) -> None:
         session.status = "FAILED"
         session.updated_at = datetime.now(UTC)
         await self._state.save_session(session)
@@ -173,9 +237,9 @@ class AgentService:
             session,
             "turn.failed",
             {
-                "code": "INVALID_AGENT_OUTPUT",
-                "message": "Agent output failed structured envelope validation",
-                "validationError": validation_error,
+                "code": code,
+                "message": message,
+                "detail": detail,
             },
         )
 

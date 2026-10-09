@@ -12,6 +12,12 @@ MANIFEST = {
     "region": "ap-southeast-1",
     "environment": "development",
     "tags": {"managed-by": "provisr"},
+    "security": {"encryption_enabled": True},
+    "backup": {"enabled": True},
+    "policy": {
+        "requirements_loaded": True,
+        "applied_constraints": ["allowed_regions"],
+    },
     "resources": [
         {
             "type": "aws_ec2",

@@ -11,7 +11,7 @@ from app.profiles.registry import InMemoryProfileSelector
 from app.prompts.catalog import build_prompt_registry
 from app.prompts.errors import VersionNotFound
 from app.prompts.models import PromptBundle
-from app.prompts.provisioning import PROVISIONING_AGENT_V1, PROVISIONING_AGENT_V1_1
+from app.prompts.provisioning import PROVISIONING_AGENT_V1, PROVISIONING_AGENT_V1_2
 from app.prompts.registry import InMemoryPromptRegistry
 
 
@@ -113,9 +113,9 @@ def test_serialized_profile_contains_orchestration_fields() -> None:
     payload = profile.model_dump(mode="json")
 
     assert payload["profile_id"] == "provisioning"
-    assert payload["system_prompt"] == PROVISIONING_AGENT_V1_1.content
-    assert payload["allowed_tools"] == list(PROVISIONING_AGENT_V1_1.tool_allowlist)
-    assert payload["required_first_calls"] == list(PROVISIONING_AGENT_V1_1.required_first_calls)
-    assert payload["safety_rules"] == list(PROVISIONING_AGENT_V1_1.safety_rules)
-    assert payload["prompt_version"] == "1.1.0"
-    assert payload["prompt_hash"] == PROVISIONING_AGENT_V1_1.content_hash
+    assert payload["system_prompt"] == PROVISIONING_AGENT_V1_2.content
+    assert payload["allowed_tools"] == list(PROVISIONING_AGENT_V1_2.tool_allowlist)
+    assert payload["required_first_calls"] == list(PROVISIONING_AGENT_V1_2.required_first_calls)
+    assert payload["safety_rules"] == list(PROVISIONING_AGENT_V1_2.safety_rules)
+    assert payload["prompt_version"] == "1.2.0"
+    assert payload["prompt_hash"] == PROVISIONING_AGENT_V1_2.content_hash

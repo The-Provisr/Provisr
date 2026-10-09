@@ -88,7 +88,11 @@ class ClaudeModel:
                 model=self._model,
                 max_tokens=profile.llm_config.max_tokens,
                 temperature=profile.llm_config.temperature,
-                system=render_runtime_system_prompt(profile, session.request_id),
+                system=render_runtime_system_prompt(
+                    profile,
+                    session.request_id,
+                    session.policy_requirements,
+                ),
                 messages=messages,
             )
         except ModelNotConfiguredError:

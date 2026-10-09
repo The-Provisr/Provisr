@@ -392,6 +392,15 @@ export function LockIcon(props: IconProps) {
   );
 }
 
+export function UnlockIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect height="11" rx="2" width="18" x="3" y="11" />
+      <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+    </IconBase>
+  );
+}
+
 export function ExternalLinkIcon(props: IconProps) {
   return (
     <IconBase {...props}>

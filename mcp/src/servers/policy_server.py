@@ -10,10 +10,10 @@ import asyncpg
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 
-
 from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
+from src.servers.manifest_validation import router as manifest_router
 
 
 @dataclass(slots=True)
@@ -69,6 +69,7 @@ def create_app(
         lifespan=lifespan,
     )
     install_context_error_handler(application)
+    application.include_router(manifest_router)
 
     @application.get("/health/live")
     async def live() -> dict[str, str]:

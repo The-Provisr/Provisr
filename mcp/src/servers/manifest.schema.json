@@ -1,0 +1,281 @@
+{
+  "$defs": {
+    "BackupConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "BackupConfiguration",
+      "type": "object"
+    },
+    "Ec2Resource": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "aws_ec2",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "instance_type": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Instance Type",
+          "type": "string"
+        },
+        "image": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Image",
+          "type": "string"
+        },
+        "count": {
+          "default": 1,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "instance_type",
+        "image"
+      ],
+      "title": "Ec2Resource",
+      "type": "object"
+    },
+    "PolicyApplication": {
+      "additionalProperties": false,
+      "properties": {
+        "requirements_loaded": {
+          "const": true,
+          "title": "Requirements Loaded",
+          "type": "boolean"
+        },
+        "applied_constraints": {
+          "items": {
+            "$ref": "#/$defs/PolicyConstraintName"
+          },
+          "title": "Applied Constraints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requirements_loaded",
+        "applied_constraints"
+      ],
+      "title": "PolicyApplication",
+      "type": "object"
+    },
+    "PolicyConstraintName": {
+      "enum": [
+        "allowed_regions",
+        "max_budget",
+        "required_tags",
+        "prohibited_resource_types",
+        "required_encryption",
+        "required_backup"
+      ],
+      "type": "string"
+    },
+    "RdsResource": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "aws_rds",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "engine": {
+          "enum": [
+            "postgres",
+            "mysql"
+          ],
+          "title": "Engine",
+          "type": "string"
+        },
+        "instance_class": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Instance Class",
+          "type": "string"
+        },
+        "allocated_storage_gb": {
+          "maximum": 16384,
+          "minimum": 20,
+          "title": "Allocated Storage Gb",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "engine",
+        "instance_class",
+        "allocated_storage_gb"
+      ],
+      "title": "RdsResource",
+      "type": "object"
+    },
+    "S3Resource": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "aws_s3",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 63,
+          "minLength": 3,
+          "pattern": "^[a-z0-9][a-z0-9.-]+[a-z0-9]$",
+          "title": "Name",
+          "type": "string"
+        },
+        "versioning": {
+          "default": true,
+          "title": "Versioning",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "name"
+      ],
+      "title": "S3Resource",
+      "type": "object"
+    },
+    "SecurityConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "encryption_enabled": {
+          "title": "Encryption Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "encryption_enabled"
+      ],
+      "title": "SecurityConfiguration",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "provider": {
+      "const": "aws",
+      "default": "aws",
+      "title": "Provider",
+      "type": "string"
+    },
+    "region": {
+      "maxLength": 32,
+      "minLength": 3,
+      "title": "Region",
+      "type": "string"
+    },
+    "environment": {
+      "enum": [
+        "development",
+        "staging",
+        "production",
+        "sandbox"
+      ],
+      "title": "Environment",
+      "type": "string"
+    },
+    "monthly_budget_usd": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Monthly Budget Usd"
+    },
+    "tags": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "object"
+    },
+    "security": {
+      "$ref": "#/$defs/SecurityConfiguration"
+    },
+    "backup": {
+      "$ref": "#/$defs/BackupConfiguration"
+    },
+    "policy": {
+      "$ref": "#/$defs/PolicyApplication"
+    },
+    "resources": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "aws_ec2": "#/$defs/Ec2Resource",
+            "aws_rds": "#/$defs/RdsResource",
+            "aws_s3": "#/$defs/S3Resource"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Ec2Resource"
+          },
+          {
+            "$ref": "#/$defs/RdsResource"
+          },
+          {
+            "$ref": "#/$defs/S3Resource"
+          }
+        ]
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Resources",
+      "type": "array"
+    }
+  },
+  "required": [
+    "region",
+    "environment",
+    "security",
+    "backup",
+    "policy",
+    "resources"
+  ],
+  "title": "ResourceManifest",
+  "type": "object"
+}

@@ -16,6 +16,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { ChatMessage } from "@/components/ui/chat-message";
 import { NavigationRail } from "@/components/ui/navigation-rail";
+import { RegistryProvider } from "@/components/registry/RegistryProvider";
 
 const progressSteps = [
   "Request",
@@ -41,6 +42,7 @@ export default function ChatPage() {
   const [activeTab, setActiveTab] = useState(drawerTabs[0]);
 
   return (
+    <RegistryProvider>
     <main className="flex h-screen overflow-hidden bg-gray-50 font-sans text-gray-800">
       <NavigationRail />
       <ChatSidebar />
@@ -99,6 +101,40 @@ export default function ChatPage() {
                     result:
                       "3/3 policies satisfied. Public ALB requires workspace approval.",
                   },
+                  components: [
+                    {
+                      type: "cost_estimate",
+                      version: "1.0",
+                      requestId: "run-demo-001",
+                      data: {
+                        currency: "USD",
+                        monthlyTotalUsd: 482,
+                        breakdown: [
+                          {
+                            category: "Compute",
+                            serviceName: "ECS Fargate tasks",
+                            costUsd: 214,
+                          },
+                          {
+                            category: "Database",
+                            serviceName: "RDS Postgres",
+                            costUsd: 168,
+                          },
+                          {
+                            category: "Networking",
+                            serviceName: "Application Load Balancer",
+                            costUsd: 63,
+                          },
+                          {
+                            category: "Monitoring",
+                            serviceName: "CloudWatch",
+                            costUsd: 37,
+                          },
+                        ],
+                        deltaPercentage: 12,
+                      },
+                    },
+                  ],
                 }}
               />
 
@@ -233,5 +269,6 @@ export default function ChatPage() {
         ) : null}
       </section>
     </main>
+    </RegistryProvider>
   );
 }

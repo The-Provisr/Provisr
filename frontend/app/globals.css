@@ -198,6 +198,9 @@ body {
 .text-gray-800 { color: #1f2937; }
 .text-gray-900 { color: #111827; }
 .text-blue-500 { color: #3b82f6; }
+.text-blue-900 { color: #1e3a8a; }
+.text-blue-950 { color: #172554; }
+.text-red-900 { color: #7f1d1d; }
 .text-orange-500 { color: #f97316; }
 .text-purple-500 { color: #a855f7; }
 .text-green-700 { color: #15803d; }
@@ -278,7 +281,9 @@ body {
 .text-gray-400,
 .text-gray-300 { color: var(--provisr-ink-muted); }
 .text-blue-500,
-.text-blue-700 { color: var(--provisr-accent-blue); }
+.text-blue-700,
+.text-blue-900,
+.text-blue-950 { color: var(--provisr-accent-blue); }
 .text-amber-700,
 .text-amber-900 { color: var(--provisr-warning-ink); }
 .text-green-700 { color: var(--provisr-success-ink); }

@@ -82,8 +82,10 @@ describe("ChatPersistenceService", () => {
     expect(executedQueries[3]).toContain("SELECT id, provisioning_run_id, request_fingerprint FROM provisr_state.chat_turns");
     expect(executedQueries[4]).toContain("provisr_state.chat_sessions");
     expect(executedQueries[5]).toContain("INSERT INTO provisr_state.provisioning_runs");
-    expect(executedQueries[6]).toContain("INSERT INTO provisr_state.chat_turns");
-    expect(executedQueries[7]).toContain("INSERT INTO provisr_state.chat_messages");
+    expect(executedQueries[6]).toContain("provisr_audit.chain");
+    expect(executedQueries[8]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[9]).toContain("INSERT INTO provisr_state.chat_turns");
+    expect(executedQueries[10]).toContain("INSERT INTO provisr_state.chat_messages");
     expect(events.append).toHaveBeenCalledTimes(1);
     expect(executedQueries[executedQueries.length - 1]).toBe("COMMIT");
     expect(poolClient.release).toHaveBeenCalledTimes(1);

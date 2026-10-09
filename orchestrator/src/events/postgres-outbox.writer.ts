@@ -4,6 +4,7 @@ import { StateChangedEvent } from "../state-machine/workflow-transition.service"
 /** Inserts a StateChangedEvent using the caller's open transaction. */
 export class PostgresOutboxWriter {
   async appendStateChangedOutboxEvent(client: SqlClient, event: StateChangedEvent): Promise<void> {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('provisr_sse'), hashtext($1))", [event.workspaceId]);
     await client.query(
       `INSERT INTO provisr_events.sse_events
          (workspace_id, event_id, event_type, correlation_id, payload)

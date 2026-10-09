@@ -1,19 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const regionSelectorSchema = z.object({
-  provider: z.enum(["aws", "azure", "gcp"]),
-  selectedRegion: z.string(),
-  availableRegions: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      latencyMs: z.number().optional(),
-      complianceCompliant: z.boolean().optional(),
-    }),
-  ),
-  reasoning: z.string().optional(),
-});
+import { regionSelectorSchema } from "@provisr/shared-contracts";
+export { regionSelectorSchema } from "@provisr/shared-contracts";
 
 export type RegionSelectorData = z.infer<typeof regionSelectorSchema>;
 

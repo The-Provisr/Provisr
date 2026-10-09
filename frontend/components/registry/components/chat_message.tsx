@@ -1,21 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const chatMessageSchema = z.object({
-  id: z.string(),
-  role: z.enum(["user", "assistant", "system"]),
-  content: z.string(),
-  senderName: z.string().optional(),
-  createdAt: z.string().optional(),
-  status: z.enum(["sending", "sent", "complete", "failed"]).optional(),
-  toolSummary: z
-    .object({
-      toolName: z.string(),
-      durationMs: z.number().optional(),
-      result: z.string().optional(),
-    })
-    .optional(),
-});
+import { chatMessageSchema } from "@provisr/shared-contracts";
+export { chatMessageSchema } from "@provisr/shared-contracts";
 
 export type ChatMessageData = z.infer<typeof chatMessageSchema>;
 

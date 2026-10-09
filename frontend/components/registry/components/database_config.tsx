@@ -1,15 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const databaseConfigSchema = z.object({
-  engine: z.string(),
-  version: z.string().optional(),
-  instanceClass: z.string().optional(),
-  allocatedStorageGb: z.number().optional(),
-  multiAz: z.boolean().default(false),
-  storageType: z.string().optional(),
-  backupRetentionDays: z.number().optional(),
-});
+import { databaseConfigSchema } from "@provisr/shared-contracts";
+export { databaseConfigSchema } from "@provisr/shared-contracts";
 
 export type DatabaseConfigData = z.infer<typeof databaseConfigSchema>;
 

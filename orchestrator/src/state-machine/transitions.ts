@@ -23,6 +23,7 @@ export interface TransitionConditions {
   clarificationCompleted: boolean;
   manifestCreated: boolean;
   manifestValidationPassed: boolean;
+  manifestConfirmed?: boolean;
   iacGenerated: boolean;
   planCreated: boolean;
   policyCheckPassed: boolean;
@@ -38,6 +39,7 @@ export const EMPTY_TRANSITION_CONDITIONS: TransitionConditions = {
   clarificationCompleted: false,
   manifestCreated: false,
   manifestValidationPassed: false,
+  manifestConfirmed: false,
   iacGenerated: false,
   planCreated: false,
   policyCheckPassed: false,
@@ -102,6 +104,7 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<WorkflowState, readonly Transi
     ...EXIT_TO_FAILURE_OR_CANCELLATION,
   ],
   MANIFEST_CREATING: [
+    { to: "CLARIFYING", onEntry: "REQUEST_CLARIFICATION", requiredConditions: ["cloudContextLoaded"] },
     {
       to: "MANIFEST_VALIDATING",
       onEntry: "VALIDATE_MANIFEST",
@@ -110,10 +113,11 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<WorkflowState, readonly Transi
     ...EXIT_TO_FAILURE_OR_CANCELLATION,
   ],
   MANIFEST_VALIDATING: [
+    { to: "MANIFEST_CREATING", onEntry: "CREATE_MANIFEST", requiredConditions: ["cloudContextLoaded"] },
     {
       to: "IAC_GENERATING",
       onEntry: "GENERATE_IAC",
-      requiredConditions: ["manifestValidationPassed"],
+      requiredConditions: ["manifestValidationPassed", "manifestConfirmed"],
     },
     ...EXIT_TO_FAILURE_OR_CANCELLATION,
   ],
@@ -155,6 +159,7 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<WorkflowState, readonly Transi
     ...EXIT_TO_FAILURE_OR_CANCELLATION,
   ],
   APPROVING: [
+    { to: "MANIFEST_CREATING", onEntry: "CREATE_MANIFEST", requiredConditions: ["cloudContextLoaded"] },
     {
       to: "EXECUTING",
       onEntry: "EXECUTE_IAC",

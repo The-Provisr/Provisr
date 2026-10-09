@@ -1,20 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const computePlanSchema = z.object({
-  service: z.string(),
-  instanceType: z.string().optional(),
-  replicaCount: z.number().default(1),
-  autoScaling: z
-    .object({
-      min: z.number(),
-      max: z.number(),
-      targetCpuUtilization: z.number().optional(),
-    })
-    .optional(),
-  os: z.string().optional(),
-  architecture: z.enum(["x86_64", "arm64"]).optional(),
-});
+import { computePlanSchema } from "@provisr/shared-contracts";
+export { computePlanSchema } from "@provisr/shared-contracts";
 
 export type ComputePlanData = z.infer<typeof computePlanSchema>;
 

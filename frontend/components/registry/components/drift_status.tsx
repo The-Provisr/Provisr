@@ -1,22 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const driftStatusSchema = z.object({
-  hasDrift: z.boolean(),
-  lastCheckedAt: z.string(),
-  driftedResources: z
-    .array(
-      z.object({
-        resourceId: z.string(),
-        resourceName: z.string().optional(),
-        resourceType: z.string(),
-        property: z.string(),
-        expectedValue: z.string(),
-        actualValue: z.string(),
-      }),
-    )
-    .optional(),
-});
+import { driftStatusSchema } from "@provisr/shared-contracts";
+export { driftStatusSchema } from "@provisr/shared-contracts";
 
 export type DriftStatusData = z.infer<typeof driftStatusSchema>;
 

@@ -1,19 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const databaseEngineSelectorSchema = z.object({
-  recommendedEngine: z.string(),
-  reasoning: z.string(),
-  availableEngines: z.array(
-    z.object({
-      engine: z.string(),
-      displayName: z.string(),
-      bestFor: z.string(),
-      isRecommended: z.boolean().optional(),
-    }),
-  ),
-  selectedEngine: z.string().optional(),
-});
+import { databaseEngineSelectorSchema } from "@provisr/shared-contracts";
+export { databaseEngineSelectorSchema } from "@provisr/shared-contracts";
 
 export type DatabaseEngineSelectorData = z.infer<typeof databaseEngineSelectorSchema>;
 

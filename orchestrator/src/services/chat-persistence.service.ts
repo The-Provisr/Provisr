@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { ConflictError, NotFoundError } from "../common/errors/typed-errors";
 import { DbService } from "../db/db.service";
 import { ChatEventsService } from "./chat-events.service";
+import { AuditService } from "./audit.service";
 
 type Queryable = { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> };
 
@@ -160,6 +161,9 @@ export class ChatPersistenceService {
          VALUES ($1, $2, $3, 'RECEIVED', $4, $5, $6) RETURNING id`,
         [params.sessionId, params.workspaceId, params.userId, params.prompt, hash({ ...params, fingerprint }), correlationId],
       );
+      await new AuditService(this.db).append({ workspaceId: params.workspaceId, eventType: "run_created",
+        actorId: params.userId, actorType: "user", resourceType: "provisioning_run", resourceId: run.rows[0]!.id,
+        payload: { sessionId: params.sessionId }, correlationId }, client);
       const turn = await client.query<{ id: string }>(
         `INSERT INTO provisr_state.chat_turns
          (session_id, workspace_id, requester_id, client_message_id, idempotency_key, request_fingerprint, input, correlation_id, provisioning_run_id)

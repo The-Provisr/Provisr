@@ -1,14 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const storageCardSchema = z.object({
-  bucketName: z.string(),
-  storageClass: z.string().optional(),
-  versioning: z.boolean().default(false),
-  encryption: z.string().optional(),
-  publicAccessBlocked: z.boolean().default(true),
-  lifecycleRulesCount: z.number().optional(),
-});
+import { storageCardSchema } from "@provisr/shared-contracts";
+export { storageCardSchema } from "@provisr/shared-contracts";
 
 export type StorageCardData = z.infer<typeof storageCardSchema>;
 

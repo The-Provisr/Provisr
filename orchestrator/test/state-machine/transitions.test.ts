@@ -17,6 +17,7 @@ const allConditions: TransitionConditions = {
   clarificationCompleted: true,
   manifestCreated: true,
   manifestValidationPassed: true,
+  manifestConfirmed: true,
   iacGenerated: true,
   planCreated: true,
   policyCheckPassed: true,

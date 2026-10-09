@@ -32,6 +32,7 @@ export class HttpPolicyRequirementsClient implements PolicyRequirementsClient {
   async getPolicyRequirements(workspaceId: string): Promise<PolicyRequirements> {
     const response = await this.fetcher(
       `${this.baseUrl.replace(/\/$/, "")}/workspaces/${encodeURIComponent(workspaceId)}/policy-requirements`,
+      { signal: AbortSignal.timeout(15_000) },
     );
     if (!response.ok) {
       throw new PolicyServiceClientError(`Policy service returned ${response.status}`);

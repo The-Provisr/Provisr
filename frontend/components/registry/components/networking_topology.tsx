@@ -1,27 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const networkingTopologySchema = z.object({
-  vpcCidr: z.string(),
-  subnets: z.array(
-    z.object({
-      name: z.string(),
-      cidr: z.string(),
-      type: z.enum(["public", "private", "isolated"]),
-      zone: z.string().optional(),
-    }),
-  ),
-  natGateway: z.boolean().optional(),
-  internetGateway: z.boolean().optional(),
-  securityGroups: z
-    .array(
-      z.object({
-        name: z.string(),
-        rulesCount: z.number(),
-      }),
-    )
-    .optional(),
-});
+import { networkingTopologySchema } from "@provisr/shared-contracts";
+export { networkingTopologySchema } from "@provisr/shared-contracts";
 
 export type NetworkingTopologyData = z.infer<typeof networkingTopologySchema>;
 

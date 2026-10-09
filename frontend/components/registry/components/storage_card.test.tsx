@@ -92,7 +92,9 @@ describe("StorageCardComponent (public access)", () => {
     expect(badge.className).toContain("bg-red-50");
 
     const alert = screen.getByTestId("public-access-alert");
-    expect(alert).toHaveTextContent("reachable from the public internet");
+    expect(alert).toHaveTextContent("Public access blocking is disabled.");
+    expect(alert).toHaveTextContent("may be publicly reachable");
+    expect(alert).toHaveTextContent("Check its access policy before approval.");
   });
 });
 
@@ -102,11 +104,13 @@ describe("isEncryptionEnabled", () => {
     expect(isEncryptionEnabled("SSE-S3")).toBe(true);
     expect(isEncryptionEnabled("aws:kms")).toBe(true);
     expect(isEncryptionEnabled("AES256")).toBe(true);
+    expect(isEncryptionEnabled("  AWS:KMS ")).toBe(true);
   });
 
   it("treats missing or disabling values as unencrypted", () => {
     expect(isEncryptionEnabled(undefined)).toBe(false);
     expect(isEncryptionEnabled("")).toBe(false);
+    expect(isEncryptionEnabled(" \t\n ")).toBe(false);
     expect(isEncryptionEnabled("  NONE ")).toBe(false);
     expect(isEncryptionEnabled("disabled")).toBe(false);
     expect(isEncryptionEnabled("plaintext")).toBe(false);
@@ -117,20 +121,20 @@ describe("StorageCardComponent (states)", () => {
   it("renders a loading skeleton when state=loading", () => {
     render(<StorageCardComponent data={fullData} state="loading" />);
 
-    expect(screen.getByTestId("storage-card-skeleton")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading storage resource" })).toBeInTheDocument();
     expect(screen.queryByText("prod-assets-bucket")).not.toBeInTheDocument();
   });
 
   it("renders the loading skeleton when data is missing", () => {
     render(<StorageCardComponent />);
 
-    expect(screen.getByTestId("storage-card-skeleton")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading storage resource" })).toBeInTheDocument();
   });
 
   it("renders the error fallback when state=error", () => {
     render(<StorageCardComponent data={fullData} state="error" />);
 
-    expect(screen.getByTestId("storage-card-error")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Storage resource unavailable");
     expect(screen.getByText("Storage resource unavailable")).toBeInTheDocument();
   });
 

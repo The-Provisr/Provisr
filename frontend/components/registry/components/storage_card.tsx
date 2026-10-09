@@ -19,7 +19,8 @@ const UNENCRYPTED_VALUES = ["none", "disabled", "off", "unencrypted", "plaintext
 
 export function isEncryptionEnabled(encryption?: string): boolean {
   if (!encryption) return false;
-  return !UNENCRYPTED_VALUES.includes(encryption.trim().toLowerCase());
+  const normalizedEncryption = encryption.trim().toLowerCase();
+  return normalizedEncryption !== "" && !UNENCRYPTED_VALUES.includes(normalizedEncryption);
 }
 
 function Skeleton({ className }: { className: string }) {
@@ -30,6 +31,8 @@ function StorageCardSkeleton() {
   return (
     <div
       data-testid="storage-card-skeleton"
+      role="status"
+      aria-label="Loading storage resource"
       className="rounded-xl border border-gray-200 bg-white p-5 shadow-xs"
     >
       <div className="flex items-center justify-between">
@@ -53,6 +56,7 @@ function StorageCardError({ errorMessage }: { errorMessage?: string }) {
   return (
     <div
       data-testid="storage-card-error"
+      role="alert"
       className="rounded-xl border border-red-200 bg-red-50 p-5 text-red-900"
     >
       <p className="text-sm font-semibold">Storage resource unavailable</p>
@@ -143,8 +147,8 @@ export function StorageCardComponent({
         >
           <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
           <p className="text-xs leading-relaxed">
-            <span className="font-semibold">Public access is allowed.</span> This bucket or storage
-            account is reachable from the public internet. Block public access before approving.
+            <span className="font-semibold">Public access blocking is disabled.</span> This bucket or
+            storage account may be publicly reachable. Check its access policy before approval.
           </p>
         </div>
       ) : null}

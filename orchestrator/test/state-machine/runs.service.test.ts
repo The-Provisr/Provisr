@@ -129,8 +129,9 @@ describe("RunsService", () => {
     expect(result.id).toBe(runId);
     expect(executedQueries[0]).toBe("BEGIN");
     expect(executedQueries[1]).toContain("INSERT INTO provisr_state.provisioning_runs");
-    expect(executedQueries[2]).toContain("INSERT INTO provisr_audit.audit_events");
-    expect(executedQueries[3]).toBe("COMMIT");
+    expect(executedQueries[2]).toContain("pg_advisory_xact_lock");
+    expect(executedQueries[4]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[5]).toBe("COMMIT");
     expect(poolClient.release).toHaveBeenCalledTimes(1);
   });
 
@@ -162,8 +163,9 @@ describe("RunsService", () => {
 
     expect(executedQueries[0]).toBe("BEGIN");
     expect(executedQueries[1]).toContain("INSERT INTO provisr_state.provisioning_runs");
-    expect(executedQueries[2]).toContain("INSERT INTO provisr_audit.audit_events");
-    expect(executedQueries[3]).toBe("ROLLBACK");
+    expect(executedQueries[2]).toContain("pg_advisory_xact_lock");
+    expect(executedQueries[4]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[5]).toBe("ROLLBACK");
     expect(poolClient.release).toHaveBeenCalledTimes(1);
   });
 
@@ -202,9 +204,10 @@ describe("RunsService", () => {
     expect(executedQueries[0]).toBe("BEGIN");
     expect(executedQueries[1]).toContain("FOR UPDATE");
     expect(executedQueries[2]).toContain("UPDATE provisr_state.provisioning_runs");
-    expect(executedQueries[3]).toContain("INSERT INTO provisr_audit.audit_events");
-    expect(executedQueries[4]).toContain("INSERT INTO provisr_events.events");
-    expect(executedQueries[5]).toBe("COMMIT");
+    expect(executedQueries[3]).toContain("pg_advisory_xact_lock");
+    expect(executedQueries[5]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[6]).toContain("INSERT INTO provisr_events.sse_events");
+    expect(executedQueries[7]).toBe("COMMIT");
     expect(poolClient.release).toHaveBeenCalledTimes(1);
   });
 
@@ -301,7 +304,7 @@ describe("RunsService", () => {
         if (sql.includes("INSERT INTO provisr_audit.audit_events")) {
           return { rows: [] };
         }
-        if (sql.includes("INSERT INTO provisr_events.events")) {
+        if (sql.includes("INSERT INTO provisr_events.sse_events")) {
           throw new Error("Outbox write failure");
         }
         return { rows: [] };
@@ -323,9 +326,10 @@ describe("RunsService", () => {
     expect(executedQueries[0]).toBe("BEGIN");
     expect(executedQueries[1]).toContain("FOR UPDATE");
     expect(executedQueries[2]).toContain("UPDATE provisr_state.provisioning_runs");
-    expect(executedQueries[3]).toContain("INSERT INTO provisr_audit.audit_events");
-    expect(executedQueries[4]).toContain("INSERT INTO provisr_events.events");
-    expect(executedQueries[5]).toBe("ROLLBACK");
+    expect(executedQueries[3]).toContain("pg_advisory_xact_lock");
+    expect(executedQueries[5]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[6]).toContain("INSERT INTO provisr_events.sse_events");
+    expect(executedQueries[7]).toBe("ROLLBACK");
     expect(poolClient.release).toHaveBeenCalledTimes(1);
   });
 });

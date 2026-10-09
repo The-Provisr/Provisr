@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { DbService } from "../db/db.service";
+import { AuditService } from "../services/audit.service";
 
 export const ALL_RUN_STATES = [
   "received",
@@ -63,7 +64,7 @@ export interface ProvisioningRun {
 
 @Injectable()
 export class RunsService {
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService, private readonly audit = new AuditService(db)) {}
 
   async createRun(sessionId: string, workspaceId: string, requesterId: string, prompt: string): Promise<ProvisioningRun> {
     const correlationId = randomUUID();
@@ -88,11 +89,9 @@ export class RunsService {
       const run = res.rows[0];
       if (!run) throw new ConflictException("Failed to create run");
 
-      await client.query(
-        `INSERT INTO provisr_audit.audit_events (workspace_id, actor_id, actor_type, action, resource_type, resource_id, event_data) 
-         VALUES ($1, $2, 'user', 'run_created', 'provisioning_run', $3, $4)`,
-        [workspaceId, requesterId, run.id, JSON.stringify({ prompt, sessionId })]
-      );
+      await this.audit.append({ workspaceId, actorId: requesterId, actorType: "user",
+        eventType: "run_created", resourceType: "provisioning_run", resourceId: run.id,
+        payload: { prompt, sessionId }, correlationId }, client);
 
       await client.query("COMMIT");
       return run;
@@ -212,17 +211,16 @@ export class RunsService {
       }
 
       // Audit transition
-      await client.query(
-        `INSERT INTO provisr_audit.audit_events (workspace_id, actor_id, actor_type, action, resource_type, resource_id, event_data) 
-         VALUES ($1, $2, 'user', 'run_transitioned', 'provisioning_run', $3, $4)`,
-        [workspaceId, actorId, run.id, JSON.stringify({ state: run.state, stateVersion: run.stateVersion })]
-      );
+      await this.audit.append({ workspaceId, actorId, actorType: "user",
+        eventType: "state_transition", resourceType: "provisioning_run", resourceId: run.id,
+        payload: { from: currentRun.state, to: run.state, stateVersion: run.stateVersion },
+        correlationId: run.correlationId }, client);
       
       // Outbox event
       await client.query(
-        `INSERT INTO provisr_events.events (id, aggregate_type, aggregate_id, event_type, payload)
-         VALUES ($1, 'provisioning_run', $2, 'StateChangedEvent', $3)`,
-        [randomUUID(), run.id, JSON.stringify({ state: run.state, version: run.stateVersion })]
+        `INSERT INTO provisr_events.sse_events (workspace_id, event_id, event_type, correlation_id, payload)
+         VALUES ($1, $2, 'StateChangedEvent', $3, $4)`,
+        [workspaceId, randomUUID(), run.correlationId, JSON.stringify({ run_id: run.id, from: currentRun.state, to: run.state, state_version: run.stateVersion })]
       );
 
       await client.query("COMMIT");

@@ -6,7 +6,7 @@ type Queryable = { query: (text: string, values?: unknown[]) => Promise<{ rows: 
 
 export interface AuditAppendParams {
   workspaceId: string;
-  eventType: "prompt_received" | "run_created" | "tool_call" | "manifest_created" | "error";
+  eventType: "prompt_received" | "run_created" | "state_transition" | "confirmation" | "tool_call" | "manifest_created" | "error";
   actorId: string;
   actorType: "user" | "agent" | "system";
   resourceType: string;
@@ -42,8 +42,10 @@ export class AuditService {
   }
 
   private async executeAppend(params: AuditAppendParams, client: Queryable): Promise<void> {
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('provisr_audit_chain'))");
-    const previous = await client.query("SELECT hash FROM provisr_audit.audit_events ORDER BY seq DESC LIMIT 1 FOR UPDATE");
+    // Use the same global chain lock as every Go audit writer. SELECT FOR
+    // UPDATE is unnecessary and requires UPDATE privileges on append-only data.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('provisr_audit.chain'), 0)");
+    const previous = await client.query("SELECT hash FROM provisr_audit.audit_events ORDER BY seq DESC LIMIT 1");
     const previousHash = (previous.rows[0]?.hash as string) ?? null;
     const payload = JSON.stringify(params.payload);
     const hash = createHash("sha256").update(`${previousHash ?? ""}|${params.workspaceId}|${params.eventType}|${params.resourceId}|${payload}|${params.correlationId}`).digest("hex");

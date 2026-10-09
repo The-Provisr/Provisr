@@ -86,7 +86,7 @@ export class ChatPersistenceService {
       await this.assertSessionOwner(id, workspaceId, userId, client);
       const runs = await client.query<{ state: string }>(
         `SELECT state FROM provisr_state.provisioning_runs
-         WHERE session_id = $1 AND workspace_id = $2 AND state NOT IN ('completed', 'failed', 'cancelled', 'rejected')`,
+         WHERE session_id = $1 AND workspace_id = $2 AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`,
         [id, workspaceId],
       );
       if (runs.rows.length > 0) {
@@ -157,7 +157,7 @@ export class ChatPersistenceService {
       const run = await client.query<{ id: string }>(
         `INSERT INTO provisr_state.provisioning_runs
          (session_id, workspace_id, requester_id, state, prompt, idempotency_key, correlation_id)
-         VALUES ($1, $2, $3, 'received', $4, $5, $6) RETURNING id`,
+         VALUES ($1, $2, $3, 'RECEIVED', $4, $5, $6) RETURNING id`,
         [params.sessionId, params.workspaceId, params.userId, params.prompt, hash({ ...params, fingerprint }), correlationId],
       );
       const turn = await client.query<{ id: string }>(

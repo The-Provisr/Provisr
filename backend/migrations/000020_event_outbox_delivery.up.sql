@@ -24,7 +24,10 @@ CREATE INDEX idx_sse_events_publishable
     WHERE status = 'pending';
 CREATE INDEX idx_sse_events_lease_recovery
     ON provisr_events.sse_events(locked_until, created_at)
-    WHERE status = 'publishing';
+    -- Newly added enum values cannot be used until the migration commits.
+    -- Every publishing lease has a non-null deadline, which also supports
+    -- the locked_until <= now() recovery predicate.
+    WHERE locked_until IS NOT NULL;
 
 GRANT USAGE ON SCHEMA provisr_events TO provisr_app;
 GRANT SELECT, INSERT, UPDATE ON provisr_events.sse_events TO provisr_app;

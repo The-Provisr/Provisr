@@ -73,8 +73,19 @@ class ManifestDraftData(OutputModel):
     manifest: ResourceManifest
 
 
+class ClarificationAnswerField(OutputModel):
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    type: Literal["string", "number", "boolean", "strings"]
+    options: tuple[str, ...] | None = None
+
+
 class ClarificationQuestionData(OutputModel):
     question: str = Field(min_length=1, max_length=10000)
+    fields: tuple[ClarificationAnswerField, ...] = Field(
+        default=(ClarificationAnswerField(name="answer", type="string"),),
+        min_length=1,
+        max_length=20,
+    )
 
 
 class ToolSummaryData(OutputModel):

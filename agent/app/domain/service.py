@@ -7,6 +7,7 @@ from app.domain.models import (
     AgentEventType,
     AgentSession,
     ConversationMessage,
+    ExecutionContext,
 )
 from app.integrations.anthropic_model import LanguageModel
 from app.integrations.state import StateStore
@@ -54,7 +55,10 @@ class AgentService:
         request_id: UUID,
         profile_id: str = "provisioning",
         prompt_version: str | None = None,
+        execution_context: ExecutionContext | None = None,
     ) -> AgentSession:
+        if execution_context and str(execution_context.workspace_id) != organization_id:
+            raise ValueError("Execution workspace must match organization_id")
         profile = self._profile_selector.select_profile(profile_id, prompt_version)
         prompt = profile.prompt
         now = datetime.now(UTC)
@@ -69,6 +73,9 @@ class AgentService:
             prompt_hash=prompt.content_hash,
             temperature=profile.llm_config.temperature,
             max_tokens=profile.llm_config.max_tokens,
+            execution_context=execution_context,
+            policy_requirements=(execution_context.policy_context if execution_context else None),
+            policy_requirements_loaded=execution_context is not None,
             created_at=now,
             updated_at=now,
         )

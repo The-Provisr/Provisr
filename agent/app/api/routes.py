@@ -1,7 +1,8 @@
+import hmac
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import AgentServiceDependency, StateStoreDependency
@@ -14,6 +15,14 @@ from app.api.schemas import (
 from app.domain.models import AgentEvent
 
 router = APIRouter()
+
+
+def require_orchestrator(request: Request) -> None:
+    token = request.app.state.settings.orchestrator_service_token
+    if not token or not hmac.compare_digest(
+        request.headers.get("authorization", ""), f"Bearer {token}"
+    ):
+        raise HTTPException(status_code=401, detail="Orchestration authorization required")
 
 
 @router.get("/health/live", tags=["health"])
@@ -35,12 +44,16 @@ async def readiness(state: StateStoreDependency) -> dict[str, str]:
 async def create_session(
     body: CreateSessionRequest,
     service: AgentServiceDependency,
+    request: Request,
 ) -> CreateSessionResponse:
+    if body.execution_context is not None:
+        require_orchestrator(request)
     session = await service.create_session(
         organization_id=body.organization_id,
         request_id=body.request_id,
         profile_id=body.profile_id,
         prompt_version=body.prompt_version,
+        execution_context=body.execution_context,
     )
     return CreateSessionResponse(session=session)
 
@@ -54,7 +67,12 @@ async def run_turn(
     session_id: str,
     body: RunTurnRequest,
     service: AgentServiceDependency,
+    state: StateStoreDependency,
+    request: Request,
 ) -> RunTurnResponse:
+    session = await state.get_session(session_id)
+    if session.execution_context is not None:
+        require_orchestrator(request)
     result = await service.run_turn(session_id=session_id, message=body.message)
     return RunTurnResponse(result=result)
 
@@ -63,8 +81,12 @@ async def run_turn(
 async def stream_events(
     session_id: str,
     state: StateStoreDependency,
+    request: Request,
     after_sequence: int = Query(default=0, ge=0),
 ) -> StreamingResponse:
+    session = await state.get_session(session_id)
+    if session.execution_context is not None:
+        require_orchestrator(request)
     events = await state.list_events(session_id, after_sequence)
     return StreamingResponse(
         _encode_events(events),

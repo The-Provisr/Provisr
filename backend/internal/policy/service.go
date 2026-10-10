@@ -116,12 +116,13 @@ type updateRuleParametersRequest struct {
 // --- Server ---
 
 type server struct {
-	db  *sql.DB
-	log zerolog.Logger
+	db     *sql.DB
+	log    zerolog.Logger
+	engine *Engine
 }
 
 func New(db *sql.DB, log zerolog.Logger) http.Handler {
-	s := &server{db: db, log: log}
+	s := &server{db: db, log: log, engine: NewEngine()}
 
 	mux := http.NewServeMux()
 	mux.Handle("/health/", health.Handler())
@@ -133,6 +134,7 @@ func New(db *sql.DB, log zerolog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/policy-packs/{pack_id}", s.handleGetPack)
 	mux.HandleFunc("PATCH /v1/policy-rules/{rule_id}/parameters", s.handleUpdateRuleParameters)
 	mux.HandleFunc("GET /v1/workspaces/{workspace_id}/policy-requirements", s.handleGetPolicyRequirements)
+	mux.HandleFunc("POST /v1/policies/evaluate", s.handleEvaluatePolicy)
 
 	return loggingMiddleware(log, s.recoveryMiddleware(authMiddleware(mux)))
 }
@@ -673,6 +675,31 @@ func (s *server) handleGetPolicyRequirements(w http.ResponseWriter, r *http.Requ
 	}
 
 	s.writeJSON(w, http.StatusOK, reqs)
+}
+
+func (s *server) handleEvaluatePolicy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	var req EvaluationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(r, w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
+		return
+	}
+
+	if req.WorkspaceID != "" {
+		if _, err := uuid.Parse(req.WorkspaceID); err != nil {
+			s.writeError(r, w, http.StatusBadRequest, "validation_error", "workspace_id must be a valid UUID")
+			return
+		}
+	}
+
+	res, err := s.engine.Evaluate(r.Context(), req)
+	if err != nil {
+		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to evaluate policy")
+		s.writeError(r, w, http.StatusInternalServerError, "internal_error", "failed to evaluate policy")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, res)
 }
 
 // --- Helpers ---

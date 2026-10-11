@@ -51,6 +51,14 @@ function isPublicCidr(cidr: string): boolean {
   return (PUBLIC_CIDRS as readonly string[]).includes(cidr.trim());
 }
 
+export function isPublicIngressRule(rule: FirewallRule): boolean {
+  return (
+    rule.direction === "ingress" &&
+    rule.source !== undefined &&
+    isPublicCidr(rule.source)
+  );
+}
+
 export function findPublicIngressExposures(
   data: NetworkingTopologyData,
 ): PublicIngressExposure[] {
@@ -58,11 +66,7 @@ export function findPublicIngressExposures(
 
   for (const group of data.securityGroups ?? []) {
     for (const rule of group.rules ?? []) {
-      if (
-        rule.direction === "ingress" &&
-        rule.source !== undefined &&
-        isPublicCidr(rule.source)
-      ) {
+      if (isPublicIngressRule(rule)) {
         exposures.push({ groupName: group.name, rule });
       }
     }
@@ -210,10 +214,10 @@ export function NetworkingTopologyComponent({
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-gray-100 font-semibold uppercase tracking-wider text-gray-400">
-                  <th className="pb-2">Subnet</th>
-                  <th className="pb-2">CIDR</th>
-                  <th className="pb-2">AZ</th>
-                  <th className="pb-2">Type</th>
+                  <th scope="col" className="pb-2">Subnet</th>
+                  <th scope="col" className="pb-2">CIDR</th>
+                  <th scope="col" className="pb-2">AZ</th>
+                  <th scope="col" className="pb-2">Type</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -258,10 +262,7 @@ export function NetworkingTopologyComponent({
                   {group.rules && group.rules.length > 0 ? (
                     <div className="mt-2 divide-y divide-gray-100">
                       {group.rules.map((rule, index) => {
-                        const exposed =
-                          rule.direction === "ingress" &&
-                          rule.source !== undefined &&
-                          isPublicCidr(rule.source);
+                        const exposed = isPublicIngressRule(rule);
 
                         return (
                           <div

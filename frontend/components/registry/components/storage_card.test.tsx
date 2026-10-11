@@ -88,7 +88,7 @@ describe("StorageCardComponent (public access)", () => {
     render(<StorageCardComponent data={data} />);
 
     const badge = screen.getByTestId("public-access-badge");
-    expect(badge).toHaveTextContent("Public Access Allowed");
+    expect(badge).toHaveTextContent("Public Access Not Blocked");
     expect(badge.className).toContain("bg-red-50");
 
     const alert = screen.getByTestId("public-access-alert");

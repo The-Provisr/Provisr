@@ -123,7 +123,7 @@ export function StorageCardComponent({
               className="flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-red-900"
             >
               <AlertTriangleIcon className="size-3 shrink-0" />
-              Public Access Allowed
+              Public Access Not Blocked
             </span>
           )}
         </div>

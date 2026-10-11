@@ -318,6 +318,23 @@ export function DatabaseIcon(props: IconProps) {
   );
 }
 
+export function CheckIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </IconBase>
+  );
+}
+
+export function BanIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m4.9 4.9 14.2 14.2" />
+    </IconBase>
+  );
+}
+
 export function HardDriveIcon(props: IconProps) {
   return (
     <IconBase {...props}>

@@ -18,6 +18,24 @@ from app.domain.manifest import (
     S3Resource,
 )
 
+# The compact wire manifest requires the policy/security/backup blocks; the
+# drafter tests only exercise resource enrichment, so fill them with safe values.
+_WIRE_DEFAULTS: dict[str, object] = {
+    "security": {"encryption_enabled": True},
+    "backup": {"enabled": True},
+    "policy": {
+        "requirements_loaded": True,
+        "applied_constraints": [
+            "allowed_regions",
+            "max_budget",
+            "required_tags",
+            "prohibited_resource_types",
+            "required_encryption",
+            "required_backup",
+        ],
+    },
+}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -33,6 +51,7 @@ def _ec2_manifest(
 ) -> ResourceManifest:
     return ResourceManifest(
         provider="aws",
+        **_WIRE_DEFAULTS,
         region=region,
         environment=environment,  # type: ignore[arg-type]
         monthly_budget_usd=budget,
@@ -56,6 +75,7 @@ def _rds_manifest(
 ) -> ResourceManifest:
     return ResourceManifest(
         provider="aws",
+        **_WIRE_DEFAULTS,
         region=region,
         environment=environment,  # type: ignore[arg-type]
         tags={},
@@ -74,6 +94,7 @@ def _rds_manifest(
 def _s3_manifest(*, region: str = "us-east-1") -> ResourceManifest:
     return ResourceManifest(
         provider="aws",
+        **_WIRE_DEFAULTS,
         region=region,
         environment="development",
         tags={},
@@ -261,6 +282,7 @@ def test_ec2_single_count_generates_assumption() -> None:
 def test_ec2_explicit_ami_id_does_not_generate_image_assumption() -> None:
     raw = ResourceManifest(
         provider="aws",
+        **_WIRE_DEFAULTS,
         region="ap-southeast-1",
         environment="production",
         tags={},

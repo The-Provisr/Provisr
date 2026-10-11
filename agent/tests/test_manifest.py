@@ -13,6 +13,12 @@ def test_accepts_an_aws_ec2_manifest() -> None:
             "environment": "staging",
             "monthly_budget_usd": 80,
             "tags": {"owner": "platform"},
+            "security": {"encryption_enabled": True},
+            "backup": {"enabled": True},
+            "policy": {
+                "requirements_loaded": True,
+                "applied_constraints": ["allowed_regions"],
+            },
             "resources": [
                 {
                     "type": "aws_ec2",
@@ -33,6 +39,12 @@ def test_rejects_an_unknown_resource_type() -> None:
             {
                 "region": "ap-southeast-1",
                 "environment": "staging",
+                "security": {"encryption_enabled": True},
+                "backup": {"enabled": True},
+                "policy": {
+                    "requirements_loaded": True,
+                    "applied_constraints": ["allowed_regions"],
+                },
                 "resources": [{"type": "made_up", "name": "unsafe"}],
             }
         )

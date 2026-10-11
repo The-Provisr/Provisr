@@ -115,8 +115,7 @@ def draft_manifest(
     merged_tags = {**raw.tags, **context.policy.required_tags}
 
     resources = [
-        _build_canonical_resource(r_raw, merged_tags, context.policy)
-        for r_raw in raw.resources
+        _build_canonical_resource(r_raw, merged_tags, context.policy) for r_raw in raw.resources
     ]
 
     return CanonicalManifest(
@@ -173,9 +172,7 @@ def _collect_region_violations(
 ) -> None:
     if policy.allowed_regions and region not in policy.allowed_regions:
         allowed = ", ".join(policy.allowed_regions)
-        violations.append(
-            f"Region '{region}' is not in the policy-allowed set: {allowed}."
-        )
+        violations.append(f"Region '{region}' is not in the policy-allowed set: {allowed}.")
 
 
 def _collect_budget_violations(
@@ -204,9 +201,7 @@ def _collect_prohibited_type_violations(
     for resource in resources:
         rtype = getattr(resource, "type", None)
         if rtype in policy.prohibited_resource_types:
-            violations.append(
-                f"Resource type '{rtype}' is prohibited by workspace policy."
-            )
+            violations.append(f"Resource type '{rtype}' is prohibited by workspace policy.")
 
 
 # ---------------------------------------------------------------------------

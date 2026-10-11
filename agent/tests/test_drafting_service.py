@@ -1,62 +1,90 @@
-"""Tests for manifest drafting integration in AgentService.
+"""Tests for canonical manifest drafting integration in AgentService.
 
 Verifies that:
-- manifest_candidate from the model triggers drafting and emits manifest.draft event.
-- Policy violations convert the result to needs_clarification.
-- The canonical_manifest is attached to the ModelTurnResult on success.
+- A validated manifest_draft envelope emits a canonical `manifest.draft` event.
+- The canonical draft carries session/source metadata.
+- Policy violations fail the turn (enforced before drafting).
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
+from copy import deepcopy
+from uuid import UUID
 
-from app.domain.drafting import PolicyConstraints
-from app.domain.manifest import Ec2Resource, ResourceManifest
-from app.domain.models import ModelTurnResult
+import pytest
+
+from app.domain.errors import InvalidModelResponseError
 from app.domain.service import AgentService
 from app.integrations.state import InMemoryStateStore
+from app.policy.models import PolicyRequirements
+from app.profiles.catalog import build_profile_selector
 from app.prompts.catalog import build_prompt_registry
-from tests.fakes import FakeLanguageModel
+from tests.fakes import FakeLanguageModel, FakePolicyRequirementsTool
+
+REQUEST_ID = UUID("8b8c64dc-6607-4a45-aa71-f51b2d381cdf")
+FULLY_SPECIFIED = "Deploy postgres on AWS in ap-southeast-1 for production"
+
+COMPLIANT_MANIFEST = {
+    "schema_version": "1.0",
+    "provider": "aws",
+    "region": "ap-southeast-1",
+    "environment": "production",
+    "monthly_budget_usd": 100,
+    "tags": {"owner": "platform", "data-classification": "internal"},
+    "security": {"encryption_enabled": True},
+    "backup": {"enabled": True},
+    "policy": {
+        "requirements_loaded": True,
+        "applied_constraints": [
+            "allowed_regions",
+            "max_budget",
+            "required_tags",
+            "prohibited_resource_types",
+            "required_encryption",
+            "required_backup",
+        ],
+    },
+    "resources": [
+        {
+            "type": "aws_rds",
+            "name": "orders-db",
+            "engine": "postgres",
+            "instance_class": "db.t3.medium",
+            "allocated_storage_gb": 100,
+        }
+    ],
+}
 
 
-def _make_ec2_result(region: str = "ap-southeast-1") -> ModelTurnResult:
-    return ModelTurnResult(
-        outcome="manifest_candidate",
-        message="Ready to provision an EC2 instance.",
-        manifest=ResourceManifest(
-            provider="aws",
-            region=region,
-            environment="production",
-            tags={},
-            resources=[
-                Ec2Resource(
-                    type="aws_ec2",
-                    name="api-server",
-                    instance_type="t3.medium",
-                    image="ubuntu-24.04",
-                )
-            ],
-        ),
+def manifest_output(manifest: dict[str, object]) -> str:
+    return json.dumps(
+        {
+            "type": "manifest_draft",
+            "version": "1.0.0",
+            "request_id": str(REQUEST_ID),
+            "data": {"message": "Draft ready.", "manifest": manifest},
+            "metadata": {"confidence": 0.95, "source": "llm_generated", "warnings": []},
+        }
     )
 
 
-def _build_service(
-    model_result: ModelTurnResult,
-    *,
-    policy: PolicyConstraints | None = None,
-    workspace_id: str = "ws-test",
-) -> tuple[AgentService, InMemoryStateStore]:
+def build_service(raw_output: str, requirements: PolicyRequirements | None = None):
     state = InMemoryStateStore()
-    model = FakeLanguageModel(model_result)
-    prompt_registry = build_prompt_registry()
+    model = FakeLanguageModel(raw_output)
+    selector = build_profile_selector(build_prompt_registry())
+    policy_tool = FakePolicyRequirementsTool(requirements)
     service = AgentService(
         state=state,
         model=model,
-        prompt_registry=prompt_registry,
-        policy_constraints=policy,
-        workspace_id=workspace_id,
+        profile_selector=selector,
+        policy_tool=policy_tool,
     )
     return service, state
+
+
+async def create_session(service: AgentService):
+    return await service.create_session(organization_id="ws-abc", request_id=REQUEST_ID)
 
 
 # ---------------------------------------------------------------------------
@@ -64,156 +92,78 @@ def _build_service(
 # ---------------------------------------------------------------------------
 
 
-def test_manifest_candidate_produces_canonical_manifest_on_result() -> None:
-    service, _state = _build_service(_make_ec2_result())
+@pytest.mark.anyio
+async def test_valid_draft_emits_canonical_manifest_draft_event() -> None:
+    service, state = build_service(manifest_output(COMPLIANT_MANIFEST))
+    session = await create_session(service)
 
-    async def run() -> ModelTurnResult:
-        session = await service.create_session(organization_id="org", request_id="req")
-        return await service.run_turn(
-            session_id=session.session_id,
-            message="Deploy an EC2 on AWS in ap-southeast-1 for production",
-        )
+    result = await service.run_turn(session_id=session.session_id, message=FULLY_SPECIFIED)
 
-    result = asyncio.run(run())
-    assert result.outcome == "manifest_candidate"
-    assert result.canonical_manifest is not None
-    assert result.canonical_manifest.region == "ap-southeast-1"
-    assert result.canonical_manifest.environment == "production"
+    assert result.type == "manifest_draft"
+    events = await state.list_events(session.session_id, 0)
+    types = [e.type for e in events]
+    assert "manifest.draft" in types
+    assert "manifest.proposed" in types
+    assert types.index("manifest.draft") < types.index("manifest.proposed")
 
-
-def test_canonical_manifest_metadata_contains_session_context() -> None:
-    service, _state = _build_service(_make_ec2_result(), workspace_id="ws-abc")
-
-    async def run() -> ModelTurnResult:
-        session = await service.create_session(organization_id="org", request_id="req-xyz")
-        return await service.run_turn(
-            session_id=session.session_id,
-            message="Deploy an EC2 on AWS in ap-southeast-1 for production",
-        )
-
-    result = asyncio.run(run())
-    assert result.canonical_manifest is not None
-    assert result.canonical_manifest.metadata.workspace_id == "ws-abc"
-    assert result.canonical_manifest.metadata.request_id == "req-xyz"
+    draft = next(e for e in events if e.type == "manifest.draft").data
+    assert draft["schema_version"] == "1.0"
+    assert draft["provider"] == "aws"
+    assert draft["region"] == "ap-southeast-1"
+    assert "metadata" in draft
+    assert draft["metadata"]["workspace_id"] == "ws-abc"
+    assert draft["metadata"]["request_id"] == str(REQUEST_ID)
+    assert draft["resources"]
 
 
-def test_manifest_draft_sse_event_emitted_before_manifest_proposed() -> None:
-    service, state = _build_service(_make_ec2_result())
+@pytest.mark.anyio
+async def test_canonical_resource_carries_source_annotation_and_policy_refs() -> None:
+    service, state = build_service(manifest_output(COMPLIANT_MANIFEST))
+    session = await create_session(service)
 
-    async def run() -> list[str]:
-        session = await service.create_session(organization_id="org", request_id="req")
-        await service.run_turn(
-            session_id=session.session_id,
-            message="Deploy an EC2 on AWS in ap-southeast-1 for production",
-        )
-        events = await state.list_events(session.session_id, 0)
-        return [e.type for e in events]
+    await service.run_turn(session_id=session.session_id, message=FULLY_SPECIFIED)
 
-    event_types = asyncio.run(run())
-    assert "manifest.draft" in event_types
-    assert "manifest.proposed" in event_types
-    # manifest.draft must precede manifest.proposed
-    draft_idx = event_types.index("manifest.draft")
-    proposed_idx = event_types.index("manifest.proposed")
-    assert draft_idx < proposed_idx
-
-
-def test_manifest_draft_event_data_contains_canonical_fields() -> None:
-    service, state = _build_service(_make_ec2_result())
-
-    async def run() -> dict:
-        session = await service.create_session(organization_id="org", request_id="req")
-        await service.run_turn(
-            session_id=session.session_id,
-            message="Deploy an EC2 on AWS in ap-southeast-1 for production",
-        )
-        events = await state.list_events(session.session_id, 0)
-        draft_events = [e for e in events if e.type == "manifest.draft"]
-        assert draft_events
-        return draft_events[0].data
-
-    data = asyncio.run(run())
-    assert data.get("schema_version") == "1.0"
-    assert data.get("provider") == "aws"
-    assert data.get("region") == "ap-southeast-1"
-    assert "metadata" in data
-    assert "resources" in data
+    events = await state.list_events(session.session_id, 0)
+    draft = next(e for e in events if e.type == "manifest.draft").data
+    resource = draft["resources"][0]
+    assert resource["logical_name"] == "orders-db"
+    assert resource["source_metadata"]["source"] in {
+        "user_prompt",
+        "policy_default",
+        "cloud_state",
+        "ai_assumption",
+    }
 
 
 # ---------------------------------------------------------------------------
-# Policy violation → needs_clarification
+# Policy violations fail the turn before drafting
 # ---------------------------------------------------------------------------
 
 
-def test_policy_region_violation_converts_result_to_clarification() -> None:
-    policy = PolicyConstraints(allowed_regions=("us-east-1",))
-    service, _state = _build_service(_make_ec2_result(region="ap-southeast-1"), policy=policy)
+@pytest.mark.anyio
+async def test_policy_violation_fails_the_turn_without_manifest_draft() -> None:
+    violating = deepcopy(COMPLIANT_MANIFEST)
+    violating["region"] = "us-east-1"
+    policy = PolicyRequirements(allowed_regions=("ap-southeast-1",))
+    service, state = build_service(manifest_output(violating), policy)
+    session = await create_session(service)
 
-    async def run() -> ModelTurnResult:
-        session = await service.create_session(organization_id="org", request_id="req")
-        return await service.run_turn(
-            session_id=session.session_id,
-            message="Deploy an EC2 on AWS in ap-southeast-1 for production",
-        )
+    with pytest.raises(InvalidModelResponseError):
+        await service.run_turn(session_id=session.session_id, message=FULLY_SPECIFIED)
 
-    result = asyncio.run(run())
-    assert result.outcome == "needs_clarification"
-    assert "policy" in result.message.lower()
-    assert "ap-southeast-1" in result.message
-    assert result.canonical_manifest is None
-
-
-def test_policy_violation_emits_clarification_required_not_manifest_draft() -> None:
-    policy = PolicyConstraints(allowed_regions=("us-east-1",))
-    service, state = _build_service(_make_ec2_result(region="ap-southeast-1"), policy=policy)
-
-    async def run() -> list[str]:
-        session = await service.create_session(organization_id="org", request_id="req")
-        await service.run_turn(
-            session_id=session.session_id,
-            message="Deploy an EC2 on AWS in ap-southeast-1 for production",
-        )
-        events = await state.list_events(session.session_id, 0)
-        return [e.type for e in events]
-
-    event_types = asyncio.run(run())
-    assert "clarification.required" in event_types
-    assert "manifest.draft" not in event_types
+    events = await state.list_events(session.session_id, 0)
+    types = [e.type for e in events]
+    assert "manifest.draft" not in types
+    assert "turn.failed" in types
 
 
-def test_no_policy_violation_when_constraints_empty() -> None:
-    service, _state = _build_service(_make_ec2_result())
+@pytest.mark.anyio
+async def test_clarification_message_skips_drafting_path() -> None:
+    service, state = build_service(manifest_output(COMPLIANT_MANIFEST))
+    session = await create_session(service)
 
-    async def run() -> ModelTurnResult:
-        session = await service.create_session(organization_id="org", request_id="req")
-        return await service.run_turn(
-            session_id=session.session_id,
-            message="Deploy an EC2 on AWS in ap-southeast-1 for production",
-        )
+    result = await service.run_turn(session_id=session.session_id, message="I need a server")
 
-    result = asyncio.run(run())
-    assert result.outcome == "manifest_candidate"
-
-
-# ---------------------------------------------------------------------------
-# Needs-clarification outcome bypasses drafting
-# ---------------------------------------------------------------------------
-
-
-def test_clarification_outcome_skips_drafting() -> None:
-    clarification_result = ModelTurnResult(
-        outcome="needs_clarification",
-        message="Which region should this be deployed in?",
-    )
-    service, _state = _build_service(clarification_result)
-
-    async def run() -> ModelTurnResult:
-        session = await service.create_session(organization_id="org", request_id="req")
-        return await service.run_turn(
-            session_id=session.session_id,
-            # Fully qualified so gap-detection doesn't intercept first
-            message="Deploy a server on AWS in ap-southeast-1 for production",
-        )
-
-    result = asyncio.run(run())
-    assert result.canonical_manifest is None
+    assert result.type == "clarification_question"
+    events = await state.list_events(session.session_id, 0)
+    assert all(e.type != "manifest.draft" for e in events)

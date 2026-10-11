@@ -62,10 +62,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-      - uses: pnpm/action-setup@v4
+          node-version: "22.22.2"
+          cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @provisr/shared-contracts build
       - run: pnpm --filter @provisr/orchestrator build

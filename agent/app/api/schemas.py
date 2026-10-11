@@ -1,6 +1,9 @@
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.models import AgentSession, ModelTurnResult
+from app.domain.models import AgentSession
+from app.outputs.models import AgentOutputEnvelope
 
 
 class ApiModel(BaseModel):
@@ -9,7 +12,8 @@ class ApiModel(BaseModel):
 
 class CreateSessionRequest(ApiModel):
     organization_id: str = Field(min_length=1, max_length=128)
-    request_id: str = Field(min_length=1, max_length=128)
+    request_id: UUID
+    profile_id: str = Field(default="provisioning", min_length=1, max_length=64)
     prompt_version: str | None = Field(default=None, min_length=1, max_length=64)
 
 
@@ -22,7 +26,7 @@ class RunTurnRequest(ApiModel):
 
 
 class RunTurnResponse(ApiModel):
-    result: ModelTurnResult
+    result: AgentOutputEnvelope
 
 
 class ProblemDetails(ApiModel):

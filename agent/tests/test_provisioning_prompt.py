@@ -1,5 +1,10 @@
 from app.prompts.catalog import build_prompt_registry
-from app.prompts.provisioning import PROVISIONING_AGENT_PROMPT, PROVISIONING_AGENT_V1
+from app.prompts.provisioning import (
+    PROVISIONING_AGENT_PROMPT,
+    PROVISIONING_AGENT_V1,
+    PROVISIONING_AGENT_V1_1,
+    PROVISIONING_AGENT_V1_2,
+)
 
 
 def test_provisioning_prompt_is_registered_as_version_1() -> None:
@@ -8,6 +13,14 @@ def test_provisioning_prompt_is_registered_as_version_1() -> None:
     assert bundle is PROVISIONING_AGENT_V1
     assert bundle.version == "1.0.0"
     assert len(bundle.content_hash) == 64
+    assert bundle.calculate_hash() == bundle.content_hash
+
+
+def test_policy_aware_prompt_is_latest() -> None:
+    bundle = build_prompt_registry().get_prompt("provisioning_agent")
+
+    assert bundle is PROVISIONING_AGENT_V1_2
+    assert bundle.version == "1.2.0"
     assert bundle.calculate_hash() == bundle.content_hash
 
 
@@ -44,6 +57,37 @@ def test_policy_requirements_is_the_required_first_call() -> None:
 
 
 def test_prompt_restricts_output_to_supported_envelopes() -> None:
-    assert '"outcome":"needs_clarification"' in PROVISIONING_AGENT_PROMPT
-    assert '"outcome":"manifest_candidate"' in PROVISIONING_AGENT_PROMPT
+    for output_type in (
+        "assistant_message",
+        "component_payload",
+        "manifest_draft",
+        "clarification_question",
+        "tool_summary",
+        "error",
+    ):
+        assert output_type in PROVISIONING_AGENT_PROMPT
+    assert '"version":"1.0.0"' in PROVISIONING_AGENT_PROMPT
+    assert '"request_id"' in PROVISIONING_AGENT_PROMPT
     assert "Do not return markdown, arbitrary" in PROVISIONING_AGENT_PROMPT
+
+
+def test_prompt_applies_policy_constraints_and_explains_conflicts() -> None:
+    for constraint in (
+        "allowed_regions",
+        "max_budget",
+        "required_tags",
+        "prohibited_resource_types",
+        "required_encryption",
+        "required_backup",
+    ):
+        assert constraint in PROVISIONING_AGENT_PROMPT
+    assert "Explain the constraint in plain language" in PROVISIONING_AGENT_PROMPT
+    assert "compliant alternatives" in PROVISIONING_AGENT_PROMPT
+    assert "ask the user to confirm" in PROVISIONING_AGENT_PROMPT
+
+
+def test_structured_envelope_prompt_version_remains_pinned() -> None:
+    bundle = build_prompt_registry().get_prompt("provisioning_agent", "1.1.0")
+
+    assert bundle is PROVISIONING_AGENT_V1_1
+    assert bundle.calculate_hash() == bundle.content_hash

@@ -5,13 +5,15 @@ import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 import { CurrentUser } from "../middleware/current-user.decorator";
 import type { RequestUser } from "../middleware/auth.types";
 
-export const createWorkspaceSchema = z.object({
-  name: z.string().min(3).max(64),
-  description: z.string().max(500).optional(),
-  environment: z.enum(["development", "staging", "production"]).default("development"),
-});
+export const createWorkspaceSchema = z
+  .object({
+    name: z.string().min(3).max(64),
+    description: z.string().max(500).optional(),
+    environment: z.enum(["development", "staging", "production"]).default("development"),
+  })
+  .strict();
 
-export const updateWorkspaceSchema = createWorkspaceSchema.partial();
+export const updateWorkspaceSchema = createWorkspaceSchema.partial().strict();
 
 export type CreateWorkspaceDto = z.infer<typeof createWorkspaceSchema>;
 export type UpdateWorkspaceDto = z.infer<typeof updateWorkspaceSchema>;

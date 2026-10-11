@@ -229,6 +229,26 @@ describe("databaseConfigSchema", () => {
       databaseConfigSchema.safeParse({ ...safeConfig, backupRetentionDays: -1 }).success,
     ).toBe(false);
   });
+
+  it("rejects an autoscaling ceiling below the allocated storage", () => {
+    expect(
+      databaseConfigSchema.safeParse({
+        ...safeConfig,
+        allocatedStorageGb: 500,
+        maxAllocatedStorageGb: 100,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts an autoscaling ceiling equal to the allocated storage", () => {
+    expect(
+      databaseConfigSchema.safeParse({
+        ...safeConfig,
+        allocatedStorageGb: 100,
+        maxAllocatedStorageGb: 100,
+      }).success,
+    ).toBe(true);
+  });
 });
 
 describe("getDatabaseRisks", () => {

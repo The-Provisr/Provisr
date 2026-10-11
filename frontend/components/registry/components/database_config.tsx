@@ -26,7 +26,15 @@ export const databaseConfigSchema = z.object({
   storageEncrypted: z.boolean(),
   publiclyAccessible: z.boolean(),
   deletionProtection: z.boolean(),
-});
+}).refine(
+  (value) =>
+    value.maxAllocatedStorageGb === undefined ||
+    value.maxAllocatedStorageGb >= value.allocatedStorageGb,
+  {
+    message: "maxAllocatedStorageGb must be greater than or equal to allocatedStorageGb",
+    path: ["maxAllocatedStorageGb"],
+  },
+);
 
 export type DatabaseConfigData = z.infer<typeof databaseConfigSchema>;
 
@@ -173,13 +181,14 @@ function SecurityIndicator({
 
 function StorageBar({ allocatedGb, maxGb }: { allocatedGb: number; maxGb: number }) {
   const percent = Math.min(100, Math.round((allocatedGb / maxGb) * 100));
+  const currentGb = Math.min(allocatedGb, maxGb);
   return (
     <div
       role="progressbar"
       aria-label="Allocated storage"
       aria-valuemin={0}
       aria-valuemax={maxGb}
-      aria-valuenow={allocatedGb}
+      aria-valuenow={currentGb}
       aria-valuetext={`${allocatedGb} GB of ${maxGb} GB`}
       className="mt-1.5 h-2 overflow-hidden rounded-full bg-gray-100"
     >

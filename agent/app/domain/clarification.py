@@ -15,6 +15,7 @@ Design rules (from AGENTS.md / PRD §9):
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Final
 
 from app.domain.models import (
@@ -178,8 +179,17 @@ def build_answered_context(answered_questions: list[AnsweredQuestion]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _contains_term(normalized: str, terms: Iterable[str]) -> bool:
+    """Return True when any term appears as a whole word/phrase in the message.
+
+    Word-boundary matching avoids false positives such as "prod" in "product",
+    "dev" in "device", or "aws" in "laws".
+    """
+    return any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in terms)
+
+
 def _message_mentions_provider(normalized: str) -> bool:
-    return any(p in normalized for p in _KNOWN_PROVIDERS)
+    return _contains_term(normalized, _KNOWN_PROVIDERS)
 
 
 def _check_region(
@@ -196,23 +206,23 @@ def _check_region(
 
 
 def _message_mentions_environment(normalized: str) -> bool:
-    return any(kw in normalized for kw in _ENVIRONMENT_KEYWORDS)
+    return _contains_term(normalized, _ENVIRONMENT_KEYWORDS)
 
 
 def _has_ambiguous_size(normalized: str) -> bool:
-    return any(word in normalized for word in _AMBIGUOUS_SIZE)
+    return _contains_term(normalized, _AMBIGUOUS_SIZE)
 
 
 def _has_ambiguous_ha(normalized: str) -> bool:
-    return any(phrase in normalized for phrase in _AMBIGUOUS_HA)
+    return _contains_term(normalized, _AMBIGUOUS_HA)
 
 
 def _mentions_database(normalized: str) -> bool:
-    return any(word in normalized for word in ("database", "db", "rds", "postgres", "mysql"))
+    return _contains_term(normalized, ("database", "db", "rds", "postgres", "postgresql", "mysql"))
 
 
 def _mentions_db_engine(normalized: str) -> bool:
-    return any(engine in normalized for engine in ("postgres", "postgresql", "mysql", "aurora"))
+    return _contains_term(normalized, ("postgres", "postgresql", "mysql", "aurora"))
 
 
 # ---------------------------------------------------------------------------

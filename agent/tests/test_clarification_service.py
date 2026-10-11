@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config.settings import Settings
+from app.domain.errors import InvalidModelResponseError
 from app.domain.models import AnsweredQuestion
 from app.domain.service import AgentService
 from app.integrations.state import InMemoryStateStore
@@ -209,3 +210,109 @@ async def test_fully_specified_message_reaches_the_model() -> None:
     assert result.type == "assistant_message"
     assert len(model.sessions) == 1
     assert len(policy_tool.sessions) == 1
+
+
+# ---------------------------------------------------------------------------
+# Detection quality: prior turns, word boundaries, no re-asks from the model
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_gap_detection_uses_prior_user_turns() -> None:
+    service, _, _, _ = build_service(envelope("assistant_message", {"message": "unused"}))
+    session = await create_session(service)
+
+    first = await service.run_turn(session_id=session.session_id, message="I want to deploy on AWS")
+    assert first.type == "clarification_question"
+    assert first.data.field_mapping != "provider"
+
+    second = await service.run_turn(session_id=session.session_id, message="us-east-1")
+    assert second.type == "clarification_question"
+    # Provider was given in the first turn and must not be asked again.
+    assert second.data.field_mapping != "provider"
+
+
+@pytest.mark.anyio
+async def test_word_boundary_avoids_false_environment_match() -> None:
+    service, _, _, _ = build_service(envelope("assistant_message", {"message": "unused"}))
+    session = await create_session(service)
+
+    # "product" must not be treated as an environment ("prod") mention.
+    result = await service.run_turn(
+        session_id=session.session_id,
+        message="Build a product on AWS in us-east-1",
+    )
+
+    assert result.type == "clarification_question"
+    assert result.data.field_mapping == "environment"
+
+
+@pytest.mark.anyio
+async def test_model_reask_of_answered_field_is_rejected() -> None:
+    reask = json.dumps(
+        {
+            "type": "clarification_question",
+            "version": "1.0.0",
+            "request_id": str(REQUEST_ID),
+            "data": {"question": "Which region?", "field_mapping": "region"},
+            "metadata": {"confidence": 0.9, "source": "llm_generated", "warnings": []},
+        }
+    )
+    service, _, _, _ = build_service(reask)
+    session = await create_session(service)
+
+    await service.record_clarification_answers(
+        session_id=session.session_id,
+        answers=[
+            AnsweredQuestion(question_id="region", field_mapping="region", answer="us-east-1")
+        ],
+    )
+
+    with pytest.raises(InvalidModelResponseError):
+        await service.run_turn(session_id=session.session_id, message=FULLY_SPECIFIED)
+
+
+def test_turn_api_accepts_answers_and_suppresses_reask() -> None:
+    state = InMemoryStateStore()
+    model = FakeLanguageModel(envelope("assistant_message", {"message": "unused"}))
+    selector = build_profile_selector(build_prompt_registry())
+    policy_tool = FakePolicyRequirementsTool()
+    resources = Resources(
+        state=state,
+        prompt_registry=build_prompt_registry(),
+        profile_selector=selector,
+        policy_tool=policy_tool,
+        agent_service=AgentService(
+            state=state,
+            model=model,
+            profile_selector=selector,
+            policy_tool=policy_tool,
+        ),
+    )
+    app = create_app(settings=Settings(environment="test"), resources=resources)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/v1/sessions",
+            json={"organization_id": "org-1", "request_id": str(REQUEST_ID)},
+        )
+        session_id = created.json()["session"]["session_id"]
+
+        first = client.post(
+            f"/v1/sessions/{session_id}/turns",
+            json={"message": "I need a server"},
+        ).json()["result"]
+        assert first["data"]["field_mapping"] == "provider"
+
+        second = client.post(
+            f"/v1/sessions/{session_id}/turns",
+            json={
+                "message": "I need a server",
+                "answers": [
+                    {"question_id": "provider", "field_mapping": "provider", "answer": "aws"}
+                ],
+            },
+        ).json()["result"]
+
+    assert second["type"] == "clarification_question"
+    assert second["data"]["field_mapping"] != "provider"

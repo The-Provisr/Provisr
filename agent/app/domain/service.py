@@ -2,7 +2,14 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from app.domain.clarification import build_answered_context, detect_gaps
+from app.domain.drafting import (
+    DraftingContext,
+    PolicyConstraints,
+    PolicyViolationError,
+    draft_manifest,
+)
 from app.domain.errors import InvalidModelResponseError, SessionFailedError
+from app.domain.manifest import CanonicalManifest
 from app.domain.models import (
     AgentEvent,
     AgentEventType,
@@ -27,6 +34,7 @@ from app.outputs.models import (
 from app.outputs.validation import validate_envelope
 from app.policy.compliance import validate_manifest_policy
 from app.policy.errors import PolicyRequirementsUnavailableError
+from app.policy.models import PolicyRequirements
 from app.policy.tool import PolicyRequirementsTool
 from app.profiles.errors import ProfileNotAvailable
 from app.profiles.errors import ProfileNotFound as AgentProfileNotFound
@@ -159,6 +167,15 @@ class AgentService:
             if isinstance(result, ErrorEnvelope)
             else result.model_dump(mode="json")
         )
+        if isinstance(result, ManifestDraftEnvelope):
+            # Emit the fully-annotated canonical draft (AG-005) before the raw
+            # manifest.proposed summary.
+            canonical = self._draft_canonical(session, result, message)
+            await self._append_event(
+                session,
+                "manifest.draft",
+                canonical.model_dump(mode="json"),
+            )
         await self._append_event(
             session,
             _event_type_for(result),
@@ -170,6 +187,29 @@ class AgentService:
             {"outputType": result.type, "sessionStatus": session.status},
         )
         return result
+
+    def _draft_canonical(
+        self,
+        session: AgentSession,
+        envelope: ManifestDraftEnvelope,
+        user_prompt: str,
+    ) -> CanonicalManifest:
+        """Synthesise the fully-annotated canonical manifest for a validated draft.
+
+        The envelope has already passed ``validate_manifest_policy``; the
+        drafter's own pre-flight is a redundant safety net, surfaced as a turn
+        failure rather than silent acceptance.
+        """
+        context = DraftingContext(
+            request_id=str(session.request_id),
+            workspace_id=session.organization_id,
+            user_prompt=user_prompt,
+            policy=_policy_constraints(session.policy_requirements),
+        )
+        try:
+            return draft_manifest(envelope.data.manifest, context)
+        except PolicyViolationError as error:
+            raise InvalidModelResponseError(str(error)) from error
 
     async def _run_model_turn(
         self,
@@ -318,6 +358,18 @@ class AgentService:
                 data=data,
             )
         )
+
+
+def _policy_constraints(requirements: PolicyRequirements | None) -> PolicyConstraints:
+    """Map resolved policy requirements onto the drafter's constraint object."""
+    if requirements is None:
+        return PolicyConstraints()
+    return PolicyConstraints(
+        allowed_regions=tuple(requirements.allowed_regions),
+        max_budget=requirements.max_budget,
+        required_tags=dict(requirements.required_tags),
+        prohibited_resource_types=tuple(requirements.prohibited_resource_types),
+    )
 
 
 def _clarification_envelope(

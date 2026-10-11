@@ -17,6 +17,7 @@ type AgentEventType = Literal[
     "message.completed",
     "clarification.required",
     "manifest.proposed",
+    "manifest.draft",
     "turn.failed",
     "stream.completed",
 ]

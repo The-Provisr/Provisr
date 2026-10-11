@@ -75,6 +75,14 @@ class ManifestDraftData(OutputModel):
 
 class ClarificationQuestionData(OutputModel):
     question: str = Field(min_length=1, max_length=10000)
+    # Structured detail for the FE-C03 clarification UI. Mirrors
+    # frontend/lib/clarification/types.ts (ClarificationQuestionPayload); all
+    # fields are optional so older plain-text envelopes remain valid.
+    question_id: str | None = Field(default=None, max_length=64)
+    input_type: Literal["text", "select", "multi_select", "boolean", "confirmation"] | None = None
+    options: tuple[str, ...] = ()
+    required: bool = True
+    field_mapping: str | None = Field(default=None, max_length=128)
 
 
 class ToolSummaryData(OutputModel):

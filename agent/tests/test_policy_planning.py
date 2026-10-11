@@ -132,7 +132,10 @@ async def test_loads_policy_before_model_and_stores_it_in_context() -> None:
     )
     session = await create_session(service)
 
-    result = await service.run_turn(session_id=session.session_id, message="Create an orders DB")
+    result = await service.run_turn(
+        session_id=session.session_id,
+        message="Create an orders postgres DB on AWS in ap-southeast-1 for production",
+    )
     stored = await state.get_session(session.session_id)
 
     assert result.type == "manifest_draft"
@@ -150,8 +153,14 @@ async def test_reuses_policy_context_without_calling_tool_again() -> None:
     service, _, model = build_service(manifest_output(COMPLIANT_MANIFEST), policy_tool)
     session = await create_session(service)
 
-    await service.run_turn(session_id=session.session_id, message="Create an orders DB")
-    await service.run_turn(session_id=session.session_id, message="Keep the same requirements")
+    await service.run_turn(
+        session_id=session.session_id,
+        message="Create an orders postgres DB on AWS in ap-southeast-1 for production",
+    )
+    await service.run_turn(
+        session_id=session.session_id,
+        message="Keep the same requirements on AWS in ap-southeast-1 for production",
+    )
 
     assert len(policy_tool.sessions) == 1
     assert len(model.sessions) == 2
@@ -172,7 +181,10 @@ async def test_policy_tool_failure_blocks_model_and_marks_session_failed() -> No
     session = await create_session(service)
 
     with pytest.raises(PolicyRequirementsUnavailableError, match="timed out"):
-        await service.run_turn(session_id=session.session_id, message="Create a database")
+        await service.run_turn(
+            session_id=session.session_id,
+            message="Create a postgres database on AWS in ap-southeast-1 for production",
+        )
 
     stored = await state.get_session(session.session_id)
     events = await state.list_events(session.session_id, 0)
@@ -232,7 +244,10 @@ async def test_rejects_manifest_that_conflicts_with_loaded_policy() -> None:
     session = await create_session(service)
 
     with pytest.raises(InvalidModelResponseError, match="Region.*not allowed"):
-        await service.run_turn(session_id=session.session_id, message="Use us-east-1")
+        await service.run_turn(
+            session_id=session.session_id,
+            message="Use us-east-1 on AWS for production with postgres",
+        )
 
     stored = await state.get_session(session.session_id)
     assert stored.status == "FAILED"

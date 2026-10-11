@@ -2,7 +2,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.models import AgentSession
+from app.domain.models import AgentSession, AnsweredQuestion
 from app.outputs.models import AgentOutputEnvelope
 
 
@@ -23,6 +23,9 @@ class CreateSessionResponse(ApiModel):
 
 class RunTurnRequest(ApiModel):
     message: str = Field(min_length=1, max_length=20000)
+    # Structured answers to a previous clarification question; persisted before
+    # the turn so the agent never re-asks a confirmed field.
+    answers: list[AnsweredQuestion] = Field(default_factory=list)
 
 
 class RunTurnResponse(ApiModel):

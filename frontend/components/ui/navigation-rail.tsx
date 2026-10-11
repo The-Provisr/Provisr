@@ -30,7 +30,7 @@ const navItems = [
 ];
 
 export function NavigationRail() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
 
   return (
     <nav className="hidden w-16 shrink-0 flex-col items-center border-r border-gray-100 bg-white py-4 md:flex">

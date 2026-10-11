@@ -7,8 +7,10 @@ from app.domain.errors import (
     DomainError,
     InvalidModelResponseError,
     ModelNotConfiguredError,
+    SessionFailedError,
     SessionNotFoundError,
 )
+from app.policy.errors import PolicyRequirementsUnavailableError
 from app.prompts.errors import PromptIntegrityError
 
 
@@ -29,7 +31,12 @@ def register_error_handlers(app: FastAPI) -> None:
 def _status_for(error: DomainError) -> int:
     if isinstance(error, SessionNotFoundError):
         return status.HTTP_404_NOT_FOUND
-    if isinstance(error, (InvalidModelResponseError, DependencyUnavailableError)):
+    if isinstance(error, SessionFailedError):
+        return status.HTTP_409_CONFLICT
+    if isinstance(
+        error,
+        (InvalidModelResponseError, DependencyUnavailableError, PolicyRequirementsUnavailableError),
+    ):
         return status.HTTP_502_BAD_GATEWAY
     if isinstance(error, ModelNotConfiguredError):
         return status.HTTP_503_SERVICE_UNAVAILABLE
@@ -41,12 +48,16 @@ def _status_for(error: DomainError) -> int:
 def _title_for(error: DomainError) -> str:
     if isinstance(error, SessionNotFoundError):
         return "Session not found"
+    if isinstance(error, SessionFailedError):
+        return "Session failed"
     if isinstance(error, InvalidModelResponseError):
         return "Invalid model response"
     if isinstance(error, ModelNotConfiguredError):
         return "Model not configured"
     if isinstance(error, DependencyUnavailableError):
         return "External dependency unavailable"
+    if isinstance(error, PolicyRequirementsUnavailableError):
+        return "Policy requirements unavailable"
     if isinstance(error, PromptIntegrityError):
         return "Prompt integrity validation failed"
     return "Request failed"

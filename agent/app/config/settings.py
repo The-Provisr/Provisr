@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     anthropic_base_url: str = Field(default="", validation_alias="ANTHROPIC_BASE_URL")
     anthropic_workspace_id: str = Field(default="", validation_alias="ANTHROPIC_WORKSPACE_ID")
     anthropic_model: str = Field(default="claude-sonnet-4-5", validation_alias="ANTHROPIC_MODEL")
-    anthropic_max_tokens: int = Field(default=2048, ge=1, le=8192)
 
     # Google Gemini via the google-genai SDK. Reads unprefixed GEMINI_* env vars.
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")

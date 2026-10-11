@@ -17,6 +17,9 @@ export const computePlanSchema = z.object({
       desired: z.coerce.number().optional(),
       targetCpuUtilization: z.coerce.number().optional(),
     })
+    .refine((value) => value.min <= value.max, {
+      message: "autoScaling.min must be less than or equal to autoScaling.max",
+    })
     .optional(),
   os: z.string().optional(),
   architecture: z.enum(["x86_64", "arm64"]).optional(),
@@ -192,21 +195,22 @@ export function ComputePlanComponent({
     return <ComputePlanSkeleton />;
   }
 
-  const warnings: string[] = [];
-  if (data.reservation !== undefined && data.reservation !== "reserved") {
-    warnings.push(
-      `Unreserved instance (${data.reservation}) — consider reserved pricing to reduce compute cost.`,
-    );
-  }
-  if (
-    data.monthlyCostUsd !== undefined &&
-    data.monthlyCostUsd >= HIGH_COST_MONTHLY_USD
-  ) {
-    warnings.push(
-      `High-cost configuration — estimated $${data.monthlyCostUsd.toFixed(2)}/mo exceeds the $${HIGH_COST_MONTHLY_USD}/mo review threshold.`,
-    );
-  }
-  warnings.push(...(data.policyNotes ?? []));
+  const warnings = Array.from(
+    new Set([
+      ...(data.reservation !== undefined && data.reservation !== "reserved"
+        ? [
+            `Unreserved instance (${data.reservation}) — consider reserved pricing to reduce compute cost.`,
+          ]
+        : []),
+      ...(data.monthlyCostUsd !== undefined &&
+      data.monthlyCostUsd >= HIGH_COST_MONTHLY_USD
+        ? [
+            `High-cost configuration — estimated $${data.monthlyCostUsd.toFixed(2)}/mo exceeds the $${HIGH_COST_MONTHLY_USD}/mo review threshold.`,
+          ]
+        : []),
+      ...(data.policyNotes ?? []),
+    ]),
+  );
 
   const hasSpecs =
     data.vcpu !== undefined ||

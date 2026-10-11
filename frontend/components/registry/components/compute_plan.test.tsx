@@ -180,6 +180,26 @@ describe("computePlanSchema", () => {
       computePlanSchema.parse({ service: "api", reservation: "pay-as-you-go" }),
     ).toThrow();
   });
+
+  it("rejects auto-scaling ranges where min exceeds max", () => {
+    expect(() =>
+      computePlanSchema.parse({
+        service: "api",
+        autoScaling: { min: 4, max: 1 },
+      }),
+    ).toThrow();
+  });
+
+  it("renders duplicate policy notes only once", () => {
+    const data = computePlanSchema.parse({
+      service: "api",
+      policyNotes: ["Reviewed by guardrails", "Reviewed by guardrails"],
+    });
+
+    render(<ComputePlanComponent data={data} />);
+
+    expect(screen.getAllByText("Reviewed by guardrails")).toHaveLength(1);
+  });
 });
 
 describe("computePlanFromResource (manifest mapping)", () => {

@@ -78,9 +78,7 @@ _AMBIGUOUS_HA: Final[tuple[str, ...]] = (
 
 _KNOWN_PROVIDERS: Final[tuple[str, ...]] = ("aws", "azure", "gcp", "google cloud")
 
-_AWS_REGION_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"\b(us|eu|ap|sa|ca|me|af)-[a-z]+-[0-9]\b"
-)
+_AWS_REGION_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b(us|eu|ap|sa|ca|me|af)-[a-z]+-[0-9]\b")
 _ENVIRONMENT_KEYWORDS: Final[dict[str, str]] = {
     "dev": "development",
     "development": "development",
@@ -226,8 +224,7 @@ def _question_provider() -> ClarificationQuestion:
     return ClarificationQuestion(
         question_id="provider",
         question_text=(
-            "Which cloud provider should host this infrastructure? "
-            "Currently supported: AWS."
+            "Which cloud provider should host this infrastructure? Currently supported: AWS."
         ),
         input_type="select",
         options=["aws"],
@@ -251,8 +248,7 @@ def _question_environment() -> ClarificationQuestion:
     return ClarificationQuestion(
         question_id="environment",
         question_text=(
-            "What environment is this for? "
-            "(development, staging, production, or sandbox)"
+            "What environment is this for? (development, staging, production, or sandbox)"
         ),
         input_type="select",
         options=["development", "staging", "production", "sandbox"],

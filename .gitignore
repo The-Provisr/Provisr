@@ -34,6 +34,7 @@ $RECYCLE.BIN/
 # AI tooling
 .claude/
 .cursor/
+.commandcode/
 
 # Node / TS
 node_modules/
@@ -68,6 +69,14 @@ bin/
 
 # Docker
 .docker/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
 
 # Environment
 .env

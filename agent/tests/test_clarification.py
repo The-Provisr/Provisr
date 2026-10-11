@@ -338,8 +338,6 @@ def test_answered_context_lists_all_confirmed_fields() -> None:
 
 
 def test_answered_context_ends_with_newline() -> None:
-    answered = [
-        AnsweredQuestion(question_id="region", field_mapping="region", answer="us-east-1")
-    ]
+    answered = [AnsweredQuestion(question_id="region", field_mapping="region", answer="us-east-1")]
     ctx = build_answered_context(answered)
     assert ctx.endswith("\n")

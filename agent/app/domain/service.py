@@ -1,25 +1,43 @@
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from app.domain.clarification import (
-    build_answered_context,
-    detect_gaps,
-)
+from app.domain.clarification import build_answered_context, detect_gaps
+from app.domain.errors import InvalidModelResponseError, SessionFailedError
 from app.domain.models import (
     AgentEvent,
     AgentEventType,
     AgentSession,
     AnsweredQuestion,
+    ClarificationQuestion,
     ConversationMessage,
-    ModelTurnResult,
 )
 from app.integrations.anthropic_model import LanguageModel
 from app.integrations.state import StateStore
-from app.prompts.errors import ProfileNotFound, PromptIntegrityError, VersionNotFound
+from app.outputs.models import (
+    AgentOutputEnvelope,
+    AssistantMessageEnvelope,
+    ClarificationQuestionData,
+    ClarificationQuestionEnvelope,
+    ComponentPayloadEnvelope,
+    ErrorEnvelope,
+    ManifestDraftEnvelope,
+    OutputMetadata,
+    ToolSummaryEnvelope,
+)
+from app.outputs.validation import validate_envelope
+from app.policy.compliance import validate_manifest_policy
+from app.policy.errors import PolicyRequirementsUnavailableError
+from app.policy.tool import PolicyRequirementsTool
+from app.profiles.errors import ProfileNotAvailable
+from app.profiles.errors import ProfileNotFound as AgentProfileNotFound
+from app.profiles.models import ProfileBundle
+from app.profiles.registry import ProfileSelector
+from app.prompts.errors import ProfileNotFound as PromptProfileNotFound
+from app.prompts.errors import (
+    PromptIntegrityError,
+    VersionNotFound,
+)
 from app.prompts.models import PromptBundle
-from app.prompts.registry import PromptRegistry
-
-_PROVISIONING_PROFILE = "provisioning_agent"
 
 
 class AgentService:
@@ -28,46 +46,66 @@ class AgentService:
         *,
         state: StateStore,
         model: LanguageModel,
-        prompt_registry: PromptRegistry,
+        profile_selector: ProfileSelector,
+        policy_tool: PolicyRequirementsTool,
     ) -> None:
         self._state = state
         self._model = model
-        self._prompt_registry = prompt_registry
+        self._profile_selector = profile_selector
+        self._policy_tool = policy_tool
 
     async def create_session(
         self,
         *,
         organization_id: str,
-        request_id: str,
+        request_id: UUID,
+        profile_id: str = "provisioning",
         prompt_version: str | None = None,
     ) -> AgentSession:
-        prompt = self._prompt_registry.get_prompt(_PROVISIONING_PROFILE, prompt_version)
+        profile = self._profile_selector.select_profile(profile_id, prompt_version)
+        prompt = profile.prompt
         now = datetime.now(UTC)
         session = AgentSession(
             session_id=str(uuid4()),
             organization_id=organization_id,
             request_id=request_id,
+            profile_id=profile.profile_id,
             prompt_id=prompt.prompt_id,
             prompt_profile=prompt.profile,
             prompt_version=prompt.version,
             prompt_hash=prompt.content_hash,
+            temperature=profile.llm_config.temperature,
+            max_tokens=profile.llm_config.max_tokens,
             created_at=now,
             updated_at=now,
         )
         await self._state.save_session(session)
         return session
 
-    async def run_turn(self, *, session_id: str, message: str) -> ModelTurnResult:
+    async def run_turn(self, *, session_id: str, message: str) -> AgentOutputEnvelope:
         session = await self._state.get_session(session_id)
+        if session.status == "FAILED":
+            raise SessionFailedError("Failed agent sessions cannot process additional turns")
         try:
-            prompt = self._prompt_registry.get_prompt(
-                session.prompt_profile,
+            profile = self._profile_selector.select_profile(
+                session.profile_id,
                 session.prompt_version,
             )
-        except (ProfileNotFound, VersionNotFound) as error:
-            raise PromptIntegrityError("Pinned prompt is no longer available") from error
+        except (
+            AgentProfileNotFound,
+            ProfileNotAvailable,
+            PromptProfileNotFound,
+            VersionNotFound,
+        ) as error:
+            raise PromptIntegrityError("Pinned agent profile is no longer available") from error
+        prompt = profile.prompt
         if prompt.prompt_id != session.prompt_id or prompt.content_hash != session.prompt_hash:
             raise PromptIntegrityError("Pinned prompt metadata failed integrity validation")
+        if (
+            profile.llm_config.temperature != session.temperature
+            or profile.llm_config.max_tokens != session.max_tokens
+        ):
+            raise PromptIntegrityError("Pinned agent profile configuration changed")
 
         now = datetime.now(UTC)
         session.messages.append(ConversationMessage(role="user", content=message, created_at=now))
@@ -78,73 +116,104 @@ class AgentService:
             "turn.started",
             {
                 "messageAccepted": True,
+                "profileId": profile.profile_id,
                 "promptId": str(prompt.prompt_id),
                 "promptProfile": prompt.profile,
                 "promptVersion": prompt.version,
                 "promptHash": prompt.content_hash,
+                "temperature": profile.llm_config.temperature,
+                "maxTokens": profile.llm_config.max_tokens,
             },
         )
 
-        # ------------------------------------------------------------------ #
-        # Gap detection: check for missing/ambiguous fields before the model  #
-        # call so we can emit structured questions immediately.               #
-        # ------------------------------------------------------------------ #
+        # Deterministic gap detection runs before the model so blocking fields
+        # (provider, region, environment, ...) are asked immediately.
         gaps = detect_gaps(message, answered_questions=session.answered_questions)
         if gaps:
-            # Build a fast-path clarification result without calling the LLM.
-            questions_summary = "; ".join(q.question_text for q in gaps)
-            result = ModelTurnResult(
-                outcome="needs_clarification",
-                message=gaps[0].question_text,
-                clarification_questions=gaps,
-            )
-            completed_at = datetime.now(UTC)
-            session.messages.append(
-                ConversationMessage(
-                    role="assistant",
-                    content=questions_summary,
-                    created_at=completed_at,
-                )
-            )
-            session.updated_at = completed_at
-            await self._state.save_session(session)
-            await self._append_event(
-                session,
-                "clarification.required",
-                result.model_dump(mode="json", exclude_none=True),
-            )
-            await self._append_event(session, "stream.completed", {"outcome": result.outcome})
-            return result
-
-        # ------------------------------------------------------------------ #
-        # Inject confirmed answers as context so the model never re-asks.    #
-        # ------------------------------------------------------------------ #
-        augmented_prompt = _augment_prompt(prompt, session.answered_questions)
-        result = await self._model.complete_turn(session, augmented_prompt)
-
-        # If the model produced additional clarification questions, merge any
-        # new ones that are not already answered.
-        answered_fields = {aq.field_mapping for aq in session.answered_questions}
-        new_questions = [
-            q for q in result.clarification_questions if q.field_mapping not in answered_fields
-        ]
-        if new_questions != result.clarification_questions:
-            result = result.model_copy(update={"clarification_questions": new_questions})
+            result: AgentOutputEnvelope = _clarification_envelope(session, gaps[0])
+        else:
+            await self._ensure_policy_requirements(session)
+            result = await self._run_model_turn(session, profile)
 
         completed_at = datetime.now(UTC)
         session.messages.append(
-            ConversationMessage(role="assistant", content=result.message, created_at=completed_at)
+            ConversationMessage(
+                role="assistant",
+                content=_message_for(result),
+                created_at=completed_at,
+            )
         )
+        if isinstance(result, ErrorEnvelope):
+            session.status = "FAILED"
         session.updated_at = completed_at
         await self._state.save_session(session)
+        event_data = (
+            {
+                "code": result.data.code,
+                "message": result.data.message,
+                "validationError": None,
+                "retryable": result.data.retryable,
+            }
+            if isinstance(result, ErrorEnvelope)
+            else result.model_dump(mode="json")
+        )
         await self._append_event(
             session,
-            "clarification.required"
-            if result.outcome == "needs_clarification"
-            else "manifest.proposed",
-            result.model_dump(mode="json", exclude_none=True),
+            _event_type_for(result),
+            event_data,
         )
-        await self._append_event(session, "stream.completed", {"outcome": result.outcome})
+        await self._append_event(
+            session,
+            "stream.completed",
+            {"outputType": result.type, "sessionStatus": session.status},
+        )
+        return result
+
+    async def _run_model_turn(
+        self,
+        session: AgentSession,
+        profile: ProfileBundle,
+    ) -> AgentOutputEnvelope:
+        """Call the model, validate its envelope, and enforce policy on drafts."""
+        try:
+            augmented_profile = _augment_profile(profile, session.answered_questions)
+            raw_output = await self._model.complete_turn(session, augmented_profile)
+            validation = validate_envelope(raw_output)
+            if not validation.valid or validation.parsed is None:
+                details = validation.errors or ("unknown envelope validation error",)
+                raise InvalidModelResponseError(
+                    f"Agent output failed envelope validation: {'; '.join(details)}"
+                )
+            result = validation.parsed
+            if result.request_id != session.request_id:
+                raise InvalidModelResponseError(
+                    "Agent output request_id did not match the active request"
+                )
+            if isinstance(result, ManifestDraftEnvelope):
+                if session.policy_requirements is None:
+                    raise InvalidModelResponseError(
+                        "Manifest draft was produced before policy requirements were loaded"
+                    )
+                violations = validate_manifest_policy(
+                    result.data.manifest,
+                    session.policy_requirements,
+                )
+                if violations:
+                    details = "; ".join(
+                        f"{violation.message} Alternatives: {' '.join(violation.alternatives)}"
+                        for violation in violations
+                    )
+                    raise InvalidModelResponseError(
+                        f"Manifest draft conflicts with policy requirements: {details}"
+                    )
+        except InvalidModelResponseError as error:
+            await self._fail_turn(
+                session,
+                code="INVALID_AGENT_OUTPUT",
+                message="Agent output failed structured envelope validation",
+                detail=str(error),
+            )
+            raise
         return result
 
     async def record_clarification_answers(
@@ -156,13 +225,12 @@ class AgentService:
         """Persist a batch of clarification answers into the session.
 
         Call this when the frontend submits answers to a ``clarification.required``
-        event before the next ``run_turn``.  Duplicate ``field_mapping`` entries
-        are deduplicated (last value wins) to prevent state bloat.
+        event before the next ``run_turn``. Duplicate ``field_mapping`` entries are
+        deduplicated (last value wins) to prevent state bloat.
         """
         session = await self._state.get_session(session_id)
-        # Build a dict keyed by field_mapping so last-write wins on duplicates.
         merged: dict[str, AnsweredQuestion] = {
-            aq.field_mapping: aq for aq in session.answered_questions
+            answer.field_mapping: answer for answer in session.answered_questions
         }
         for answer in answers:
             merged[answer.field_mapping] = answer
@@ -174,6 +242,55 @@ class AgentService:
         )
         await self._state.save_session(session)
         return session
+
+    async def _ensure_policy_requirements(self, session: AgentSession) -> None:
+        if session.policy_requirements_loaded:
+            return
+
+        try:
+            requirements = await self._policy_tool.get_policy_requirements(session)
+        except PolicyRequirementsUnavailableError as error:
+            await self._fail_turn(
+                session,
+                code=error.code,
+                message="Policy requirements could not be loaded; manifest drafting is blocked",
+                detail=str(error),
+            )
+            raise
+
+        session.policy_requirements = requirements
+        session.policy_requirements_loaded = True
+        session.updated_at = datetime.now(UTC)
+        await self._state.save_session(session)
+        await self._append_event(
+            session,
+            "policy.requirements.loaded",
+            {
+                "tool": "get_policy_requirements",
+                "requirements": requirements.model_dump(mode="json"),
+            },
+        )
+
+    async def _fail_turn(
+        self,
+        session: AgentSession,
+        *,
+        code: str,
+        message: str,
+        detail: str,
+    ) -> None:
+        session.status = "FAILED"
+        session.updated_at = datetime.now(UTC)
+        await self._state.save_session(session)
+        await self._append_event(
+            session,
+            "turn.failed",
+            {
+                "code": code,
+                "message": message,
+                "detail": detail,
+            },
+        )
 
     async def _append_event(
         self,
@@ -197,21 +314,71 @@ class AgentService:
         )
 
 
-def _augment_prompt(
-    prompt: PromptBundle,
-    answered_questions: list[AnsweredQuestion],
-) -> PromptBundle:
-    """Return a prompt with confirmed-answers context prepended to its content.
+def _clarification_envelope(
+    session: AgentSession,
+    question: ClarificationQuestion,
+) -> ClarificationQuestionEnvelope:
+    """Build a clarification envelope for the highest-priority detected gap."""
+    return ClarificationQuestionEnvelope(
+        version="1.0.0",
+        request_id=session.request_id,
+        metadata=OutputMetadata(confidence=1.0, source="template"),
+        type="clarification_question",
+        data=ClarificationQuestionData(
+            question=question.question_text,
+            question_id=question.question_id,
+            input_type=question.input_type,
+            options=tuple(question.options),
+            required=question.required,
+            field_mapping=question.field_mapping,
+        ),
+    )
 
-    When there are no answered questions the original bundle is returned
-    unchanged (no allocation, no hash invalidation risk).
+
+def _augment_profile(
+    profile: ProfileBundle,
+    answered_questions: list[AnsweredQuestion],
+) -> ProfileBundle:
+    """Return the profile with confirmed-answers context prepended to its prompt.
+
+    The prompt's ``content_hash`` is deliberately left untouched: this is a
+    runtime augmentation, not a permanent bundle change, so the session's pinned
+    hash integrity check still holds.
     """
     context_block = build_answered_context(answered_questions)
     if not context_block:
-        return prompt
-    # Use object.__setattr__ to bypass the frozen dataclass constraint on the
-    # in-memory copy — we deliberately do not update content_hash because this
-    # is a runtime augmentation, not a permanent bundle change.
+        return profile
+    augmented_prompt = _augment_prompt(profile.prompt, context_block)
+    return profile.model_copy(update={"prompt": augmented_prompt})
+
+
+def _augment_prompt(prompt: PromptBundle, context_block: str) -> PromptBundle:
     augmented = prompt.model_copy()
     object.__setattr__(augmented, "content", context_block + prompt.content)
     return augmented
+
+
+def _message_for(envelope: AgentOutputEnvelope) -> str:
+    if isinstance(envelope, AssistantMessageEnvelope):
+        return envelope.data.message
+    if isinstance(envelope, ClarificationQuestionEnvelope):
+        return envelope.data.question
+    if isinstance(envelope, ManifestDraftEnvelope):
+        return envelope.data.message
+    if isinstance(envelope, ToolSummaryEnvelope):
+        return envelope.data.summary
+    if isinstance(envelope, ErrorEnvelope):
+        return envelope.data.message
+    if isinstance(envelope, ComponentPayloadEnvelope):
+        return f"Generated component {envelope.data.component_id}."
+    raise TypeError("Unsupported agent output envelope")
+
+
+def _event_type_for(envelope: AgentOutputEnvelope) -> AgentEventType:
+    if isinstance(envelope, ClarificationQuestionEnvelope):
+        return "clarification.required"
+    if isinstance(envelope, ManifestDraftEnvelope):
+        return "manifest.proposed"
+    if isinstance(envelope, ErrorEnvelope):
+        return "turn.failed"
+    return "message.completed"

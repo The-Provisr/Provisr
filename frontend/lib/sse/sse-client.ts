@@ -131,6 +131,10 @@ export class SSEClient {
       const token = await this.options.getToken();
       if (this.stopped) return;
       if (!token) {
+        // No credentials: go offline and stay stopped so a later connect()
+        // (e.g. once the user signs in) can retry instead of no-op'ing.
+        this.stopped = true;
+        this.attempt = 0;
         this.setStatus("disconnected");
         return;
       }

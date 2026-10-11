@@ -238,6 +238,21 @@ describe("SSEClient", () => {
     expect(client.status).toBe("connected");
   });
 
+  it("goes offline on a null token and can reconnect once one is available", async () => {
+    const getToken = vi.fn().mockResolvedValueOnce(null).mockResolvedValue("tok-2");
+    const client = makeClient({ getToken });
+
+    await client.connect();
+
+    expect(client.status).toBe("disconnected");
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    await client.connect();
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(getToken).toHaveBeenCalledTimes(2);
+  });
+
   it("backs off 1s, 2s, 4s, 8s, 16s then caps at 30s", async () => {
     const client = makeClient();
     await client.connect();

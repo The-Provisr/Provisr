@@ -217,6 +217,27 @@ describe("SSEClient", () => {
     expect(getToken).toHaveBeenCalledTimes(2);
   });
 
+  it("backs off and retries when the token fetch rejects", async () => {
+    const getToken = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("token endpoint unavailable"))
+      .mockResolvedValue("tok-2");
+    const client = makeClient({ getToken });
+
+    await client.connect();
+
+    expect(client.status).toBe("reconnecting");
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(getToken).toHaveBeenCalledTimes(2);
+
+    MockEventSource.at(0).emitOpen();
+    expect(client.status).toBe("connected");
+  });
+
   it("backs off 1s, 2s, 4s, 8s, 16s then caps at 30s", async () => {
     const client = makeClient();
     await client.connect();

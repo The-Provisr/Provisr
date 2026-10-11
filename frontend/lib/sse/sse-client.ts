@@ -126,14 +126,22 @@ export class SSEClient {
   private async openConnection(): Promise<void> {
     if (this.stopped) return;
 
-    const token = await this.options.getToken();
-    if (this.stopped) return;
-    if (!token) {
-      this.setStatus("disconnected");
+    let es: EventSource;
+    try {
+      const token = await this.options.getToken();
+      if (this.stopped) return;
+      if (!token) {
+        this.setStatus("disconnected");
+        return;
+      }
+      es = this.createEventSource(this.buildUrl(token));
+    } catch {
+      // Token fetch or EventSource construction failed: treat it like a
+      // transport error so we back off and retry instead of leaving the
+      // client stuck on "connecting".
+      if (!this.stopped) this.scheduleReconnect();
       return;
     }
-
-    const es = this.createEventSource(this.buildUrl(token));
     this.es = es;
 
     es.onopen = () => {
@@ -207,6 +215,10 @@ export class SSEClient {
     }
     if (this.stopped) return;
 
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
     this.setStatus("reconnecting");
     const exponent = Math.min(this.attempt, 30);
     const delay = Math.min(

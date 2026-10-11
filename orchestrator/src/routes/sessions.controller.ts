@@ -14,10 +14,12 @@ import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 import { CurrentUser } from "../middleware/current-user.decorator";
 import type { RequestUser } from "../middleware/auth.types";
 
-export const createSessionSchema = z.object({
-  workspaceId: z.string().uuid(),
-  title: z.string().min(1).max(200).optional(),
-});
+export const createSessionSchema = z
+  .object({
+    workspaceId: z.string().uuid(),
+    title: z.string().min(1).max(200).optional(),
+  })
+  .strict();
 
 export type CreateSessionDto = z.infer<typeof createSessionSchema>;
 

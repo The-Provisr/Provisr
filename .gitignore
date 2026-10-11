@@ -69,6 +69,14 @@ bin/
 # Docker
 .docker/
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
 # Environment
 .env
 .env.*

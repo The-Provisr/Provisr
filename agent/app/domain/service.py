@@ -127,8 +127,10 @@ class AgentService:
         )
 
         # Deterministic gap detection runs before the model so blocking fields
-        # (provider, region, environment, ...) are asked immediately.
-        gaps = detect_gaps(message, answered_questions=session.answered_questions)
+        # (provider, region, environment, ...) are asked immediately. Prior user
+        # turns are included so a value given earlier is not asked again.
+        user_context = "\n".join(item.content for item in session.messages if item.role == "user")
+        gaps = detect_gaps(user_context, answered_questions=session.answered_questions)
         if gaps:
             result: AgentOutputEnvelope = _clarification_envelope(session, gaps[0])
         else:
@@ -189,6 +191,10 @@ class AgentService:
                 raise InvalidModelResponseError(
                     "Agent output request_id did not match the active request"
                 )
+            if isinstance(result, ClarificationQuestionEnvelope) and (
+                result.data.field_mapping in {a.field_mapping for a in session.answered_questions}
+            ):
+                raise InvalidModelResponseError("Agent output asked for an already answered field")
             if isinstance(result, ManifestDraftEnvelope):
                 if session.policy_requirements is None:
                     raise InvalidModelResponseError(

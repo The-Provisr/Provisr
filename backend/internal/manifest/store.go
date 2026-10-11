@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 var (
@@ -70,6 +71,10 @@ func NewStore(db *sql.DB) *DBStore {
 	return &DBStore{db: db}
 }
 
+// maxVersionRetries bounds how many times StoreManifestVersion retries when a
+// concurrent insert for the same run_id wins the (run_id, version) race.
+const maxVersionRetries = 3
+
 // StoreManifestVersion stores a new immutable version of a manifest for runID.
 func (s *DBStore) StoreManifestVersion(ctx context.Context, runID string, content any, sourceMetadata any) (*ManifestRecord, error) {
 	if _, err := uuid.Parse(runID); err != nil {
@@ -98,22 +103,35 @@ func (s *DBStore) StoreManifestVersion(ctx context.Context, runID string, conten
 		FROM next_version
 		RETURNING id, run_id, version, content, source_metadata, created_at`
 
-	var record ManifestRecord
-	record.Hash = hash
+	var lastErr error
+	for attempt := 0; attempt < maxVersionRetries; attempt++ {
+		var record ManifestRecord
+		record.Hash = hash
 
-	err = s.db.QueryRowContext(ctx, query, runID, string(contentBytes), string(metaBytes)).Scan(
-		&record.ID,
-		&record.RunID,
-		&record.Version,
-		&record.Content,
-		&record.SourceMetadata,
-		&record.CreatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to insert manifest version: %w", err)
+		err = s.db.QueryRowContext(ctx, query, runID, string(contentBytes), string(metaBytes)).Scan(
+			&record.ID,
+			&record.RunID,
+			&record.Version,
+			&record.Content,
+			&record.SourceMetadata,
+			&record.CreatedAt,
+		)
+		if err == nil {
+			return &record, nil
+		}
+		if !isUniqueViolation(err) {
+			return nil, fmt.Errorf("failed to insert manifest version: %w", err)
+		}
+		// Lost the version race against a concurrent insert for this run; retry.
+		lastErr = err
 	}
 
-	return &record, nil
+	return nil, fmt.Errorf("failed to insert manifest version after %d attempts: %w", maxVersionRetries, lastErr)
+}
+
+func isUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505"
 }
 
 // GetManifestVersion retrieves an exact version of a manifest for runID.

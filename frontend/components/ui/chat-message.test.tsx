@@ -1,6 +1,7 @@
-import type { ComponentPayload } from "@provisr/shared-contracts";
+import type { ComponentPayload, ComponentType } from "@provisr/shared-contracts";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { RegistryProvider } from "@/components/registry/RegistryProvider";
 import { ChatMessage } from "@/components/ui/chat-message";
 import type { ChatMessageItem } from "@/lib/chat/chat-message-types";
 
@@ -162,5 +163,59 @@ describe("ChatMessage", () => {
     );
     expect(screen.getAllByText(/Hello/)).toHaveLength(1);
     expect(screen.getAllByText(/world/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders the registered component card when a registry provider is present", () => {
+    const payload: ComponentPayload = {
+      type: "cost_estimate",
+      version: "1.0",
+      requestId: "req-1",
+      data: {
+        currency: "USD",
+        monthlyTotalUsd: 482,
+        breakdown: [{ category: "Compute", serviceName: "ECS Fargate tasks", costUsd: 482 }],
+      },
+    };
+    render(
+      <RegistryProvider>
+        <ChatMessage message={{ ...base, components: [payload] }} />
+      </RegistryProvider>,
+    );
+    expect(screen.getByText("Cost Estimation Breakdown")).toBeInTheDocument();
+    expect(screen.queryByText("Rendered once the component registry")).toBeNull();
+  });
+
+  it("falls back safely for unknown component types under a registry provider", () => {
+    const payload: ComponentPayload = {
+      type: "hologram_projector" as ComponentType,
+      version: "9.9",
+      requestId: "req-2",
+      data: {},
+    };
+    render(
+      <RegistryProvider>
+        <ChatMessage message={{ ...base, components: [payload] }} />
+      </RegistryProvider>,
+    );
+    expect(screen.getByText("Unsupported component")).toBeInTheDocument();
+    expect(screen.getByText("hologram_projector")).toBeInTheDocument();
+  });
+
+  it("applies high-contrast text colors to user and assistant bubbles", () => {
+    const { container: userContainer } = renderMessage({
+      ...base,
+      id: "u9",
+      role: "user",
+      content: "Readable user text",
+      status: "sent",
+      createdAt: new Date().toISOString(),
+    });
+    const userBubble = userContainer.querySelector(".bg-blue-50");
+    expect(userBubble?.className).toContain("text-blue-950");
+
+    const { container: assistantContainer } = renderMessage(base);
+    const assistantBubble = assistantContainer.querySelector(".bg-white");
+    expect(assistantBubble?.className).toContain("text-gray-900");
+    expect(assistantBubble?.className).not.toContain("text-white");
   });
 });

@@ -318,6 +318,23 @@ export function DatabaseIcon(props: IconProps) {
   );
 }
 
+export function CheckIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </IconBase>
+  );
+}
+
+export function BanIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m4.9 4.9 14.2 14.2" />
+    </IconBase>
+  );
+}
+
 export function HardDriveIcon(props: IconProps) {
   return (
     <IconBase {...props}>
@@ -392,6 +409,15 @@ export function LockIcon(props: IconProps) {
   );
 }
 
+export function UnlockIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect height="11" rx="2" width="18" x="3" y="11" />
+      <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+    </IconBase>
+  );
+}
+
 export function ExternalLinkIcon(props: IconProps) {
   return (
     <IconBase {...props}>
@@ -426,6 +452,35 @@ export function AlertTriangleIcon(props: IconProps) {
       <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
       <path d="M12 9v4" />
       <path d="M12 17h.01" />
+    </IconBase>
+  );
+}
+
+export function LockOpenIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect height="11" rx="2" width="18" x="3" y="11" />
+      <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+    </IconBase>
+  );
+}
+
+export function GlobeIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
+    </IconBase>
+  );
+}
+
+export function ShieldOffIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m2 2 20 20" />
+      <path d="M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71" />
+      <path d="M9.31 3.65A12.25 12.25 0 0 0 11.24 2.28a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.78 9.78 0 0 1-.08 1.26" />
     </IconBase>
   );
 }

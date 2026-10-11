@@ -1,6 +1,8 @@
 import type { ComponentPayload } from "@provisr/shared-contracts";
-import type { ComponentProps, ReactNode } from "react";
+import { useContext, type ComponentProps, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import { RegistryRenderer } from "@/components/registry/RegistryRenderer";
+import { RegistryContext } from "@/components/registry/RegistryProvider";
 import type {
   ChatAttachment,
   ChatMessageItem,
@@ -93,7 +95,7 @@ function UserMessage({
       }
     >
       <div className="flex max-w-[80%] flex-col items-end">
-        <div className="rounded-3xl border border-blue-200 bg-blue-50 px-6 py-3 text-sm leading-relaxed text-white">
+        <div className="rounded-3xl border border-blue-200 bg-blue-50 px-6 py-3 text-sm leading-relaxed text-blue-950">
           {message.content}
           {message.attachments?.length ? (
             <Attachments messageId={message.id} items={message.attachments} />
@@ -124,8 +126,8 @@ function AssistantMessage({
         <div
           className={
             error
-              ? "rounded-3xl border border-l-2 border-red-200 bg-red-50 px-6 py-3 text-sm leading-relaxed text-white"
-              : "rounded-3xl border border-gray-100 bg-white px-6 py-3 text-sm leading-relaxed text-white"
+              ? "rounded-3xl border border-l-2 border-red-200 bg-red-50 px-6 py-3 text-sm leading-relaxed text-red-900"
+              : "rounded-3xl border border-gray-100 bg-white px-6 py-3 text-sm leading-relaxed text-gray-900"
           }
         >
           <ReactMarkdown components={markdownComponents}>
@@ -170,6 +172,12 @@ export function ChatMessage({
   renderComponent,
   onRetry,
 }: ChatMessageProps) {
+  const registry = useContext(RegistryContext);
+  const resolvedRenderComponent =
+    renderComponent ??
+    (registry
+      ? (payload: ComponentPayload) => <RegistryRenderer payload={payload} />
+      : undefined);
   switch (message.role) {
     case "user":
       return <UserMessage message={message} onRetry={onRetry} />;
@@ -179,7 +187,7 @@ export function ChatMessage({
       return (
         <AssistantMessage
           message={message}
-          renderComponent={renderComponent}
+          renderComponent={resolvedRenderComponent}
           onRetry={onRetry}
         />
       );

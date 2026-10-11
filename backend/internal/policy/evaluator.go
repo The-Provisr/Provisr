@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -338,26 +339,17 @@ func (e *Engine) checkIAMNoWildcards(resources []normalizedResource) []Violation
 			if statements, ok := res.Properties["statement"].([]any); ok {
 				for _, stmtRaw := range statements {
 					if stmt, ok := stmtRaw.(map[string]any); ok {
-						if actions, ok := stmt["actions"].([]any); ok {
-							for _, a := range actions {
-								if s, ok := a.(string); ok && (s == "*" || s == "*:*") {
-									hasWildcard = true
-									break
-								}
-							}
+						if actionsContainWildcard(stmt["actions"]) || actionsContainWildcard(stmt["Action"]) {
+							hasWildcard = true
+							break
 						}
 					}
 				}
 			}
 
-			// Check raw policy string or JSON
+			// Check raw policy JSON document
 			if policyStr, ok := res.Properties["policy"].(string); ok && !hasWildcard {
-				if strings.Contains(policyStr, `Action": "*"`) ||
-					strings.Contains(policyStr, `Action":"*"`) ||
-					strings.Contains(policyStr, `Action": ["*"]`) ||
-					strings.Contains(policyStr, `actions": ["*"]`) {
-					hasWildcard = true
-				}
+				hasWildcard = policyStringHasWildcard(policyStr)
 			}
 
 			if hasWildcard {
@@ -372,6 +364,39 @@ func (e *Engine) checkIAMNoWildcards(resources []normalizedResource) []Violation
 		}
 	}
 	return violations
+}
+
+// actionsContainWildcard reports whether an Action/Actions value (string or list)
+// contains a full wildcard action.
+func actionsContainWildcard(raw any) bool {
+	switch v := raw.(type) {
+	case string:
+		return v == "*" || v == "*:*"
+	case []any:
+		for _, a := range v {
+			if s, ok := a.(string); ok && (s == "*" || s == "*:*") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// policyStringHasWildcard parses a raw IAM policy JSON document and reports
+// whether any statement grants a full wildcard action.
+func policyStringHasWildcard(policyStr string) bool {
+	var doc struct {
+		Statement []map[string]any `json:"Statement"`
+	}
+	if err := json.Unmarshal([]byte(policyStr), &doc); err != nil {
+		return false
+	}
+	for _, stmt := range doc.Statement {
+		if actionsContainWildcard(stmt["Action"]) || actionsContainWildcard(stmt["Actions"]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) checkBudget(cost float64, maxBudget float64) *Violation {

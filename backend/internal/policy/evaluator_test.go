@@ -133,6 +133,22 @@ func TestEngine_Evaluate_DenyRules(t *testing.T) {
 			expectedRuleKey: "security.iam_no_wildcards",
 		},
 		{
+			name: "IAM policy raw JSON wildcard action denied",
+			input: map[string]any{
+				"region": "us-east-1",
+				"resources": []any{
+					map[string]any{
+						"id":   "wildcard_policy_raw",
+						"type": "aws_iam_policy",
+						"properties": map[string]any{
+							"policy": `{"Version": "2012-10-17", "Statement" : [{"Effect": "Allow", "Action" : "*", "Resource": "*"}]}`,
+						},
+					},
+				},
+			},
+			expectedRuleKey: "security.iam_no_wildcards",
+		},
+		{
 			name: "unapproved region denied",
 			input: map[string]any{
 				"region": "ap-south-1", // not in allowed list

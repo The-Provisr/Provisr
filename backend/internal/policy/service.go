@@ -692,6 +692,11 @@ func (s *server) handleEvaluatePolicy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.CheckType != "" && req.CheckType != "manifest" && req.CheckType != "plan" {
+		s.writeError(r, w, http.StatusBadRequest, "validation_error", "check_type must be \"manifest\" or \"plan\"")
+		return
+	}
+
 	res, err := s.engine.Evaluate(r.Context(), req)
 	if err != nil {
 		zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to evaluate policy")

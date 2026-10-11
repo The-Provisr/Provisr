@@ -335,15 +335,11 @@ func (e *Engine) checkIAMNoWildcards(resources []normalizedResource) []Violation
 		if strings.Contains(t, "iam_policy") || strings.Contains(t, "iam_role") || strings.Contains(t, "policy") {
 			hasWildcard := false
 
-			// Check structured statement
-			if statements, ok := res.Properties["statement"].([]any); ok {
-				for _, stmtRaw := range statements {
-					if stmt, ok := stmtRaw.(map[string]any); ok {
-						if actionsContainWildcard(stmt["actions"]) || actionsContainWildcard(stmt["Action"]) {
-							hasWildcard = true
-							break
-						}
-					}
+			// Check structured statement(s)
+			for _, key := range []string{"statement", "Statement"} {
+				if raw, ok := res.Properties[key]; ok && rawHasWildcardStatement(raw) {
+					hasWildcard = true
+					break
 				}
 			}
 
@@ -382,19 +378,60 @@ func actionsContainWildcard(raw any) bool {
 	return false
 }
 
+// statementHasWildcard reports whether a single IAM statement grants a full
+// wildcard action. Both "Action" and "Actions" spellings are accepted.
+func statementHasWildcard(stmt map[string]any) bool {
+	for _, key := range []string{"Action", "Actions", "action", "actions"} {
+		if actionsContainWildcard(stmt[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+// rawHasWildcardStatement accepts a structured Statement property that may be a
+// single object or an array of objects (both valid IAM policy shapes).
+func rawHasWildcardStatement(raw any) bool {
+	switch v := raw.(type) {
+	case map[string]any:
+		return statementHasWildcard(v)
+	case []any:
+		for _, item := range v {
+			if stmt, ok := item.(map[string]any); ok && statementHasWildcard(stmt) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // policyStringHasWildcard parses a raw IAM policy JSON document and reports
-// whether any statement grants a full wildcard action.
+// whether any statement grants a full wildcard action. The Statement element
+// may be a single object or an array.
 func policyStringHasWildcard(policyStr string) bool {
 	var doc struct {
-		Statement []map[string]any `json:"Statement"`
+		Statement json.RawMessage `json:"Statement"`
 	}
 	if err := json.Unmarshal([]byte(policyStr), &doc); err != nil {
 		return false
 	}
-	for _, stmt := range doc.Statement {
-		if actionsContainWildcard(stmt["Action"]) || actionsContainWildcard(stmt["Actions"]) {
-			return true
+	if len(doc.Statement) == 0 {
+		return false
+	}
+
+	var list []map[string]any
+	if err := json.Unmarshal(doc.Statement, &list); err == nil {
+		for _, stmt := range list {
+			if statementHasWildcard(stmt) {
+				return true
+			}
 		}
+		return false
+	}
+
+	var single map[string]any
+	if err := json.Unmarshal(doc.Statement, &single); err == nil {
+		return statementHasWildcard(single)
 	}
 	return false
 }

@@ -678,6 +678,11 @@ func (s *server) handleGetPolicyRequirements(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *server) handleEvaluatePolicy(w http.ResponseWriter, r *http.Request) {
+	if _, ok := PrincipalFromContext(r.Context()); !ok {
+		s.writeError(r, w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 	var req EvaluationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

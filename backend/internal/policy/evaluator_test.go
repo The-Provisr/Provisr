@@ -24,8 +24,8 @@ func TestEngine_Evaluate_Allow(t *testing.T) {
 				"id":   "safe_bucket",
 				"type": "aws_s3_bucket",
 				"properties": map[string]any{
-					"acl":                        "private",
-					"encrypted":                  true,
+					"acl":                         "private",
+					"encrypted":                   true,
 					"public_access_block_enabled": true,
 				},
 				"tags": map[string]any{
@@ -142,6 +142,42 @@ func TestEngine_Evaluate_DenyRules(t *testing.T) {
 						"type": "aws_iam_policy",
 						"properties": map[string]any{
 							"policy": `{"Version": "2012-10-17", "Statement" : [{"Effect": "Allow", "Action" : "*", "Resource": "*"}]}`,
+						},
+					},
+				},
+			},
+			expectedRuleKey: "security.iam_no_wildcards",
+		},
+		{
+			name: "IAM policy single-object statement wildcard denied",
+			input: map[string]any{
+				"region": "us-east-1",
+				"resources": []any{
+					map[string]any{
+						"id":   "single_object_statement",
+						"type": "aws_iam_policy",
+						"properties": map[string]any{
+							"statement": map[string]any{
+								"effect":   "Allow",
+								"Action":   "*",
+								"Resource": "*",
+							},
+						},
+					},
+				},
+			},
+			expectedRuleKey: "security.iam_no_wildcards",
+		},
+		{
+			name: "IAM policy raw JSON single-object statement wildcard denied",
+			input: map[string]any{
+				"region": "us-east-1",
+				"resources": []any{
+					map[string]any{
+						"id":   "raw_single_statement",
+						"type": "aws_iam_policy",
+						"properties": map[string]any{
+							"policy": `{"Version":"2012-10-17","Statement":{"Effect":"Allow","Action":"*","Resource":"*"}}`,
 						},
 					},
 				},
@@ -375,6 +411,7 @@ func BenchmarkEngine_Evaluate(b *testing.B) {
 }
 
 func TestHandleEvaluatePolicy_Endpoint(t *testing.T) {
+	t.Setenv("AUTH_DEV_BYPASS", "true")
 	handler := New(nil, zerolog.Nop())
 
 	validReq := EvaluationRequest{
@@ -402,6 +439,7 @@ func TestHandleEvaluatePolicy_Endpoint(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/policies/evaluate", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer admin-token")
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -416,5 +454,26 @@ func TestHandleEvaluatePolicy_Endpoint(t *testing.T) {
 	}
 	if resp.Decision != DecisionAllow {
 		t.Fatalf("expected decision ALLOW, got %s", resp.Decision)
+	}
+}
+
+func TestHandleEvaluatePolicy_RequiresAuthentication(t *testing.T) {
+	t.Setenv("AUTH_DEV_BYPASS", "false")
+	handler := New(nil, zerolog.Nop())
+
+	bodyBytes, _ := json.Marshal(EvaluationRequest{
+		WorkspaceID: uuid.New().String(),
+		CheckType:   "manifest",
+		Input:       map[string]any{"region": "us-east-1"},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/policies/evaluate", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401 without a principal, got %d (body: %s)", w.Code, w.Body.String())
 	}
 }

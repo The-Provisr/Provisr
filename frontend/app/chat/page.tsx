@@ -17,6 +17,8 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ChatMessage } from "@/components/ui/chat-message";
 import { NavigationRail } from "@/components/ui/navigation-rail";
 import { RegistryProvider } from "@/components/registry/RegistryProvider";
+import { SSEStatusBadge } from "@/components/ui/sse-status-badge";
+import { useSSE } from "@/lib/sse/use-sse";
 
 const progressSteps = [
   "Request",
@@ -40,6 +42,7 @@ const drawerTabs = ["Manifest", "Policy", "Terraform Plan", "Approval"];
 export default function ChatPage() {
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(drawerTabs[0]);
+  const { status } = useSSE();
 
   return (
     <RegistryProvider>
@@ -54,6 +57,7 @@ export default function ChatPage() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
+              <SSEStatusBadge status={status} />
               <Button
                 className="hidden sm:inline-flex"
                 onClick={() => setIsReviewOpen(true)}
@@ -66,7 +70,6 @@ export default function ChatPage() {
                 Share Request
                 <UploadIcon className="size-3.5 text-gray-500" />
               </Button>
-           
             </div>
           </header>
 

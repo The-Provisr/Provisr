@@ -44,7 +44,9 @@ func main() {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	if err := db.Ping(); err != nil {
+	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelPing()
+	if err := db.PingContext(pingCtx); err != nil {
 		logger.Warn().Err(err).Msg("warning: database ping failed at startup, will retry on requests")
 	}
 

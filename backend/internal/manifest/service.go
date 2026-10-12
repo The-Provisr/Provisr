@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -25,20 +27,32 @@ const maxBody = 1 << 20
 type server struct {
 	store Store
 	log   zerolog.Logger
+	// readyCheck, when set, gates the readiness probe on backing services.
+	// Nil for the in-memory store used by tests.
+	readyCheck func(context.Context) error
 }
 
 // New wires the routes and middleware backed by a PostgreSQL manifest store.
 func New(db *sql.DB, log zerolog.Logger) http.Handler {
-	return NewWithStore(log, NewStore(db))
+	s := &server{
+		store:      NewStore(db),
+		log:        log,
+		readyCheck: func(ctx context.Context) error { return db.PingContext(ctx) },
+	}
+	return s.handler()
 }
 
 // NewWithStore wires the routes with an explicit Store implementation. Pass a
 // MemoryStore in tests to avoid a database dependency.
 func NewWithStore(log zerolog.Logger, store Store) http.Handler {
-	s := &server{store: store, log: log}
+	return (&server{store: store, log: log}).handler()
+}
 
+func (s *server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/health/", health.Handler())
+	// More specific than "/health/", so it wins: readiness reflects the store.
+	mux.HandleFunc("GET /health/ready", s.handleReady)
 
 	mux.HandleFunc("POST /v1/manifests/validate", s.handleValidate)
 	mux.HandleFunc("POST /v1/runs/{run_id}/manifests", s.handleStoreVersion)
@@ -48,7 +62,7 @@ func NewWithStore(log zerolog.Logger, store Store) http.Handler {
 
 	// RequestLogger wraps Recover so panic handling runs inside the
 	// request-scoped logger and panic logs carry request_id/correlation_id.
-	return middleware.RequestLogger(log, middleware.Recover(log, mux))
+	return middleware.RequestLogger(s.log, middleware.Recover(s.log, mux))
 }
 
 type errorResponse struct {
@@ -62,14 +76,35 @@ type storeManifestRequest struct {
 	SourceMetadata map[string]any  `json:"source_metadata,omitempty"`
 }
 
+// validateResponse is the wire shape MCP-013 expects: `errors` is always
+// present, empty when the manifest is valid.
+type validateResponse struct {
+	Valid  bool              `json:"valid"`
+	Errors []ValidationError `json:"errors"`
+}
+
 // --- Handlers ---
+
+func (s *server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if s.readyCheck == nil {
+		s.writeJSON(r.Context(), w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.readyCheck(ctx); err != nil {
+		zerolog.Ctx(r.Context()).Warn().Err(err).Msg("readiness check failed")
+		s.writeJSON(r.Context(), w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+		return
+	}
+	s.writeJSON(r.Context(), w, http.StatusOK, map[string]string{"status": "ok"})
+}
 
 func (s *server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 
 	var m Manifest
-	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
-		s.writeError(r.Context(), w, http.StatusBadRequest, "invalid_json", "request body is not valid manifest JSON")
+	if !s.decodeSingleJSON(w, r, &m) {
 		return
 	}
 
@@ -82,7 +117,11 @@ func (s *server) handleValidate(w http.ResponseWriter, r *http.Request) {
 
 	// A validation failure is a successful evaluation, not a transport error:
 	// callers read Valid/Errors to decide what to do.
-	s.writeJSON(r.Context(), w, http.StatusOK, result)
+	validationErrors := result.Errors
+	if validationErrors == nil {
+		validationErrors = []ValidationError{}
+	}
+	s.writeJSON(r.Context(), w, http.StatusOK, validateResponse{Valid: result.Valid, Errors: validationErrors})
 }
 
 func (s *server) handleStoreVersion(w http.ResponseWriter, r *http.Request) {
@@ -93,8 +132,7 @@ func (s *server) handleStoreVersion(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 	var req storeManifestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(r.Context(), w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
+	if !s.decodeSingleJSON(w, r, &req) {
 		return
 	}
 	if len(req.Content) == 0 {
@@ -162,6 +200,22 @@ func (s *server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Helpers ---
+
+// decodeSingleJSON decodes exactly one JSON value into dst and rejects trailing
+// data (e.g. a second object or junk after the value). It writes a 400 response
+// and returns false on failure.
+func (s *server) decodeSingleJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(dst); err != nil {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "request body must contain a single JSON value")
+		return false
+	}
+	return true
+}
 
 func (s *server) requireRunID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	runID := r.PathValue("run_id")

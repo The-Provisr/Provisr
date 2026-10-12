@@ -27,6 +27,10 @@ cd "$ROOT/infra/docker"
 docker compose up -d postgres redis 2>/dev/null || true
 cd "$ROOT"
 
+# Services that talk to Postgres need a DSN; default to the local compose
+# instance unless the developer already exported one.
+export DATABASE_URL="${DATABASE_URL:-postgres://provisr:provisr-dev@localhost:5432/provisr?sslmode=disable}"
+
 echo "Starting $SERVICE-service..."
 cd "$ROOT/backend/cmd/$DIR"
 go run .

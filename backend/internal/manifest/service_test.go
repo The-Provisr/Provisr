@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -61,6 +62,17 @@ func TestValidateAcceptsValidManifest(t *testing.T) {
 	}
 	if !result.Valid || len(result.Errors) != 0 {
 		t.Fatalf("expected valid manifest, got %+v", result)
+	}
+	// MCP-013 expects `errors` to always be present, even when empty.
+	if !strings.Contains(rec.Body.String(), `"errors":[]`) {
+		t.Fatalf("expected errors:[] in response, got %s", rec.Body.String())
+	}
+}
+
+func TestValidateRejectsTrailingJSON(t *testing.T) {
+	rec := doRequest(t, newTestHandler(), http.MethodPost, "/v1/manifests/validate", validManifestJSON+" {}\n")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for trailing JSON, got %d", rec.Code)
 	}
 }
 

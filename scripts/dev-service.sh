@@ -3,7 +3,7 @@ set -euo pipefail
 
 if [ $# -eq 0 ]; then
   echo "Usage: ./scripts/dev-service.sh <service-name>"
-  echo "Available: policy state provisioning approval audit notification reconciler"
+  echo "Available: policy state provisioning approval audit notification reconciler manifest"
   exit 1
 fi
 
@@ -19,6 +19,7 @@ case "$SERVICE" in
   audit) DIR="audit-service" ;;
   notification) DIR="notification-service" ;;
   reconciler) DIR="reconciler" ;;
+  manifest) DIR="manifest-service" ;;
   *) echo "Unknown service: $SERVICE"; exit 1 ;;
 esac
 

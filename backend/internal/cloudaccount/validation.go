@@ -44,3 +44,4 @@ func validIdempotencyKey(key string) bool {
 	key = strings.TrimSpace(key)
 	return key != "" && len(key) <= 128
 }
+

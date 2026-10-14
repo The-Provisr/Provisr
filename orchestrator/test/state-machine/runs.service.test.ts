@@ -1,3 +1,4 @@
+import { NotImplementedException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunsService, createRunsService } from "../../src/state-machine/runs.service";
 import { AuditService } from "../../src/services/audit.service";
@@ -206,5 +207,32 @@ describe("RunsService durable planning", () => {
     const run = makeRun({ state: "COMPLETED" }); const f = memoryDb(run);
     expect((await new RunsService(f.db).cancelRun(run.id, run.workspaceId, run.requesterId)).state).toBe("COMPLETED");
     expect(f.audits).toHaveLength(0);
+  });
+
+  it("rejects an approved decision until plan confirmation is implemented", async () => {
+    const run = makeRun({ state: "APPROVING", approvalStatus: "pending", policyDecision: "requires_approval" }); const f = memoryDb(run);
+    await expect(new RunsService(f.db).handleApprovalEvent(run.id, run.workspaceId, run.requesterId, "approved")).rejects.toThrow(NotImplementedException);
+    expect(f.current()).toMatchObject({ state: "APPROVING", approvalStatus: "pending" });
+    expect(f.audits).toHaveLength(0);
+  });
+
+  it("still routes a rejected approval back to manifest revision", async () => {
+    const run = makeRun({ state: "APPROVING", approvalStatus: "pending", policyDecision: "requires_approval",
+      policyRequirements: policy, policyRequirementsLoadedAt: new Date(), cloudContextLoadedAt: new Date() });
+    run.cloudContext = contextFor(run); const f = memoryDb(run);
+    const updated = await new RunsService(f.db).handleApprovalEvent(run.id, run.workspaceId, run.requesterId, "rejected", "Too expensive");
+    expect(updated).toMatchObject({ state: "MANIFEST_CREATING", approvalStatus: "rejected", agentTurnPending: true });
+  });
+
+  it("destroys the planning lock connection when the advisory unlock fails", async () => {
+    const run = makeRun(); const f = memoryDb(run, "pg_advisory_unlock");
+    await expect(new RunsService(f.db).processRun(run.id, run.workspaceId)).rejects.toThrow("Database write failure");
+    expect(f.release).toHaveBeenCalledWith(expect.objectContaining({ message: "Database write failure" }));
+  });
+
+  it("returns the planning lock connection to the pool after a clean unlock", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    await new RunsService(f.db).processRun(run.id, run.workspaceId);
+    expect(f.release).toHaveBeenCalledWith(undefined);
   });
 });

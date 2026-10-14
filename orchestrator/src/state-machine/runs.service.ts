@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException, NotImplementedException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { z } from "zod";
@@ -267,9 +267,12 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
     const run = await this.getRun(id, workspaceId, actorId);
     if (run.state !== "APPROVING") throw new ConflictException("Run is not waiting for approval");
     if (decision === "rejected" && !reason?.trim()) throw new ConflictException("Reason is required when rejecting an approval");
+    // TODO(follow-up: persist plan confirmation and enable APPROVING → EXECUTING): plan consent is not
+    // recorded yet, so confirmationCompleted is always false and an approval cannot start execution.
+    if (decision === "approved") throw new NotImplementedException("Execution is not yet available: plan confirmation is not implemented, so an approved run cannot advance to EXECUTING.");
     return this.mutate(id, workspaceId, run.stateVersion, actorId, () => ({
-      state: decision === "approved" ? "EXECUTING" : "MANIFEST_CREATING",
-      updates: decision === "approved" ? { approvalStatus: decision } : { approvalStatus: decision, policyDecision: null,
+      state: "MANIFEST_CREATING",
+      updates: { approvalStatus: decision, policyDecision: null,
         manifestValidatedVersion: null, manifestConfirmedVersion: null, manifestConfirmedAt: null, manifestValidationAttempts: 0,
         agentInput: `Revise the proposal in response to the approval rejection: ${reason}`, agentTurnPending: true },
       eventType: "ApprovalDecisionEvent", payload: { decision, ...(reason ? { reason } : {}) },
@@ -334,8 +337,11 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
         });
       }
     } finally {
+      // A connection whose unlock failed may still hold the session lock; destroy it rather than pool it.
+      let unlockError: Error | undefined;
       try { if (locked) await lock.query("SELECT pg_advisory_unlock(hashtext('provisr_planning'), hashtext($1))", [id]); }
-      finally { lock.release(); }
+      catch (error) { unlockError = error as Error; throw error; }
+      finally { lock.release(unlockError); }
     }
   }
   private async dispatchAgent(initial: ProvisioningRun): Promise<void> {

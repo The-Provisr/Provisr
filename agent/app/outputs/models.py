@@ -4,7 +4,7 @@ import re
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.manifest import ResourceManifest
 
@@ -77,6 +77,12 @@ class ClarificationAnswerField(OutputModel):
     name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
     type: Literal["string", "number", "boolean", "strings"]
     options: tuple[str, ...] | None = None
+
+    @model_validator(mode="after")
+    def validate_options_type(self) -> ClarificationAnswerField:
+        if self.options is not None and self.type not in ("string", "strings"):
+            raise ValueError("options are only allowed for string fields")
+        return self
 
 
 class ClarificationQuestionData(OutputModel):

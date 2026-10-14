@@ -92,7 +92,7 @@ export class PostgresWorkflowTransitionStore implements WorkflowTransitionStore 
       await client.query("COMMIT");
       return toSnapshot(row);
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => {});
       throw error;
     } finally {
       client.release();

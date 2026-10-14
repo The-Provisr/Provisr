@@ -5,7 +5,7 @@ ALTER TYPE provisr_events.event_status ADD VALUE IF NOT EXISTS 'publishing';
 ALTER TABLE provisr_events.sse_events
     ALTER COLUMN event_id TYPE UUID USING event_id::uuid,
     ADD COLUMN published_at TIMESTAMPTZ,
-    ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK (delivery_attempts BETWEEN 0 AND 3),
+    ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK (delivery_attempts >= 0),
     ADD COLUMN next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     ADD COLUMN locked_until TIMESTAMPTZ,
     ADD COLUMN last_error TEXT,

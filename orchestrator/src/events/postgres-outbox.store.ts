@@ -56,7 +56,7 @@ export class PostgresOutboxStore implements OutboxStore {
       await client.query("COMMIT");
       return result.rows[0] ? toOutboxEvent(result.rows[0]) : null;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => {});
       throw error;
     } finally {
       client.release();

@@ -20,7 +20,7 @@ const answerFieldSchema = z.object({
   name: z.string().regex(/^[a-z][a-z0-9_]*$/).max(64),
   type: z.enum(["string", "number", "boolean", "strings"]),
   options: z.array(z.string().min(1)).min(1).nullish(),
-}).strict();
+}).strict().refine(f => !f.options || f.type === "string" || f.type === "strings", "Answer options are only allowed for string fields");
 export const questionSchema = z.object({
   question: z.string().trim().min(1).max(10000),
   fields: z.array(answerFieldSchema).min(1).max(20).default([{ name: "answer", type: "string" }]),

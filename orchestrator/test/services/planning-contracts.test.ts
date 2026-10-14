@@ -13,6 +13,13 @@ describe("questionSchema", () => {
     expect(() => validateAnswers(question, { region: "ap-south-1" })).toThrow();
   });
 
+  it("rejects answer options on non-string fields when the question is emitted", () => {
+    for (const type of ["number", "boolean"]) {
+      expect(() => questionSchema.parse({ question: "How many?", fields: [{ name: "count", type, options: ["1", "2"] }] })).toThrow();
+    }
+    expect(questionSchema.parse({ question: "Which zones?", fields: [{ name: "zones", type: "strings", options: ["a", "b"] }] }).fields[0]!.options).toEqual(["a", "b"]);
+  });
+
   it("still rejects unknown keys", () => {
     expect(() => questionSchema.parse({ question: "Which region?", unexpected: true })).toThrow();
   });

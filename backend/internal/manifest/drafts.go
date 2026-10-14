@@ -200,7 +200,7 @@ func (s *draftServer) store(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "Manifest storage unavailable")
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Validation performs remote calls. Recheck and lock authorization before
 	// writing, so membership revocation cannot race a stored draft.
 	var role string

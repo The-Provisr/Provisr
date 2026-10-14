@@ -61,3 +61,5 @@ export interface ComponentPayload<T = unknown> {
   requestId: string;
   data: T;
 }
+
+export * from "./component-schemas";

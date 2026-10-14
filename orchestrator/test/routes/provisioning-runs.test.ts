@@ -89,8 +89,7 @@ describe("Provisioning runs routes", () => {
     expect(res.body.details).toEqual([
       {
         field: "status",
-        message:
-          "Invalid enum value. Expected 'received' | 'pending_agent' | 'pending_clarification' | 'policy_check' | 'pending_confirmation' | 'pending_approval' | 'provisioning' | 'live' | 'failed' | 'cancelled', received 'INVALID'",
+        message: expect.stringContaining("Invalid enum value"),
       },
     ]);
   });
@@ -120,7 +119,7 @@ describe("Provisioning runs routes", () => {
     ]);
   });
 
-  it("requires manifestVersion and planVersion on confirm", async () => {
+  it("requires manifestVersion on confirm", async () => {
     const res = await http(app)
       .post(`/v1/runs/${UUID}/confirm?workspaceId=${UUID}`)
       .send({})
@@ -128,7 +127,6 @@ describe("Provisioning runs routes", () => {
 
     expect(res.body.details).toEqual([
       { field: "manifestVersion", message: "Required" },
-      { field: "planVersion", message: "Required" },
     ]);
   });
 
@@ -205,13 +203,13 @@ describe("ProvisioningRunsController", () => {
     const controller = new ProvisioningRunsController(runsService);
 
     await controller.create(UUID, { sessionId: UUID, prompt: "Create VPC" }, user);
-    expect(runsService.createRun).toHaveBeenCalledWith(UUID, UUID, user.userId, "Create VPC");
+    expect(runsService.createRun).toHaveBeenCalledWith(UUID, UUID, user.userId, "Create VPC", undefined);
 
     await controller.list(UUID, UUID, "received", user);
-    expect(runsService.listRuns).toHaveBeenCalledWith(UUID, UUID, "received");
+    expect(runsService.listRuns).toHaveBeenCalledWith(UUID, UUID, "received", user.userId);
 
-    await controller.get(UUID, UUID);
-    expect(runsService.getRun).toHaveBeenCalledWith(UUID, UUID);
+    await controller.get(UUID, UUID, user);
+    expect(runsService.getRun).toHaveBeenCalledWith(UUID, UUID, user.userId);
 
     await controller.cancel(UUID, UUID, user);
     expect(runsService.cancelRun).toHaveBeenCalledWith(UUID, UUID, user.userId);

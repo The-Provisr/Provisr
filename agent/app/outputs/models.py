@@ -4,7 +4,7 @@ import re
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.manifest import ResourceManifest
 
@@ -73,8 +73,33 @@ class ManifestDraftData(OutputModel):
     manifest: ResourceManifest
 
 
+class ClarificationAnswerField(OutputModel):
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    type: Literal["string", "number", "boolean", "strings"]
+    options: tuple[str, ...] | None = None
+
+    @model_validator(mode="after")
+    def validate_options_type(self) -> ClarificationAnswerField:
+        if self.options is not None and self.type not in ("string", "strings"):
+            raise ValueError("options are only allowed for string fields")
+        return self
+
+
 class ClarificationQuestionData(OutputModel):
     question: str = Field(min_length=1, max_length=10000)
+    fields: tuple[ClarificationAnswerField, ...] = Field(
+        default=(ClarificationAnswerField(name="answer", type="string"),),
+        min_length=1,
+        max_length=20,
+    )
+    # Structured detail for the FE-C03 clarification UI. Mirrors
+    # frontend/lib/clarification/types.ts (ClarificationQuestionPayload); all
+    # fields are optional so older plain-text envelopes remain valid.
+    question_id: str | None = Field(default=None, max_length=64)
+    input_type: Literal["text", "select", "multi_select", "boolean", "confirmation"] | None = None
+    options: tuple[str, ...] = ()
+    required: bool = True
+    field_mapping: str | None = Field(default=None, max_length=128)
 
 
 class ToolSummaryData(OutputModel):

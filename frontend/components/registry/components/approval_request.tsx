@@ -1,14 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const approvalRequestSchema = z.object({
-  requestId: z.string(),
-  status: z.enum(["pending", "approved", "rejected", "expired"]),
-  reason: z.string(),
-  requiredApprovers: z.array(z.string()).optional(),
-  autoApprovalEligible: z.boolean().default(false),
-  expiresAt: z.string().optional(),
-});
+import { approvalRequestSchema } from "@provisr/shared-contracts";
+export { approvalRequestSchema } from "@provisr/shared-contracts";
 
 export type ApprovalRequestData = z.infer<typeof approvalRequestSchema>;
 

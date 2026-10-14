@@ -1,14 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const cloudStateSchema = z.object({
-  cloudAccountId: z.string(),
-  provider: z.enum(["aws", "azure", "gcp"]),
-  syncedAt: z.string(),
-  totalResources: z.number(),
-  healthyCount: z.number(),
-  unhealthyCount: z.number(),
-});
+import { cloudStateSchema } from "@provisr/shared-contracts";
+export { cloudStateSchema } from "@provisr/shared-contracts";
 
 export type CloudStateData = z.infer<typeof cloudStateSchema>;
 

@@ -1,480 +1,122 @@
-import { describe, expect, it, vi } from "vitest";
-import { randomUUID } from "node:crypto";
-import { ConflictException, NotFoundException } from "@nestjs/common";
-import {
-  ALL_RUN_STATES,
-  ProvisioningRun,
-  RunState,
-  RunsService,
-} from "../../src/state-machine/runs.service";
-import type { DbService } from "../../src/db/db.service";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile, readdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { DbService } from "../../src/db/db.service";
+import { RunsService } from "../../src/state-machine/runs.service";
+import { AuditService, serializeAuditPayload } from "../../src/services/audit.service";
+import { ChatPersistenceService } from "../../src/services/chat-persistence.service";
+import { ChatEventsService } from "../../src/services/chat-events.service";
+import { fakeClients, manifest, policy, contextFor } from "../helpers/planning-fixture";
 
-describe("State Machine Transitions Integration Tests", () => {
-  const workspaceId = randomUUID();
-  const sessionId = randomUUID();
-  const runId = randomUUID();
-  const userId = randomUUID();
+const connection = process.env.TEST_DATABASE_URL;
+describe.skipIf(!connection)("OR-M01..012 real PostgreSQL", () => {
+  let db: DbService;
+  let service: RunsService;
+  const workspaceId = randomUUID(), userId = randomUUID(), sessionId = randomUUID();
+  beforeAll(async () => {
+    // Refuse to run migrations against a normal application database.
+    if (!new URL(connection!).pathname.startsWith("/provisr_or_planning_test_")) throw new Error("Use a disposable provisr_or_planning_test_* database");
+    db = new DbService({ databaseUrl: connection });
+    const migrations = resolve(process.cwd(), "../backend/migrations");
+    const files = (await readdir(migrations)).filter(file => file.endsWith(".up.sql")).sort();
+    for (const file of files) await db.query(await readFile(resolve(migrations, file), "utf8"));
+    await db.query(`INSERT INTO provisr_identity.users (id, clerk_id, name, email) VALUES ($1,$2,'Test','test@example.invalid')`, [userId, userId]);
+    await db.query(`INSERT INTO provisr_identity.workspaces (id,name,slug,environment) VALUES ($1,'Test',$2,'dev')`, [workspaceId,workspaceId]);
+    await db.query(`INSERT INTO provisr_identity.memberships (workspace_id,user_id,role) VALUES ($1,$2,'engineer')`, [workspaceId,userId]);
+    await db.query(`INSERT INTO provisr_state.chat_sessions (id,workspace_id,user_id,title) VALUES ($1,$2,$3,'Test')`, [sessionId,workspaceId,userId]);
+    service = new RunsService(db);
+  }, 30000);
+  afterAll(async () => { if (db) await db.onModuleDestroy(); });
 
-  const createMockRun = (overrides?: Partial<ProvisioningRun>): ProvisioningRun => ({
-    id: runId,
-    sessionId,
-    workspaceId,
-    requesterId: userId,
-    state: "received",
-    stateVersion: 0,
-    prompt: "provision vpc and k8s cluster",
-    manifestVersion: null,
-    policyDecision: null,
-    approvalStatus: "not_required",
-    executionStatus: "pending",
-    idempotencyKey: null,
-    correlationId: randomUUID(),
-    errorCode: null,
-    errorMessage: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    completedAt: null,
-    ...overrides,
+  it("creates a single run on concurrent idempotent requests", async () => {
+    const key = randomUUID();
+    const results = await Promise.all(Array.from({ length: 4 }, () => service.createRun(sessionId,workspaceId,userId,"Create bucket",key)));
+    expect(new Set(results.map(run => run.id)).size).toBe(1);
+    expect(results[0]!.state).toBe("RECEIVED");
+    await expect(service.createRun(sessionId,workspaceId,userId,"Different prompt",key)).rejects.toThrow("Idempotency key");
   });
 
-  /**
-   * Helper that simulates an in-memory transactional database for RunsService
-   */
-  function createTransactionalMockDb(initialRun: ProvisioningRun) {
-    let currentRunState = { ...initialRun };
-    const auditLogs: Array<{ action: string; eventData: string; workspaceId: string; actorId: string; resourceId: string }> = [];
-    const outboxEvents: Array<{ eventId: string; resourceId: string; eventType: string; payload: string }> = [];
-
-    const poolClient = {
-      query: vi.fn().mockImplementation(async (sql: string, params?: unknown[]) => {
-        if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") {
-          return { rows: [] };
-        }
-        if (sql.includes("FROM provisr_state.provisioning_runs") && sql.includes("FOR UPDATE")) {
-          const [id, wsId] = params as [string, string];
-          if (id === currentRunState.id && wsId === currentRunState.workspaceId) {
-            return { rows: [{ ...currentRunState }] };
-          }
-          return { rows: [] };
-        }
-        if (sql.includes("UPDATE provisr_state.provisioning_runs")) {
-          const [newState, approvalStatus, policyDecision, id, wsId, expectedVer] = params as [
-            RunState,
-            string,
-            string | null,
-            string,
-            string,
-            number,
-          ];
-          if (
-            id === currentRunState.id &&
-            wsId === currentRunState.workspaceId &&
-            currentRunState.stateVersion === expectedVer
-          ) {
-            currentRunState = {
-              ...currentRunState,
-              state: newState,
-              approvalStatus: approvalStatus ?? currentRunState.approvalStatus,
-              policyDecision: policyDecision ?? currentRunState.policyDecision,
-              stateVersion: currentRunState.stateVersion + 1,
-              updatedAt: new Date(),
-            };
-            return { rows: [{ ...currentRunState }] };
-          }
-          return { rows: [] };
-        }
-        if (sql.includes("INSERT INTO provisr_audit.audit_events")) {
-          const [wsId, actorId, rId, eventData] = params as [string, string, string, string];
-          auditLogs.push({ action: "run_transitioned", eventData, workspaceId: wsId, actorId, resourceId: rId });
-          return { rows: [] };
-        }
-        if (sql.includes("INSERT INTO provisr_events.events")) {
-          const [eventId, rId, payload] = params as [string, string, string];
-          outboxEvents.push({ eventId, resourceId: rId, eventType: "StateChangedEvent", payload });
-          return { rows: [] };
-        }
-        return { rows: [] };
-      }),
-      release: vi.fn(),
-    };
-
-    const db = {
-      connect: vi.fn().mockResolvedValue(poolClient),
-      query: vi.fn().mockImplementation(async (sql: string, params?: unknown[]) => {
-        if (sql.includes("FROM provisr_state.provisioning_runs")) {
-          const [id, wsId] = params as [string, string];
-          if (id === currentRunState.id && wsId === currentRunState.workspaceId) {
-            return { rows: [{ ...currentRunState }] };
-          }
-          return { rows: [] };
-        }
-        return { rows: [] };
-      }),
-    } as unknown as DbService;
-
-    return {
-      db,
-      poolClient,
-      getRunState: () => currentRunState,
-      setRunState: (updated: ProvisioningRun) => {
-        currentRunState = { ...updated };
-      },
-      getAuditLogs: () => auditLogs,
-      getOutboxEvents: () => outboxEvents,
-    };
-  }
-
-  describe("End-to-End Strict State Transition Sequence", () => {
-    it("successfully progresses through all prescribed stages from received to completed", async () => {
-      const initial = createMockRun();
-      const mockEnv = createTransactionalMockDb(initial);
-      const service = new RunsService(mockEnv.db);
-
-      const happyPathTransitions: RunState[] = [
-        "pending_policy",
-        "pending_cloud_context",
-        "pending_agent",
-        "manifest_ready",
-        "pending_iac",
-        "plan_ready",
-        "pending_policy_check",
-        "pending_confirmation",
-        "pending_approval",
-        "pending_execution",
-        "executing",
-        "completed",
-      ];
-
-      let currentExpectedVersion = 0;
-
-      for (const nextState of happyPathTransitions) {
-        const updated = await service.transitionState(
-          runId,
-          workspaceId,
-          currentExpectedVersion,
-          nextState,
-          userId,
-        );
-
-        expect(updated.state).toBe(nextState);
-        currentExpectedVersion += 1;
-        expect(updated.stateVersion).toBe(currentExpectedVersion);
-      }
-
-      expect(mockEnv.getRunState().state).toBe("completed");
-      expect(mockEnv.getRunState().stateVersion).toBe(12);
-
-      // Verify audit events and outbox events captured at each transition
-      const auditLogs = mockEnv.getAuditLogs();
-      expect(auditLogs).toHaveLength(12);
-      expect(auditLogs.every((log) => log.action === "run_transitioned")).toBe(true);
-
-      const outboxEvents = mockEnv.getOutboxEvents();
-      expect(outboxEvents).toHaveLength(12);
-      expect(outboxEvents.every((e) => e.eventType === "StateChangedEvent")).toBe(true);
-    });
+  it("persists transitions, validates answer mappings, and resumes the same run", async () => {
+    let run = await service.createRun(sessionId,workspaceId,userId,"Clarification");
+    run = await service.transitionState(run.id,workspaceId,run.stateVersion,"POLICY_LOADED",userId);
+    run = await service.transitionState(run.id,workspaceId,run.stateVersion,"CLOUD_CONTEXT_LOADED",userId,{ policyRequirements: policy, policyRequirementsLoadedAt: new Date() });
+    await expect(service.transitionState(run.id,workspaceId,run.stateVersion,"MANIFEST_CREATING",userId)).rejects.toThrow("cloudContextLoaded");
+    run = await service.transitionState(run.id,workspaceId,run.stateVersion,"MANIFEST_CREATING",userId,{ cloudContext: contextFor(run), cloudContextLoadedAt: new Date() });
+    run = await service.suspendRun(run,{ question: "Region?",fields: [{ name: "region",type: "string",options: ["us-east-1"] }] });
+    await expect(service.clarifyRun(run.id,workspaceId,userId,{ answers: { region: "us-east-1", unexpected: true } })).rejects.toThrow("Answers do not match");
+    const resumed = await service.clarifyRun(run.id,workspaceId,userId,{ answers: { region: "us-east-1" },idempotencyKey: "clarify-once" });
+    expect(resumed.id).toBe(run.id);
+    expect(resumed.state).toBe("MANIFEST_CREATING");
+    expect(resumed.answersHistory).toHaveLength(1);
+    const replay = await service.clarifyRun(run.id,workspaceId,userId,{ answers: { region: "us-east-1" },idempotencyKey: "clarify-once" });
+    expect(replay.stateVersion).toBe(resumed.stateVersion);
+    await expect(service.transitionState(run.id,workspaceId,run.stateVersion,"FAILED",userId)).rejects.toThrow("State version conflict");
   });
 
-  describe("Approval Edge Cases & Gating", () => {
-    it("successfully approves a run in pending_approval state -> moves to pending_execution and marks approved", async () => {
-      const initial = createMockRun({ state: "pending_approval", stateVersion: 8, approvalStatus: "pending" });
-      const mockEnv = createTransactionalMockDb(initial);
-      const service = new RunsService(mockEnv.db);
-
-      const result = await service.handleApprovalEvent(runId, workspaceId, userId, "approved");
-
-      expect(result.state).toBe("pending_execution");
-      expect(result.stateVersion).toBe(9);
-      expect(result.approvalStatus).toBe("approved");
-    });
-
-    it("successfully rejects a run in pending_approval state -> moves to pending_agent for redesign with reason", async () => {
-      const initial = createMockRun({ state: "pending_approval", stateVersion: 8, approvalStatus: "pending" });
-      const mockEnv = createTransactionalMockDb(initial);
-      const service = new RunsService(mockEnv.db);
-
-      const result = await service.handleApprovalEvent(
-        runId,
-        workspaceId,
-        userId,
-        "rejected",
-        "Cost estimate exceeds monthly budget threshold",
-      );
-
-      expect(result.state).toBe("pending_agent");
-      expect(result.stateVersion).toBe(9);
-      expect(result.approvalStatus).toBe("rejected");
-    });
-
-    it("rejects approval rejection when reason is missing or empty", async () => {
-      const initial = createMockRun({ state: "pending_approval", stateVersion: 8 });
-      const mockEnv = createTransactionalMockDb(initial);
-      const service = new RunsService(mockEnv.db);
-
-      await expect(
-        service.handleApprovalEvent(runId, workspaceId, userId, "rejected"),
-      ).rejects.toThrow("Reason is required when rejecting an approval");
-
-      await expect(
-        service.handleApprovalEvent(runId, workspaceId, userId, "rejected", "   "),
-      ).rejects.toThrow("Reason is required when rejecting an approval");
-    });
-
-    it("rejects approval decision when run is in a rejected state (pending_agent)", async () => {
-      const rejectedRun = createMockRun({ state: "pending_agent", stateVersion: 9, approvalStatus: "rejected" });
-      const mockEnv = createTransactionalMockDb(rejectedRun);
-      const service = new RunsService(mockEnv.db);
-
-      await expect(
-        service.handleApprovalEvent(runId, workspaceId, userId, "approved"),
-      ).rejects.toThrow(ConflictException);
-
-      await expect(
-        service.handleApprovalEvent(runId, workspaceId, userId, "approved"),
-      ).rejects.toThrow("Cannot process approval decision for run in 'pending_agent' state (expected 'pending_approval')");
-    });
-
-    it("rejects approval decision on terminal or non-approval states", async () => {
-      const invalidStates: RunState[] = ["completed", "failed", "cancelled", "executing", "received", "pending_confirmation"];
-
-      for (const invalidState of invalidStates) {
-        const run = createMockRun({ state: invalidState, stateVersion: 5 });
-        const mockEnv = createTransactionalMockDb(run);
-        const service = new RunsService(mockEnv.db);
-
-        await expect(
-          service.handleApprovalEvent(runId, workspaceId, userId, "approved"),
-        ).rejects.toThrow(`Cannot process approval decision for run in '${invalidState}' state (expected 'pending_approval')`);
-      }
-    });
-
-    it("rejects direct state transition to pending_execution from non-approval states", async () => {
-      const nonApprovalStates: RunState[] = [
-        "received",
-        "pending_policy",
-        "pending_cloud_context",
-        "pending_agent",
-        "manifest_ready",
-        "pending_iac",
-        "plan_ready",
-        "pending_policy_check",
-        "pending_confirmation",
-        "executing",
-        "completed",
-        "failed",
-        "cancelled",
-      ];
-
-      for (const fromState of nonApprovalStates) {
-        const run = createMockRun({ state: fromState, stateVersion: 2 });
-        const mockEnv = createTransactionalMockDb(run);
-        const service = new RunsService(mockEnv.db);
-
-        await expect(
-          service.transitionState(runId, workspaceId, 2, "pending_execution", userId),
-        ).rejects.toThrow(
-          `Invalid state transition from '${fromState}' to 'pending_execution'`,
-        );
-      }
-    });
+  it("rolls back state and audit when the outbox rejects an insert", async () => {
+    const run = await service.createRun(sessionId,workspaceId,userId,"Rollback");
+    const before = await db.query(`SELECT count(*) AS count FROM provisr_audit.audit_events WHERE resource_id = $1`,[run.id]);
+    await db.query(`CREATE FUNCTION provisr_events.test_reject_event() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.payload->>'run_id' = '${run.id}' THEN RAISE EXCEPTION 'test outbox failure'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER test_reject_event BEFORE INSERT ON provisr_events.sse_events FOR EACH ROW EXECUTE FUNCTION provisr_events.test_reject_event()`);
+    try {
+      await expect(service.transitionState(run.id,workspaceId,0,"POLICY_LOADED",userId)).rejects.toThrow("test outbox failure");
+      expect((await service.getRun(run.id,workspaceId)).stateVersion).toBe(0);
+      expect((await db.query(`SELECT count(*) AS count FROM provisr_audit.audit_events WHERE resource_id = $1`,[run.id])).rows).toEqual(before.rows);
+    } finally { await db.query("DROP TRIGGER test_reject_event ON provisr_events.sse_events; DROP FUNCTION provisr_events.test_reject_event()"); }
   });
 
-  describe("Enforce Strict Step Order (Rejection of Skipped Transitions)", () => {
-    it("rejects jumping directly from received to executing (bypassing all safety gates)", async () => {
-      const initial = createMockRun({ state: "received", stateVersion: 0 });
-      const mockEnv = createTransactionalMockDb(initial);
-      const service = new RunsService(mockEnv.db);
-
-      await expect(
-        service.transitionState(runId, workspaceId, 0, "executing", userId),
-      ).rejects.toThrow("Invalid state transition from 'received' to 'executing'");
+  it("stores versions and blocks IaC until the active version is confirmed", async () => {
+    const created = await service.createRun(sessionId,workspaceId,userId,"Manifest");
+    const c = fakeClients(created,[{ type: "manifest_draft",data: { message: "Draft",manifest } },{ type: "manifest_draft",data: { message: "Revision",manifest } }]);
+    const original = c.fetcher.getMockImplementation()!;
+    c.fetcher.mockImplementation(async (url, init) => {
+      if (new URL(String(url)).pathname !== "/v1/manifests") return original(url,init);
+      const body = JSON.parse(init!.body as string);
+      // Mock the remote BE-D02 dependency with real canonical manifest storage.
+      // Its authorization, validation, concurrency and audit are separately tested in Go.
+      const result = await db.query<{ version: number }>(`INSERT INTO provisr_manifest.manifests (run_id,version,content,idempotency_key)
+        SELECT $1,COALESCE(MAX(version),0)+1,$2::jsonb,$3 FROM provisr_manifest.manifests WHERE run_id=$1 RETURNING version`,[created.id,JSON.stringify(body.content),body.context.idempotency_key]);
+      return new Response(JSON.stringify(result.rows[0]),{ status: 201 });
     });
-
-    it("rejects jumping from manifest_ready to executing (bypassing IaC, Plan, Policy, Confirmation, Approval)", async () => {
-      const initial = createMockRun({ state: "manifest_ready", stateVersion: 4 });
-      const mockEnv = createTransactionalMockDb(initial);
-      const service = new RunsService(mockEnv.db);
-
-      await expect(
-        service.transitionState(runId, workspaceId, 4, "executing", userId),
-      ).rejects.toThrow("Invalid state transition from 'manifest_ready' to 'executing'");
-    });
-
-    it("rejects jumping from pending_confirmation to executing (bypassing approval gate)", async () => {
-      const initial = createMockRun({ state: "pending_confirmation", stateVersion: 8 });
-      const mockEnv = createTransactionalMockDb(initial);
-      const service = new RunsService(mockEnv.db);
-
-      await expect(
-        service.transitionState(runId, workspaceId, 8, "executing", userId),
-      ).rejects.toThrow("Invalid state transition from 'pending_confirmation' to 'executing'");
-    });
-
-    it("rejects jumping from pending_execution to completed (bypassing execution)", async () => {
-      const initial = createMockRun({ state: "pending_execution", stateVersion: 10 });
-      const mockEnv = createTransactionalMockDb(initial);
-      const service = new RunsService(mockEnv.db);
-
-      await expect(
-        service.transitionState(runId, workspaceId, 10, "completed", userId),
-      ).rejects.toThrow("Invalid state transition from 'pending_execution' to 'completed'");
-    });
+    const planning = new RunsService(db,new AuditService(db),c.clients);
+    await planning.processRun(created.id,workspaceId);
+    let run = await service.getRun(created.id,workspaceId);
+    expect(run).toMatchObject({ state: "MANIFEST_VALIDATING",manifestVersion: 1,manifestValidatedVersion: 1 });
+    await expect(service.transitionState(run.id,workspaceId,run.stateVersion,"IAC_GENERATING",userId)).rejects.toThrow("manifestConfirmed");
+    await planning.reviseRun(run.id,workspaceId,userId,"Change the bucket");
+    await planning.processRun(created.id,workspaceId);
+    run = await service.getRun(created.id,workspaceId);
+    expect(run.manifestVersion).toBe(2);
+    await expect(service.confirmRun(run.id,workspaceId,userId,{ manifestVersion: "1" })).rejects.toThrow("active validated");
+    expect((await service.confirmRun(run.id,workspaceId,userId,{ manifestVersion: "2" })).state).toBe("IAC_GENERATING");
+    await expect(db.query(`UPDATE provisr_manifest.manifests SET content='{}' WHERE run_id=$1`,[run.id])).rejects.toThrow("immutable");
+    await expect(db.query(`DELETE FROM provisr_manifest.manifests WHERE run_id=$1`,[run.id])).rejects.toThrow("immutable");
   });
 
-  describe("Rejection of Backward and Terminal Transitions", () => {
-    it("rejects backward transitions from executing to previous states", async () => {
-      const executingRun = createMockRun({ state: "executing", stateVersion: 11 });
-      const mockEnv = createTransactionalMockDb(executingRun);
-      const service = new RunsService(mockEnv.db);
-
-      const previousStates: RunState[] = [
-        "received",
-        "pending_policy",
-        "pending_cloud_context",
-        "pending_agent",
-        "manifest_ready",
-        "pending_iac",
-        "plan_ready",
-        "pending_policy_check",
-        "pending_confirmation",
-        "pending_approval",
-        "pending_execution",
-      ];
-
-      for (const backwardState of previousStates) {
-        await expect(
-          service.transitionState(runId, workspaceId, 11, backwardState, userId),
-        ).rejects.toThrow(`Invalid state transition from 'executing' to '${backwardState}'`);
-      }
-    });
-
-    it("rejects any transitions out of terminal states (completed, failed, cancelled)", async () => {
-      const terminalStates: RunState[] = ["completed", "failed", "cancelled"];
-
-      for (const terminal of terminalStates) {
-        const run = createMockRun({ state: terminal, stateVersion: 12 });
-        const mockEnv = createTransactionalMockDb(run);
-        const service = new RunsService(mockEnv.db);
-
-        for (const targetState of ALL_RUN_STATES) {
-          await expect(
-            service.transitionState(runId, workspaceId, 12, targetState, userId),
-          ).rejects.toThrow(`Invalid state transition from '${terminal}' to '${targetState}'`);
-        }
-      }
-    });
+  it("expires clarification and deletes a terminal session without enum casting errors", async () => {
+    const ownSession = randomUUID();
+    await db.query(`INSERT INTO provisr_state.chat_sessions (id,workspace_id,user_id,title) VALUES ($1,$2,$3,'Expiry')`,[ownSession,workspaceId,userId]);
+    let run = await service.createRun(ownSession,workspaceId,userId,"Expiry");
+    run = await service.transitionState(run.id,workspaceId,run.stateVersion,"POLICY_LOADED",userId);
+    run = await service.transitionState(run.id,workspaceId,run.stateVersion,"CLOUD_CONTEXT_LOADED",userId,{ policyRequirements: policy,policyRequirementsLoadedAt: new Date() });
+    run = await service.transitionState(run.id,workspaceId,run.stateVersion,"CLARIFYING",userId,{ cloudContext: contextFor(run),cloudContextLoadedAt: new Date(),currentQuestion: { question: "Region?",fields: [{ name: "answer",type: "string" }] },clarificationExpiresAt: new Date(Date.now()-1000) });
+    await service.processRun(run.id,workspaceId);
+    expect((await service.getRun(run.id,workspaceId)).state).toBe("CANCELLED");
+    await new ChatPersistenceService(db,new ChatEventsService(db)).deleteSession(ownSession,workspaceId,userId);
   });
 
-  describe("Optimistic Concurrency & Version Conflicts", () => {
-    it("rejects state transitions when expectedVersion does not match current stateVersion", async () => {
-      const run = createMockRun({ state: "pending_agent", stateVersion: 3 });
-      const mockEnv = createTransactionalMockDb(run);
-      const service = new RunsService(mockEnv.db);
-
-      // Stale expectedVersion = 2 (actual is 3)
-      await expect(
-        service.transitionState(runId, workspaceId, 2, "manifest_ready", userId),
-      ).rejects.toThrow("State version conflict");
-
-      // Future expectedVersion = 4 (actual is 3)
-      await expect(
-        service.transitionState(runId, workspaceId, 4, "manifest_ready", userId),
-      ).rejects.toThrow("State version conflict");
-    });
-
-    it("throws NotFoundException if run does not exist", async () => {
-      const run = createMockRun();
-      const mockEnv = createTransactionalMockDb(run);
-      const service = new RunsService(mockEnv.db);
-
-      await expect(
-        service.transitionState(randomUUID(), workspaceId, 0, "pending_policy", userId),
-      ).rejects.toThrow(NotFoundException);
-    });
-  });
-
-  describe("Cancellation Transitions", () => {
-    it("allows cancellation from all non-terminal states", async () => {
-      const nonTerminalStates: RunState[] = [
-        "received",
-        "pending_policy",
-        "pending_cloud_context",
-        "pending_agent",
-        "manifest_ready",
-        "pending_iac",
-        "plan_ready",
-        "pending_policy_check",
-        "pending_confirmation",
-        "pending_approval",
-        "pending_execution",
-        "executing",
-      ];
-
-      for (let i = 0; i < nonTerminalStates.length; i++) {
-        const state = nonTerminalStates[i];
-        const run = createMockRun({ id: randomUUID(), state, stateVersion: i });
-        const mockEnv = createTransactionalMockDb(run);
-        const service = new RunsService(mockEnv.db);
-
-        const cancelled = await service.cancelRun(run.id, workspaceId, userId);
-        expect(cancelled.state).toBe("cancelled");
-        expect(cancelled.stateVersion).toBe(i + 1);
-      }
-    });
-
-    it("is idempotent when canceling an already cancelled, completed, or failed run", async () => {
-      const terminalStates: RunState[] = ["cancelled", "completed", "failed"];
-
-      for (const terminal of terminalStates) {
-        const run = createMockRun({ id: randomUUID(), state: terminal, stateVersion: 5 });
-        const mockEnv = createTransactionalMockDb(run);
-        const service = new RunsService(mockEnv.db);
-
-        const result = await service.cancelRun(run.id, workspaceId, userId);
-        expect(result.state).toBe(terminal);
-        expect(result.stateVersion).toBe(5);
-      }
-    });
-  });
-
-  describe("Clarification and Re-prompt Loops", () => {
-    it("allows transitioning from pending_agent to pending_agent when user clarifies input", async () => {
-      const run = createMockRun({ state: "pending_agent", stateVersion: 3 });
-      const mockEnv = createTransactionalMockDb(run);
-      const service = new RunsService(mockEnv.db);
-
-      const clarified = await service.clarifyRun(runId, workspaceId, userId, {
-        answers: { databaseEngine: "postgresql", size: "medium" },
-      });
-
-      expect(clarified.state).toBe("pending_agent");
-      expect(clarified.stateVersion).toBe(4);
-    });
-
-    it("allows re-planning transitions to pending_agent from policy_check, confirmation, and approval", async () => {
-      const rePlanSources: RunState[] = [
-        "pending_policy_check",
-        "pending_confirmation",
-        "pending_approval",
-      ];
-
-      for (let i = 0; i < rePlanSources.length; i++) {
-        const sourceState = rePlanSources[i];
-        const run = createMockRun({ id: randomUUID(), state: sourceState, stateVersion: 5 + i });
-        const mockEnv = createTransactionalMockDb(run);
-        const service = new RunsService(mockEnv.db);
-
-        const updated = await service.transitionState(
-          run.id,
-          workspaceId,
-          run.stateVersion,
-          "pending_agent",
-          userId,
-        );
-
-        expect(updated.state).toBe("pending_agent");
-        expect(updated.stateVersion).toBe(run.stateVersion + 1);
-      }
-    });
+  it("serializes concurrent audit appends into a verifiable global SHA-256 chain", async () => {
+    const runs = await Promise.all(Array.from({ length: 8 },(_,i) => service.createRun(sessionId,workspaceId,userId,`Concurrent ${i}`)));
+    await Promise.all(runs.map(run => service.transitionState(run.id,workspaceId,0,"POLICY_LOADED",userId)));
+    const result = await db.query(`SELECT workspace_id,event_type,resource_id,payload,hash,previous_hash,correlation_id FROM provisr_audit.audit_events ORDER BY seq`);
+    let previous = null;
+    for (const row of result.rows) {
+      expect(row.previous_hash).toBe(previous);
+      const hash = createHash("sha256").update(`${previous ?? ""}|${row.workspace_id}|${row.event_type}|${row.resource_id}|${serializeAuditPayload(row.payload)}|${row.correlation_id}`).digest("hex");
+      expect(row.hash).toBe(hash);
+      previous = row.hash;
+    }
   });
 });

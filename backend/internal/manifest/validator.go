@@ -10,6 +10,7 @@ var (
 	logicalNameRegex = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 	regionRegex      = regexp.MustCompile(`^[a-z0-9_-]+$`)
 	typePartRegex    = regexp.MustCompile(`^[a-z0-9_-]+$`)
+	schemaVerRegex   = regexp.MustCompile(`^1\.[0-9]+(\.[0-9]+)?$`)
 
 	validProviders = map[string]bool{
 		"aws":   true,
@@ -58,7 +59,7 @@ func (v *Validator) Validate(m *Manifest) (*ValidationResult, error) {
 			Code:    "missing_schema_version",
 			Message: "schema_version is required",
 		})
-	} else if !strings.HasPrefix(m.SchemaVersion, "1.") {
+	} else if !schemaVerRegex.MatchString(m.SchemaVersion) {
 		errors = append(errors, ValidationError{
 			Field:   "schema_version",
 			Code:    "unsupported_schema_version",

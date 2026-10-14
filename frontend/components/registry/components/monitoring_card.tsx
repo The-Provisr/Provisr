@@ -1,19 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const monitoringCardSchema = z.object({
-  service: z.string(),
-  metrics: z.array(
-    z.object({
-      name: z.string(),
-      unit: z.string(),
-      threshold: z.string().optional(),
-    }),
-  ),
-  alertEndpoints: z.array(z.string()).optional(),
-  logRetentionDays: z.number().optional(),
-  dashboardEnabled: z.boolean().default(true),
-});
+import { monitoringCardSchema } from "@provisr/shared-contracts";
+export { monitoringCardSchema } from "@provisr/shared-contracts";
 
 export type MonitoringCardData = z.infer<typeof monitoringCardSchema>;
 

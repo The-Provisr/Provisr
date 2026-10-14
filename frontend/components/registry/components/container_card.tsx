@@ -1,15 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const containerCardSchema = z.object({
-  image: z.string(),
-  tag: z.string().optional(),
-  port: z.number(),
-  environmentVariables: z.record(z.string()).optional(),
-  cpu: z.string().optional(),
-  memory: z.string().optional(),
-  healthCheckPath: z.string().optional(),
-});
+import { containerCardSchema } from "@provisr/shared-contracts";
+export { containerCardSchema } from "@provisr/shared-contracts";
 
 export type ContainerCardData = z.infer<typeof containerCardSchema>;
 

@@ -1,22 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const policyResultSchema = z.object({
-  status: z.enum(["passed", "failed", "warning", "pending"]),
-  packName: z.string().optional(),
-  evaluatedCount: z.number(),
-  passedCount: z.number(),
-  violations: z
-    .array(
-      z.object({
-        ruleId: z.string(),
-        severity: z.enum(["critical", "high", "medium", "low"]),
-        message: z.string(),
-        remediation: z.string().optional(),
-      }),
-    )
-    .optional(),
-});
+import { policyResultSchema } from "@provisr/shared-contracts";
+export { policyResultSchema } from "@provisr/shared-contracts";
 
 export type PolicyResultData = z.infer<typeof policyResultSchema>;
 

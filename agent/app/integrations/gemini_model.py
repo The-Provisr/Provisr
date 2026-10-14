@@ -67,6 +67,7 @@ class GeminiModel:
                         profile,
                         session.request_id,
                         session.policy_requirements,
+                        session.execution_context,
                     ),
                     max_output_tokens=profile.llm_config.max_tokens,
                     response_mime_type="application/json",

@@ -1,27 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const loadbalancerCardSchema = z.object({
-  name: z.string(),
-  type: z.enum(["application", "network", "gateway"]).default("application"),
-  scheme: z.enum(["internet-facing", "internal"]).default("internet-facing"),
-  listeners: z.array(
-    z.object({
-      port: z.number(),
-      protocol: z.string(),
-      sslCertificate: z.boolean().optional(),
-    }),
-  ),
-  targetGroups: z
-    .array(
-      z.object({
-        name: z.string(),
-        port: z.number(),
-        healthCheckStatus: z.string().optional(),
-      }),
-    )
-    .optional(),
-});
+import { loadbalancerCardSchema } from "@provisr/shared-contracts";
+export { loadbalancerCardSchema } from "@provisr/shared-contracts";
 
 export type LoadbalancerCardData = z.infer<typeof loadbalancerCardSchema>;
 

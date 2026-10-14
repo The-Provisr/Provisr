@@ -41,6 +41,26 @@
       "file": "google-cloud-1.svg",
       "role": "Google Cloud provider logo",
       "sections": ["platform-multicloud", "onboarding-cloud", "workspace-cloud-accounts"]
+    },
+    {
+      "file": "engines/postgresql.svg",
+      "role": "PostgreSQL database engine logo",
+      "sections": ["chat-database-engine-selector"]
+    },
+    {
+      "file": "engines/mysql.svg",
+      "role": "MySQL database engine logo",
+      "sections": ["chat-database-engine-selector"]
+    },
+    {
+      "file": "engines/oracle.svg",
+      "role": "Oracle Database engine logo",
+      "sections": ["chat-database-engine-selector"]
+    },
+    {
+      "file": "engines/ms-sqlserver.svg",
+      "role": "Microsoft SQL Server database engine logo",
+      "sections": ["chat-database-engine-selector"]
     }
   ]
 }

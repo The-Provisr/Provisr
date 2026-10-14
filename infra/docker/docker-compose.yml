@@ -44,6 +44,22 @@ services:
       - "4318:4318"
 
   # ── Backend services (profile: backend) ──
+  manifest-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./manifest-service"]
+    ports:
+      - "8090:8090"
+    environment:
+      PORT: "8090"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   policy-service:
     profiles: [all, backend]
     build:
@@ -54,6 +70,8 @@ services:
 
     environment:
       PORT: "8081"
+      # Shared service bearer for orchestrator calls; empty disables the match.
+      POLICY_SERVICE_SECRET: ${POLICY_SERVICE_SECRET:-}
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
       REDIS_URL: redis://redis:6379/0
     depends_on:
@@ -74,6 +92,8 @@ services:
     environment:
       PORT: "8082"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      MCP_URL: http://mcp:5100
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
     depends_on:
       postgres:
         condition: service_healthy
@@ -207,6 +227,9 @@ services:
     environment:
       PORT: "5000"
       REDIS_URL: redis://redis:6379/0
+      PROVISR_STATE_BACKEND: redis
+      PROVISR_REDIS_URL: redis://redis:6379/0
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
       ORCHESTRATOR_URL: http://orchestrator:4000
     depends_on:
       redis:
@@ -225,11 +248,15 @@ services:
     environment:
       PORT: "5100"
       BACKEND_URL: http://provisioning-service:8083
+      MANIFEST_SERVICE_URL: http://manifest-service:8090
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
       provisioning-service:
+        condition: service_started
+        required: false
+      manifest-service:
         condition: service_started
         required: false
 
@@ -245,6 +272,13 @@ services:
       PORT: "4000"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      AGENT_URL: http://agent:5000
+      CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089
+      POLICY_SERVICE_URL: http://policy-service:8081
+      POLICY_SERVICE_SECRET: ${POLICY_SERVICE_SECRET:-}
+      STATE_SERVICE_URL: http://state-service:8082
+      MCP_URL: http://mcp:5100
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
       # Local dev only. Production must inject this via Vault/infra config.
       # No fallback: an unset key must fail startup, never ship a known key.
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?CLERK_SECRET_KEY must be set}

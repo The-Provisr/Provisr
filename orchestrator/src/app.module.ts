@@ -33,6 +33,7 @@ import { ApprovalsController } from "./routes/approvals.controller";
 import { ArtifactsController } from "./routes/artifacts.controller";
 import { SseController } from "./routes/sse.controller";
 import { RunsService, createRunsService } from "./state-machine/runs.service";
+import { PlanningClients, loadPlanningConfig } from "./services/planning-clients";
 
 @Module({
   imports: [],
@@ -56,11 +57,6 @@ import { RunsService, createRunsService } from "./state-machine/runs.service";
       inject: [DB_CONFIG],
     },
     {
-      provide: RunsService,
-      useFactory: (db: DbService) => createRunsService(db),
-      inject: [DbService],
-    },
-    {
       // Config read once at wiring time and passed in (never read from
       // process.env inside services). Fails fast in production without
       // CLERK_SECRET_KEY.
@@ -76,15 +72,6 @@ import { RunsService, createRunsService } from "./state-machine/runs.service";
       provide: IdentityService,
       useFactory: (clerk: ClerkAuthService) => new IdentityService(clerk),
       inject: [ClerkAuthService],
-    },
-    {
-      provide: DB_CONFIG,
-      useFactory: () => loadDbConfig(),
-    },
-    {
-      provide: DbService,
-      useFactory: (config: DbConfig) => createDbService(config),
-      inject: [DB_CONFIG],
     },
     {
       provide: ChatEventsService,
@@ -104,8 +91,9 @@ import { RunsService, createRunsService } from "./state-machine/runs.service";
     },
     {
       provide: RunsService,
-      useFactory: (db: DbService) => createRunsService(db),
-      inject: [DbService],
+      useFactory: (db: DbService, audit: AuditService) => createRunsService(db, audit,
+        process.env.NODE_ENV === "test" ? undefined : new PlanningClients(loadPlanningConfig(process.env))),
+      inject: [DbService, AuditService],
     },
     {
       // useFactory + inject instead of useClass so the guard works under

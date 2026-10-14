@@ -564,7 +564,7 @@ func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(
 		`SELECT EXISTS(
 			SELECT 1 FROM provisr_state.provisioning_runs
-			WHERE workspace_id = $1 AND state NOT IN ('completed', 'failed', 'cancelled')
+			WHERE workspace_id = $1 AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
 			LIMIT 1
 		)`,
 		id,
@@ -892,7 +892,7 @@ func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		`SELECT EXISTS(
 			SELECT 1 FROM provisr_state.provisioning_runs
 			WHERE requester_id = $1 AND workspace_id = $2
-			AND state NOT IN ('completed', 'failed', 'cancelled')
+			AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
 		)`,
 		userID, workspaceID,
 	).Scan(&exists)

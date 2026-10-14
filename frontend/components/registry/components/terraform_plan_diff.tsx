@@ -1,19 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const terraformPlanDiffSchema = z.object({
-  addCount: z.number(),
-  changeCount: z.number(),
-  destroyCount: z.number(),
-  changes: z.array(
-    z.object({
-      resourceType: z.string(),
-      resourceName: z.string(),
-      action: z.enum(["create", "update", "delete", "no-op"]),
-      details: z.string().optional(),
-    }),
-  ),
-});
+import { terraformPlanDiffSchema } from "@provisr/shared-contracts";
+export { terraformPlanDiffSchema } from "@provisr/shared-contracts";
 
 export type TerraformPlanDiffData = z.infer<typeof terraformPlanDiffSchema>;
 

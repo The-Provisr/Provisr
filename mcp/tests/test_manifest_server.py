@@ -23,8 +23,8 @@ REQUEST_ID = UUID("e160fe9a-20b0-4a53-b7a4-af4acd899895")
 CORRELATION_ID = UUID("0bc6e45b-4038-47d1-b392-eab5016356ef")
 SESSION_ID = UUID("030aa973-4357-412f-98d1-7288a27f4bf7")
 
-BACKEND_URL = "http://mock-backend:8081"
-VALIDATE_URL = f"{BACKEND_URL}/v1/workspaces/{WORKSPACE_ID}/manifests/validate"
+BACKEND_URL = "http://mock-backend:8090"
+VALIDATE_URL = f"{BACKEND_URL}/v1/manifests/validate"
 
 MANIFEST: dict[str, Any] = {
     "schema_version": "1.0",
@@ -141,7 +141,7 @@ def test_validate_manifest_valid() -> None:
     assert req.url == VALIDATE_URL
     assert req.headers["X-Request-ID"] == str(REQUEST_ID)
     assert req.headers["X-Correlation-ID"] == str(CORRELATION_ID)
-    assert json.loads(req.content) == {"manifest": MANIFEST}
+    assert json.loads(req.content) == MANIFEST
 
 
 @pytest.mark.parametrize(
@@ -261,6 +261,14 @@ def test_validate_manifest_rejects_missing_manifest() -> None:
         backend_returning(json={"valid": True, "errors": [MISSING_REGION]}),
         backend_returning(json={"valid": False}),
         backend_returning(json={"valid": False, "errors": []}),
+        backend_returning(
+            json={
+                "valid": False,
+                "errors": [
+                    {"field": 42, "code": "invalid", "message": "invalid"},
+                ],
+            }
+        ),
     ],
     ids=[
         "read-timeout",
@@ -280,6 +288,7 @@ def test_validate_manifest_rejects_missing_manifest() -> None:
         "valid-with-errors",
         "invalid-without-errors-key",
         "invalid-with-empty-errors",
+        "coerced-error-field",
     ],
 )
 def test_validate_manifest_backend_failure_is_a_tool_error(backend: FakeBackend) -> None:
@@ -303,8 +312,7 @@ def test_validate_manifest_logs_outcome_without_manifest_content(
         call_tool(backend, tool_body())
 
     assert "outcome=invalid" in caplog.text
-    assert "missing_region" in caplog.text
-    assert "dangling_dependency" in caplog.text
+    assert "error_count=2" in caplog.text
     assert str(CORRELATION_ID) in caplog.text
     assert "app-vpc" not in caplog.text
     assert "ap-southeast-1" not in caplog.text
@@ -352,3 +360,156 @@ async def test_validate_manifest_function_raises_when_backend_unavailable() -> N
                 http_client=client,
                 backend_url=BACKEND_URL,
             )
+
+
+def test_runtime_serves_one_manifest_route_and_projects_drafts() -> None:
+    from test_manifest_validation import CLOUD, POLICY
+    from test_manifest_validation import MANIFEST as DRAFT
+
+    from src.servers.policy_server import create_app as create_runtime
+
+    backend = backend_returning(json={"valid": True, "errors": []})
+    runtime = create_runtime(
+        membership_store=FakeMembershipStore(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(backend)),
+        backend_url="http://policy:8081",
+        manifest_backend_url=BACKEND_URL,
+    )
+    operation = runtime.openapi()["paths"]["/tools/validate_manifest"]["post"]
+    assert operation["operationId"].startswith("validate_manifest_tool_")
+    body = {
+        "context": valid_context_payload(permissions=["manifest:read", "manifest:write"]),
+        "manifest": DRAFT,
+        "cloud_context": CLOUD,
+        "policy_context": POLICY,
+    }
+    with TestClient(runtime) as client:
+        result = client.post("/tools/validate_manifest", json=body)
+    assert result.status_code == 200
+    assert result.json() == {"valid": True, "errors": []}
+    request = backend.requests[0]
+    assert request.url == VALIDATE_URL
+    submitted = json.loads(request.content)
+    assert submitted["resources"][0]["logical_name"] == "resource_0"
+    assert submitted["resources"][0]["properties"]["name"] == DRAFT["resources"][0]["name"]
+    assert submitted["resources"][0]["type"] == "storage.aws.s3"
+    assert submitted["resources"][0]["security_settings"] == DRAFT["security"]
+    assert submitted["resources"][0]["properties"]["versioning"] is True
+    assert "logical_name" not in DRAFT["resources"][0]
+
+
+@pytest.mark.parametrize(
+    ("resource", "canonical_type"),
+    [
+        (
+            {
+                "type": "aws_ec2",
+                "name": "AppServer",
+                "image": "ami-test",
+                "instance_type": "t3.micro",
+            },
+            "compute.aws.instance",
+        ),
+        (
+            {
+                "type": "aws_rds",
+                "name": "AppDB",
+                "engine": "mysql",
+                "instance_class": "db.t3.micro",
+                "allocated_storage_gb": 20,
+            },
+            "database.aws.rds",
+        ),
+        ({"type": "aws_s3", "name": "app.data.bucket"}, "storage.aws.s3"),
+    ],
+)
+def test_projection_preserves_cloud_names_and_provider_configuration(
+    resource: dict[str, object],
+    canonical_type: str,
+) -> None:
+    from test_manifest_validation import CLOUD, POLICY
+    from test_manifest_validation import MANIFEST as DRAFT
+
+    backend = backend_returning(json={"valid": True})
+    response = call_tool(
+        backend,
+        {
+            "context": valid_context_payload(),
+            "manifest": {**DRAFT, "resources": [resource]},
+            "cloud_context": CLOUD,
+            "policy_context": POLICY,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+    projected = json.loads(backend.requests[0].content)["resources"][0]
+    assert projected["logical_name"] == "resource_0"
+    assert projected["type"] == canonical_type
+    assert projected["properties"] == {k: v for k, v in resource.items() if k != "type"}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"cloud_context": None},
+        {"policy_context": None},
+        {"policy_context": {"enabled": True, "allowed_regions": ["eu-west-1"]}},
+        {"manifest": {"provider": "aws"}},
+    ],
+)
+def test_runtime_draft_guards_cannot_be_bypassed(overrides: dict[str, object]) -> None:
+    from test_manifest_validation import CLOUD, POLICY
+    from test_manifest_validation import MANIFEST as DRAFT
+
+    from src.servers.policy_server import create_app as create_runtime
+
+    backend = backend_returning(json={"valid": True, "errors": []})
+    runtime = create_runtime(
+        membership_store=FakeMembershipStore(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(backend)),
+        manifest_backend_url=BACKEND_URL,
+    )
+    body = {
+        "context": valid_context_payload(),
+        "manifest": DRAFT,
+        "cloud_context": CLOUD,
+        "policy_context": POLICY,
+        **overrides,
+    }
+    with TestClient(runtime) as client:
+        result = client.post("/tools/validate_manifest", json=body)
+    assert result.status_code == 200
+    assert result.json()["valid"] is False
+    assert result.json()["errors"][0]["code"] == "invalid_draft"
+    assert backend.requests == []
+
+
+def test_manifest_service_env_is_independent_of_policy_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MANIFEST_SERVICE_URL", BACKEND_URL + "/")
+    monkeypatch.setenv("POLICY_SERVICE_URL", "http://policy:8081")
+    monkeypatch.setenv("BACKEND_URL", "http://provisioning:8083")
+    backend = backend_returning(json={"valid": True})
+    runtime = create_app(
+        membership_store=FakeMembershipStore(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(backend)),
+    )
+    with TestClient(runtime) as client:
+        assert client.post("/tools/validate_manifest", json=tool_body()).status_code == 200
+    assert backend.requests[0].url == VALIDATE_URL
+
+
+def test_backend_error_codes_are_not_logged(caplog: pytest.LogCaptureFixture) -> None:
+    backend = backend_returning(
+        json={
+            "valid": False,
+            "errors": [
+                {"field": "region", "code": "SECRET_FROM_BACKEND", "message": "secret"},
+            ],
+        }
+    )
+    with caplog.at_level(logging.INFO, logger="src.servers.manifest_server"):
+        call_tool(backend, tool_body())
+    assert "outcome=invalid" in caplog.text
+    assert "SECRET_FROM_BACKEND" not in caplog.text

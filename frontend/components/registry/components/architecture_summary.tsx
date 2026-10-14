@@ -1,23 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const architectureSummarySchema = z.object({
-  title: z.string().optional(),
-  provider: z.enum(["aws", "azure", "gcp", "unknown"]).default("unknown"),
-  region: z.string(),
-  environment: z.string(),
-  estimatedCostUsd: z.number().optional(),
-  resources: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      type: z.string(),
-      tier: z.string().optional(),
-      properties: z.record(z.string()).optional(),
-    }),
-  ),
-  highlights: z.array(z.string()).optional(),
-});
+import { architectureSummarySchema } from "@provisr/shared-contracts";
+export { architectureSummarySchema } from "@provisr/shared-contracts";
 
 export type ArchitectureSummaryData = z.infer<typeof architectureSummarySchema>;
 

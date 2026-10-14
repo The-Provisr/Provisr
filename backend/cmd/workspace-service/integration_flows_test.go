@@ -162,7 +162,7 @@ func seedActiveRun(t *testing.T, db *sql.DB, workspaceID, userID string) {
 	if _, err := db.Exec(
 		`INSERT INTO provisr_state.provisioning_runs
 		 (session_id, workspace_id, requester_id, state, prompt, idempotency_key, correlation_id)
-		 VALUES ($1, $2, $3, 'pending_approval', 'deploy', $4, $5)`,
+		 VALUES ($1, $2, $3, 'APPROVING', 'deploy', $4, $5)`,
 		sessionID, workspaceID, userID, newUUID(), newUUID(),
 	); err != nil {
 		t.Fatalf("seed provisioning run: %v", err)

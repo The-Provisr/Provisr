@@ -106,6 +106,16 @@ func TestValidator_TopLevelErrors(t *testing.T) {
 			expectedCode: "unsupported_schema_version",
 		},
 		{
+			name: "malformed schema version 1.x",
+			manifest: &Manifest{
+				SchemaVersion: "1.x",
+				Provider:      "aws",
+				Region:        "us-east-1",
+				Resources:     []Resource{{LogicalName: "r1", Type: "storage.aws.s3_bucket"}},
+			},
+			expectedCode: "unsupported_schema_version",
+		},
+		{
 			name: "missing provider",
 			manifest: &Manifest{
 				SchemaVersion: "1.0.0",

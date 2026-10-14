@@ -1,23 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const clarificationQuestionSchema = z.object({
-  id: z.string(),
-  question: z.string(),
-  description: z.string().optional(),
-  inputType: z.enum(["single_select", "multi_select", "text", "confirmation"]),
-  options: z
-    .array(
-      z.object({
-        label: z.string(),
-        value: z.string(),
-        description: z.string().optional(),
-      }),
-    )
-    .optional(),
-  selected: z.union([z.string(), z.array(z.string())]).optional(),
-  answered: z.boolean().optional(),
-});
+import { clarificationQuestionSchema } from "@provisr/shared-contracts";
+export { clarificationQuestionSchema } from "@provisr/shared-contracts";
 
 export type ClarificationQuestionData = z.infer<typeof clarificationQuestionSchema>;
 

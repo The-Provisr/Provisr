@@ -92,6 +92,7 @@ class ClaudeModel:
                     profile,
                     session.request_id,
                     session.policy_requirements,
+                    session.execution_context,
                 ),
                 messages=messages,
             )

@@ -13,17 +13,19 @@ import (
 var ErrPolicyConflict = errors.New("conflicting policy rules: allowed_regions intersection is empty")
 
 type PolicyRequirements struct {
-	AllowedRegions          []string `json:"allowed_regions,omitempty"`
-	MaxMonthlyBudgetUSD     *float64 `json:"max_monthly_budget_usd,omitempty"`
-	RequiredTags            []string `json:"required_tags,omitempty"`
-	ProhibitedResourceTypes []string `json:"prohibited_resource_types,omitempty"`
-	RequiredEncryption      bool     `json:"required_encryption,omitempty"`
-	Warnings                []string `json:"warnings,omitempty"`
+	// AllowedRegions is nil (omitted) when no allowed_regions rule is enabled,
+	// meaning unrestricted. An enabled rule always serializes, so an empty list
+	// means no region is allowed.
+	AllowedRegions          *[]string `json:"allowed_regions,omitempty"`
+	MaxMonthlyBudgetUSD     *float64  `json:"max_monthly_budget_usd,omitempty"`
+	RequiredTags            []string  `json:"required_tags,omitempty"`
+	ProhibitedResourceTypes []string  `json:"prohibited_resource_types,omitempty"`
+	RequiredEncryption      bool      `json:"required_encryption,omitempty"`
+	Warnings                []string  `json:"warnings,omitempty"`
 }
 
 func ProjectPolicyRequirements(ctx context.Context, db *sql.DB, workspaceID string) (PolicyRequirements, error) {
 	reqs := PolicyRequirements{
-		AllowedRegions:          []string{},
 		RequiredTags:            []string{},
 		ProhibitedResourceTypes: []string{},
 		Warnings:                []string{},
@@ -166,7 +168,7 @@ func ProjectPolicyRequirements(ctx context.Context, db *sql.DB, workspaceID stri
 			regions = append(regions, r)
 		}
 		sort.Strings(regions)
-		reqs.AllowedRegions = regions
+		reqs.AllowedRegions = &regions
 	}
 
 	if hasComplexRules {

@@ -1,20 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const resourceTableSchema = z.object({
-  title: z.string().optional(),
-  columns: z.array(z.string()).optional(),
-  rows: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      type: z.string(),
-      provider: z.string(),
-      status: z.string(),
-      monthlyCostUsd: z.number().optional(),
-    }),
-  ),
-});
+import { resourceTableSchema } from "@provisr/shared-contracts";
+export { resourceTableSchema } from "@provisr/shared-contracts";
 
 export type ResourceTableData = z.infer<typeof resourceTableSchema>;
 

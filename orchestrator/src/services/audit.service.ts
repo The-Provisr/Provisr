@@ -6,13 +6,27 @@ type Queryable = { query: (text: string, values?: unknown[]) => Promise<{ rows: 
 
 export interface AuditAppendParams {
   workspaceId: string;
-  eventType: "prompt_received" | "run_created" | "tool_call" | "manifest_created" | "error";
+  eventType: "prompt_received" | "run_created" | "state_transition" | "confirmation" | "tool_call" | "manifest_created" | "error";
   actorId: string;
   actorType: "user" | "agent" | "system";
   resourceType: string;
   resourceId: string;
   payload: Record<string, unknown>;
   correlationId: string;
+}
+
+// PostgreSQL JSONB does not retain object insertion order. Hash a stable
+// representation so persisted payloads can be independently verified.
+export function serializeAuditPayload(payload: unknown): string {
+  function canonical(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value !== null && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([key, item]) => [key, canonical(item)]));
+    }
+    return value;
+  }
+  return JSON.stringify(canonical(payload));
 }
 
 export function createAuditService(db: DbService): AuditService {
@@ -42,10 +56,12 @@ export class AuditService {
   }
 
   private async executeAppend(params: AuditAppendParams, client: Queryable): Promise<void> {
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('provisr_audit_chain'))");
-    const previous = await client.query("SELECT hash FROM provisr_audit.audit_events ORDER BY seq DESC LIMIT 1 FOR UPDATE");
+    // Use the same global chain lock as every Go audit writer. SELECT FOR
+    // UPDATE is unnecessary and requires UPDATE privileges on append-only data.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('provisr_audit.chain'), 0)");
+    const previous = await client.query("SELECT hash FROM provisr_audit.audit_events ORDER BY seq DESC LIMIT 1");
     const previousHash = (previous.rows[0]?.hash as string) ?? null;
-    const payload = JSON.stringify(params.payload);
+    const payload = serializeAuditPayload(params.payload);
     const hash = createHash("sha256").update(`${previousHash ?? ""}|${params.workspaceId}|${params.eventType}|${params.resourceId}|${payload}|${params.correlationId}`).digest("hex");
     await client.query(
       `INSERT INTO provisr_audit.audit_events

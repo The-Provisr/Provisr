@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from app.domain.drafting import (
     DraftingContext,
@@ -12,6 +13,7 @@ from app.domain.drafting import (
     draft_manifest,
 )
 from app.domain.manifest import (
+    CanonicalManifest,
     Ec2Resource,
     RdsResource,
     ResourceManifest,
@@ -210,6 +212,25 @@ def test_policy_tags_override_model_tags_on_collision() -> None:
 
     # Policy wins
     assert result.tags["env"] == "prod"
+
+
+def test_key_only_policy_tags_keep_model_value() -> None:
+    policy = PolicyConstraints(required_tags={"Team": "*"})
+    result = draft_manifest(_ec2_manifest(tags={"Team": "payments"}), _ctx(policy=policy))
+
+    assert result.tags["Team"] == "payments"
+
+
+def test_canonical_manifest_rejects_placeholder_tag_values() -> None:
+    drafted = draft_manifest(_ec2_manifest(tags={"Team": "payments"}), _ctx())
+    payload = drafted.model_dump()
+    payload["tags"] = {"Team": "*"}
+    resource_payload = drafted.model_dump()
+    resource_payload["resources"][0]["tags"] = {"Team": "*"}
+
+    for invalid in (payload, resource_payload):
+        with pytest.raises(ValidationError, match="placeholder"):
+            CanonicalManifest.model_validate(invalid)
 
 
 def test_resources_inherit_merged_tags() -> None:

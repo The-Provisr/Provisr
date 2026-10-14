@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.domain.manifest import (
+    ANY_TAG_VALUE,
     CanonicalManifest,
     CanonicalResource,
     FieldSource,
@@ -111,8 +112,12 @@ def draft_manifest(
     """
     _run_policy_preflight(raw, context.policy)
 
-    # Merge mandatory policy tags on top of any tags the model supplied.
-    merged_tags = {**raw.tags, **context.policy.required_tags}
+    # Merge mandatory policy tags on top of any tags the model supplied. Key-only
+    # requirements keep the model's value; compliance already checked presence.
+    merged_tags = {
+        **raw.tags,
+        **{k: v for k, v in context.policy.required_tags.items() if v != ANY_TAG_VALUE},
+    }
 
     resources = [
         _build_canonical_resource(r_raw, merged_tags, context.policy) for r_raw in raw.resources

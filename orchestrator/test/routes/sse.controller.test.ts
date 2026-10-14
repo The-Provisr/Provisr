@@ -1,37 +1,24 @@
-import { Test } from "@nestjs/testing";
-import { firstValueFrom, take } from "rxjs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { firstValueFrom } from "rxjs";
+import { describe, expect, it, vi } from "vitest";
 import { SseController } from "../../src/routes/sse.controller";
+import type { DbService } from "../../src/db/db.service";
+import type { RequestUser } from "../../src/middleware/auth.types";
 
-describe("SseController", () => {
-  let controller: SseController;
-
-  beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({
-      controllers: [SseController],
-    }).compile();
-
-    controller = moduleRef.get(SseController);
+const user = { userId: "user" } as RequestUser;
+const workspaceId = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+describe("SSE persisted delivery", () => {
+  it("emits persisted payloads with replayable ids", async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [{}] }).mockResolvedValue({ rows: [{ event_id: workspaceId, event_type: "ClarificationQuestionEvent", payload: { question: "Region?" }, stream_sequence: "1" }] });
+    const stream = await new SseController({ query } as unknown as DbService).events(workspaceId, undefined, user);
+    expect(await firstValueFrom(stream)).toEqual({ id: workspaceId, type: "ClarificationQuestionEvent", data: { question: "Region?" } });
   });
-
-  it("emits a keepalive event carrying the workspace id", async () => {
-    vi.useFakeTimers();
-    try {
-      const workspaceId = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
-
-      const eventPromise = firstValueFrom(
-        controller.events(workspaceId).pipe(take(1)),
-      );
-      vi.advanceTimersByTime(15_000);
-
-      const event = await eventPromise;
-      expect(event.id).toBe("0");
-      expect(JSON.parse(String(event.data))).toEqual({
-        type: "keepalive",
-        workspaceId,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+  it("keeps heartbeats from replacing the replay cursor", async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [{}] }).mockResolvedValue({ rows: [] });
+    const stream = await new SseController({ query } as unknown as DbService).events(workspaceId, undefined, user);
+    expect(await firstValueFrom(stream)).toEqual({ type: "keepalive", data: { workspaceId } });
+  });
+  it("denies streams for nonmembers", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    await expect(new SseController({ query } as unknown as DbService).events(workspaceId, undefined, user)).rejects.toThrow("membership");
   });
 });

@@ -1,6 +1,7 @@
 import json
 from uuid import UUID
 
+from app.domain.models import ExecutionContext
 from app.policy.models import PolicyRequirements
 from app.profiles.models import ProfileBundle
 
@@ -9,6 +10,7 @@ def render_runtime_system_prompt(
     profile: ProfileBundle,
     request_id: UUID,
     policy_requirements: PolicyRequirements | None,
+    execution_context: ExecutionContext | None = None,
 ) -> str:
     """Add trusted per-run correlation data without mutating the pinned prompt bundle."""
 
@@ -18,6 +20,13 @@ def render_runtime_system_prompt(
         f"request_id: {request_id}\n"
         "Copy this request_id exactly into the output envelope."
     )
+    if execution_context is not None:
+        context = json.dumps(execution_context.model_dump(mode="json"), sort_keys=True)
+        prompt += (
+            "\n\nVALIDATED EXECUTION CONTEXT\n" + context + "\n"
+            "Draft only for the verified accounts and supported regions in this context. "
+            "Null resource counts or quotas mean unknown; never invent available capacity."
+        )
     if policy_requirements is None:
         return prompt
 

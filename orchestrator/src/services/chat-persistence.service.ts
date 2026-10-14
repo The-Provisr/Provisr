@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { ConflictError, NotFoundError } from "../common/errors/typed-errors";
+import { ConflictError, ForbiddenError, NotFoundError } from "../common/errors/typed-errors";
 import { DbService } from "../db/db.service";
 import { ChatEventsService } from "./chat-events.service";
+import { AuditService } from "./audit.service";
 
 type Queryable = { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> };
 
@@ -86,7 +87,7 @@ export class ChatPersistenceService {
       await this.assertSessionOwner(id, workspaceId, userId, client);
       const runs = await client.query<{ state: string }>(
         `SELECT state FROM provisr_state.provisioning_runs
-         WHERE session_id = $1 AND workspace_id = $2 AND state NOT IN ('completed', 'failed', 'cancelled', 'rejected')`,
+         WHERE session_id = $1 AND workspace_id = $2 AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`,
         [id, workspaceId],
       );
       if (runs.rows.length > 0) {
@@ -138,6 +139,7 @@ export class ChatPersistenceService {
     try {
       await client.query("BEGIN");
       await this.assertMembership(params.workspaceId, params.userId, client);
+      await this.assertMutationPermission(params.workspaceId, params.userId, client);
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtext($1))",
         [`chat_turn:${params.workspaceId}:${params.userId}:${params.idempotencyKey}`],
@@ -157,9 +159,12 @@ export class ChatPersistenceService {
       const run = await client.query<{ id: string }>(
         `INSERT INTO provisr_state.provisioning_runs
          (session_id, workspace_id, requester_id, state, prompt, idempotency_key, correlation_id)
-         VALUES ($1, $2, $3, 'received', $4, $5, $6) RETURNING id`,
+         VALUES ($1, $2, $3, 'RECEIVED', $4, $5, $6) RETURNING id`,
         [params.sessionId, params.workspaceId, params.userId, params.prompt, hash({ ...params, fingerprint }), correlationId],
       );
+      await new AuditService(this.db).append({ workspaceId: params.workspaceId, eventType: "run_created",
+        actorId: params.userId, actorType: "user", resourceType: "provisioning_run", resourceId: run.rows[0]!.id,
+        payload: { sessionId: params.sessionId }, correlationId }, client);
       const turn = await client.query<{ id: string }>(
         `INSERT INTO provisr_state.chat_turns
          (session_id, workspace_id, requester_id, client_message_id, idempotency_key, request_fingerprint, input, correlation_id, provisioning_run_id)
@@ -182,7 +187,7 @@ export class ChatPersistenceService {
       return { turnId: turn.rows[0]!.id, runId: run.rows[0]!.id, replayed: false };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      if (error instanceof ConflictError) {
+      if (error instanceof ConflictError || error instanceof ForbiddenError) {
         throw error;
       }
       try {
@@ -209,6 +214,11 @@ export class ChatPersistenceService {
   private async assertMembership(workspaceId: string, userId: string, client: Queryable = this.db.pool): Promise<void> {
     const result = await client.query(`SELECT 1 FROM provisr_identity.memberships WHERE workspace_id = $1 AND user_id = $2`, [workspaceId, userId]);
     if (!result.rows[0]) throw new NotFoundError("workspace membership");
+  }
+
+  private async assertMutationPermission(workspaceId: string, userId: string, client: Queryable): Promise<void> {
+    const result = await client.query(`SELECT 1 FROM provisr_identity.memberships WHERE workspace_id = $1 AND user_id = $2 AND role::text = ANY($3::text[])`, [workspaceId, userId, ["admin", "engineer"]]);
+    if (!result.rows[0]) throw new ForbiddenError("Provisioning permission required");
   }
 
   private async assertSessionOwner(sessionId: string, workspaceId: string, userId: string, client: Queryable): Promise<void> {

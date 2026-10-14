@@ -1,14 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const artifactViewerSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  type: z.enum(["manifest", "terraform", "diagram", "cost_report", "policy_report"]),
-  url: z.string().optional(),
-  content: z.string().optional(),
-  sizeBytes: z.number().optional(),
-});
+import { artifactViewerSchema } from "@provisr/shared-contracts";
+export { artifactViewerSchema } from "@provisr/shared-contracts";
 
 export type ArtifactViewerData = z.infer<typeof artifactViewerSchema>;
 

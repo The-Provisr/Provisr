@@ -11,30 +11,8 @@ import {
 } from "@/components/ui/icons";
 import { defaultRegistry } from "../registry";
 
-// Security fields and backup retention are required with no defaults: a payload
-// that omits them must fail validation instead of rendering as if it were safe.
-export const databaseConfigSchema = z.object({
-  engine: z.string().min(1),
-  version: z.string().optional(),
-  instanceClass: z.string().optional(),
-  allocatedStorageGb: z.number().positive(),
-  maxAllocatedStorageGb: z.number().positive().optional(),
-  storageType: z.string().optional(),
-  multiAz: z.boolean().default(false),
-  backupRetentionDays: z.number().int().min(0),
-  maintenanceWindow: z.string().optional(),
-  storageEncrypted: z.boolean(),
-  publiclyAccessible: z.boolean(),
-  deletionProtection: z.boolean(),
-}).refine(
-  (value) =>
-    value.maxAllocatedStorageGb === undefined ||
-    value.maxAllocatedStorageGb >= value.allocatedStorageGb,
-  {
-    message: "maxAllocatedStorageGb must be greater than or equal to allocatedStorageGb",
-    path: ["maxAllocatedStorageGb"],
-  },
-);
+import { databaseConfigSchema } from "@provisr/shared-contracts";
+export { databaseConfigSchema } from "@provisr/shared-contracts";
 
 export type DatabaseConfigData = z.infer<typeof databaseConfigSchema>;
 

@@ -1,20 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const costEstimateSchema = z.object({
-  currency: z.string().default("USD"),
-  monthlyTotalUsd: z.number(),
-  breakdown: z.array(
-    z.object({
-      category: z.string(),
-      serviceName: z.string(),
-      costUsd: z.number(),
-      unit: z.string().optional(),
-    }),
-  ),
-  previousMonthlyCostUsd: z.number().optional(),
-  deltaPercentage: z.number().optional(),
-});
+import { costEstimateSchema } from "@provisr/shared-contracts";
+export { costEstimateSchema } from "@provisr/shared-contracts";
 
 export type CostEstimateData = z.infer<typeof costEstimateSchema>;
 

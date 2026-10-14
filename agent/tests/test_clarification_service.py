@@ -81,6 +81,9 @@ async def test_gap_detection_clarifies_without_calling_model() -> None:
     assert result.data.field_mapping in {"provider", "region", "environment"}
     assert result.data.question_id
     assert result.data.input_type in {"text", "select", "multi_select", "boolean", "confirmation"}
+    # The orchestrator validates submitted answers against ``fields``.
+    assert len(result.data.fields) == 1
+    assert result.data.fields[0].name == result.data.question_id
     # Neither the model nor the policy tool should have been touched.
     assert model.sessions == []
     assert policy_tool.sessions == []

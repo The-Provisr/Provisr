@@ -99,6 +99,7 @@ def detect_gaps(
     message: str,
     *,
     answered_questions: list[AnsweredQuestion],
+    resolved_fields: frozenset[str] = frozenset(),
 ) -> list[ClarificationQuestion]:
     """Return structured clarification questions for gaps in *message*.
 
@@ -106,9 +107,10 @@ def detect_gaps(
     the agent never enters a circular re-asking loop.
 
     Returns at most ``MAX_CLARIFICATION_QUESTIONS`` questions, ordered by
-    priority (most blocking first).
+    priority (most blocking first). *resolved_fields* lists field mappings
+    already fixed by trusted context (e.g. the validated execution context).
     """
-    answered_fields = {aq.field_mapping for aq in answered_questions}
+    answered_fields = {aq.field_mapping for aq in answered_questions} | resolved_fields
     normalized = message.lower()
 
     candidates: list[ClarificationQuestion] = []

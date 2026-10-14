@@ -1,13 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const securityWarningSchema = z.object({
-  title: z.string(),
-  severity: z.enum(["critical", "high", "medium", "low"]),
-  description: z.string(),
-  affectedResource: z.string().optional(),
-  mitigationSteps: z.array(z.string()).optional(),
-});
+import { securityWarningSchema } from "@provisr/shared-contracts";
+export { securityWarningSchema } from "@provisr/shared-contracts";
 
 export type SecurityWarningData = z.infer<typeof securityWarningSchema>;
 

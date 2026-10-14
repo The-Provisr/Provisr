@@ -11,26 +11,27 @@ import { z } from "zod";
 import { ZodValidationPipe } from "../common/pipes/zod-validation.pipe";
 import { CurrentUser } from "../middleware/current-user.decorator";
 import type { RequestUser } from "../middleware/auth.types";
-import { requestStatuses } from "@provisr/shared-contracts";
-import { RunsService } from "../state-machine/runs.service";
+import { RunsService, ALL_RUN_STATES } from "../state-machine/runs.service";
 
 export const createRunSchema = z
   .object({
     sessionId: z.string().uuid(),
     prompt: z.string().min(1).max(20000),
+    idempotencyKey: z.string().min(1).max(255).optional(),
   })
   .strict();
 
 export const confirmRunSchema = z
   .object({
     manifestVersion: z.string().min(1),
-    planVersion: z.string().min(1),
+    planVersion: z.string().min(1).optional(),
   })
   .strict();
 
 export const clarifyRunSchema = z
   .object({
     answers: z.record(z.string(), z.unknown()),
+    idempotencyKey: z.string().min(1).max(255).optional(),
   })
   .strict();
 
@@ -39,7 +40,7 @@ export type ConfirmRunDto = z.infer<typeof confirmRunSchema>;
 export type ClarifyRunDto = z.infer<typeof clarifyRunSchema>;
 
 const sessionIdQuerySchema = z.string().uuid().optional();
-const runStatusQuerySchema = z.enum(requestStatuses).optional();
+const runStatusQuerySchema = z.enum(ALL_RUN_STATES).optional();
 const workspaceIdQuerySchema = z.string().uuid();
 
 @Controller("runs")
@@ -52,7 +53,7 @@ export class ProvisioningRunsController {
     @Body(new ZodValidationPipe(createRunSchema)) dto: CreateRunDto,
     @CurrentUser() user: RequestUser
   ) {
-    return this.runsService.createRun(dto.sessionId, workspaceId, user.userId, dto.prompt);
+    return this.runsService.createRun(dto.sessionId, workspaceId, user.userId, dto.prompt, dto.idempotencyKey);
   }
 
   @Get()
@@ -60,17 +61,18 @@ export class ProvisioningRunsController {
     @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
     @Query("sessionId", new ZodValidationPipe(sessionIdQuerySchema)) sessionId: string | undefined,
     @Query("status", new ZodValidationPipe(runStatusQuerySchema)) status: string | undefined,
-    @CurrentUser() _user: RequestUser,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.runsService.listRuns(workspaceId, sessionId, status);
+    return this.runsService.listRuns(workspaceId, sessionId, status, user.userId);
   }
 
   @Get(":id")
   get(
     @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
-    @Param("id", new ParseUUIDPipe()) id: string
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.runsService.getRun(id, workspaceId);
+    return this.runsService.getRun(id, workspaceId, user.userId);
   }
 
   @Post(":id/cancel")
@@ -100,5 +102,15 @@ export class ProvisioningRunsController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.runsService.clarifyRun(id, workspaceId, user.userId, dto);
+  }
+
+  @Post(":id/revise")
+  revise(
+    @Query("workspaceId", new ZodValidationPipe(workspaceIdQuerySchema)) workspaceId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(z.object({ prompt: z.string().trim().min(1).max(20000) }).strict())) dto: { prompt: string },
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.runsService.reviseRun(id, workspaceId, user.userId, dto.prompt);
   }
 }

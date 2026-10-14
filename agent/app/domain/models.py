@@ -61,6 +61,40 @@ class ConversationMessage(DomainModel):
     created_at: datetime
 
 
+class CloudAccountContext(DomainModel):
+    id: UUID
+    workspace_id: UUID
+    provider: Literal["aws", "azure", "gcp"]
+    label: str
+    status: Literal["active"]
+    verified_at: datetime
+    supported_regions: list[str] = Field(min_length=1)
+    resource_counts: dict[str, int] | None = None
+    quota_limits: dict[str, float] | None = None
+
+
+class CloudContext(DomainModel):
+    connected_providers: list[Literal["aws", "azure", "gcp"]] = Field(min_length=1)
+    active_accounts: list[CloudAccountContext] = Field(min_length=1)
+
+
+class ExecutionContext(DomainModel):
+    workspace_id: UUID
+    user_id: UUID
+    policy_context: PolicyRequirements
+    cloud_context: CloudContext
+
+    @model_validator(mode="after")
+    def validate_accounts(self) -> Self:
+        if any(a.workspace_id != self.workspace_id for a in self.cloud_context.active_accounts):
+            raise ValueError("Cloud accounts must belong to the execution workspace")
+        if set(self.cloud_context.connected_providers) != {
+            a.provider for a in self.cloud_context.active_accounts
+        }:
+            raise ValueError("Connected providers must match active accounts")
+        return self
+
+
 class AgentSession(DomainModel):
     session_id: str
     organization_id: str
@@ -75,6 +109,7 @@ class AgentSession(DomainModel):
     max_tokens: int
     policy_requirements_loaded: bool = False
     policy_requirements: PolicyRequirements | None = None
+    execution_context: ExecutionContext | None = None
     created_at: datetime
     updated_at: datetime
     messages: list[ConversationMessage] = Field(default_factory=list)

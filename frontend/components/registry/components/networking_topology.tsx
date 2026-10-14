@@ -2,41 +2,12 @@ import { z } from "zod";
 import { AlertTriangleIcon } from "@/components/ui/icons";
 import { defaultRegistry } from "../registry";
 
-export const PUBLIC_CIDRS = ["0.0.0.0/0", "::/0"] as const;
-
-export const firewallRuleSchema = z.object({
-  direction: z.enum(["ingress", "egress"]),
-  protocol: z.string(),
-  portRange: z.string(),
-  source: z.string().optional(),
-  destination: z.string().optional(),
-});
+import { firewallRuleSchema, networkingTopologySchema } from "@provisr/shared-contracts";
+export { firewallRuleSchema, networkingTopologySchema } from "@provisr/shared-contracts";
 
 export type FirewallRule = z.infer<typeof firewallRuleSchema>;
 
-export const networkingTopologySchema = z.object({
-  vpcName: z.string().optional(),
-  vpcCidr: z.string(),
-  subnets: z.array(
-    z.object({
-      name: z.string(),
-      cidr: z.string(),
-      type: z.enum(["public", "private", "isolated"]),
-      zone: z.string().optional(),
-    }),
-  ),
-  natGateway: z.boolean().optional(),
-  internetGateway: z.boolean().optional(),
-  securityGroups: z
-    .array(
-      z.object({
-        name: z.string(),
-        rulesCount: z.coerce.number().optional(),
-        rules: z.array(firewallRuleSchema).optional(),
-      }),
-    )
-    .optional(),
-});
+export const PUBLIC_CIDRS = ["0.0.0.0/0", "::/0"] as const;
 
 export type NetworkingTopologyData = z.infer<typeof networkingTopologySchema>;
 

@@ -1,19 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const executionTimelineSchema = z.object({
-  currentStep: z.string(),
-  steps: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      status: z.enum(["pending", "running", "succeeded", "failed", "skipped"]),
-      durationMs: z.number().optional(),
-      startedAt: z.string().optional(),
-      completedAt: z.string().optional(),
-    }),
-  ),
-});
+import { executionTimelineSchema } from "@provisr/shared-contracts";
+export { executionTimelineSchema } from "@provisr/shared-contracts";
 
 export type ExecutionTimelineData = z.infer<typeof executionTimelineSchema>;
 

@@ -1,21 +1,8 @@
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
-export const terraformReviewSchema = z.object({
-  moduleName: z.string(),
-  provider: z.string(),
-  version: z.string().optional(),
-  codeSnippet: z.string(),
-  summary: z.string().optional(),
-  files: z
-    .array(
-      z.object({
-        filename: z.string(),
-        linesCount: z.number(),
-      }),
-    )
-    .optional(),
-});
+import { terraformReviewSchema } from "@provisr/shared-contracts";
+export { terraformReviewSchema } from "@provisr/shared-contracts";
 
 export type TerraformReviewData = z.infer<typeof terraformReviewSchema>;
 

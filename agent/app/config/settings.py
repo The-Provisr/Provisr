@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     service_name: str = "provisr-agent"
     environment: Literal["development", "test", "staging", "production"] = "development"
     log_level: str = "INFO"
+    orchestrator_service_token: str = Field(default="", validation_alias="ORCHESTRATOR_SERVICE_TOKEN")
 
     state_backend: Literal["memory", "redis"] = "memory"
     redis_url: str = "redis://localhost:6379/0"

@@ -16,27 +16,8 @@ import { submitClarification } from "@/lib/clarification/submit";
 import type { ClarificationAnswers } from "@/lib/clarification/types";
 import { defaultRegistry } from "../registry";
 
-// Provider support (`supported`, `managedServices`) comes from the payload so
-// the agent stays the source of truth; there is no frontend lookup table.
-export const databaseEngineSelectorSchema = z.object({
-  runId: z.string().min(1),
-  provider: z.enum(["aws", "azure", "gcp"]),
-  recommendedEngine: z.string().optional(),
-  selectedEngine: z.string().optional(),
-  reasoning: z.string().optional(),
-  availableEngines: z
-    .array(
-      z.object({
-        engine: z.string().min(1),
-        displayName: z.string().min(1),
-        version: z.string().min(1),
-        supported: z.boolean(),
-        managedServices: z.array(z.string()).default([]),
-        bestFor: z.string().optional(),
-      }),
-    )
-    .min(1),
-});
+import { databaseEngineSelectorSchema } from "@provisr/shared-contracts";
+export { databaseEngineSelectorSchema } from "@provisr/shared-contracts";
 
 export type DatabaseEngineSelectorData = z.infer<typeof databaseEngineSelectorSchema>;
 

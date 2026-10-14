@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 from app.domain.clarification import build_answered_context, detect_gaps
@@ -15,14 +16,17 @@ from app.domain.models import (
     AgentEventType,
     AgentSession,
     AnsweredQuestion,
+    ClarificationInputType,
     ClarificationQuestion,
     ConversationMessage,
+    ExecutionContext,
 )
 from app.integrations.anthropic_model import LanguageModel
 from app.integrations.state import StateStore
 from app.outputs.models import (
     AgentOutputEnvelope,
     AssistantMessageEnvelope,
+    ClarificationAnswerField,
     ClarificationQuestionData,
     ClarificationQuestionEnvelope,
     ComponentPayloadEnvelope,
@@ -69,7 +73,10 @@ class AgentService:
         request_id: UUID,
         profile_id: str = "provisioning",
         prompt_version: str | None = None,
+        execution_context: ExecutionContext | None = None,
     ) -> AgentSession:
+        if execution_context and str(execution_context.workspace_id) != organization_id:
+            raise ValueError("Execution workspace must match organization_id")
         profile = self._profile_selector.select_profile(profile_id, prompt_version)
         prompt = profile.prompt
         now = datetime.now(UTC)
@@ -84,6 +91,9 @@ class AgentService:
             prompt_hash=prompt.content_hash,
             temperature=profile.llm_config.temperature,
             max_tokens=profile.llm_config.max_tokens,
+            execution_context=execution_context,
+            policy_requirements=(execution_context.policy_context if execution_context else None),
+            policy_requirements_loaded=execution_context is not None,
             created_at=now,
             updated_at=now,
         )
@@ -138,7 +148,11 @@ class AgentService:
         # (provider, region, environment, ...) are asked immediately. Prior user
         # turns are included so a value given earlier is not asked again.
         user_context = "\n".join(item.content for item in session.messages if item.role == "user")
-        gaps = detect_gaps(user_context, answered_questions=session.answered_questions)
+        gaps = detect_gaps(
+            user_context,
+            answered_questions=session.answered_questions,
+            resolved_fields=_context_resolved_fields(session.execution_context),
+        )
         if gaps:
             result: AgentOutputEnvelope = _clarification_envelope(session, gaps[0])
         else:
@@ -372,6 +386,37 @@ def _policy_constraints(requirements: PolicyRequirements | None) -> PolicyConstr
     )
 
 
+def _context_resolved_fields(context: ExecutionContext | None) -> frozenset[str]:
+    """Fields the validated cloud context leaves no choice for, so never asked."""
+    if context is None:
+        return frozenset()
+    resolved: set[str] = set()
+    if len(context.cloud_context.connected_providers) == 1:
+        resolved.add("provider")
+    regions = {r for a in context.cloud_context.active_accounts for r in a.supported_regions}
+    if len(regions) == 1:
+        resolved.add("region")
+    return frozenset(resolved)
+
+
+_ANSWER_FIELD_TYPES: dict[ClarificationInputType, Literal["string", "strings", "boolean"]] = {
+    "text": "string",
+    "select": "string",
+    "multi_select": "strings",
+    "boolean": "boolean",
+    "confirmation": "boolean",
+}
+
+
+def _answer_field(question: ClarificationQuestion) -> ClarificationAnswerField:
+    """Describe the answer shape the orchestrator validates submitted answers against."""
+    return ClarificationAnswerField(
+        name=question.question_id,
+        type=_ANSWER_FIELD_TYPES[question.input_type],
+        options=tuple(question.options) or None,
+    )
+
+
 def _clarification_envelope(
     session: AgentSession,
     question: ClarificationQuestion,
@@ -384,6 +429,7 @@ def _clarification_envelope(
         type="clarification_question",
         data=ClarificationQuestionData(
             question=question.question_text,
+            fields=(_answer_field(question),),
             question_id=question.question_id,
             input_type=question.input_type,
             options=tuple(question.options),

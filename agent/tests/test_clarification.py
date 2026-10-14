@@ -22,6 +22,18 @@ def test_detects_missing_provider_when_no_cloud_keyword() -> None:
     assert "provider" in field_mappings
 
 
+def test_context_resolved_fields_are_not_asked() -> None:
+    questions = detect_gaps(
+        "I need a web server",
+        answered_questions=[],
+        resolved_fields=frozenset({"provider", "region"}),
+    )
+
+    field_mappings = [q.field_mapping for q in questions]
+    assert "provider" not in field_mappings
+    assert "region" not in field_mappings
+
+
 def test_no_provider_question_when_aws_mentioned() -> None:
     questions = detect_gaps("Deploy on AWS in us-east-1 for production", answered_questions=[])
 

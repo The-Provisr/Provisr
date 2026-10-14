@@ -3,33 +3,10 @@ import { CloudProviderLogo } from "@/components/ui/cloud-provider-logo";
 import { AlertTriangleIcon } from "@/components/ui/icons";
 import { defaultRegistry } from "../registry";
 
-export const HIGH_COST_MONTHLY_USD = 500;
+import { computePlanSchema } from "@provisr/shared-contracts";
+export { computePlanSchema } from "@provisr/shared-contracts";
 
-export const computePlanSchema = z.object({
-  service: z.string(),
-  provider: z.enum(["aws", "azure", "gcp"]).optional(),
-  instanceType: z.string().optional(),
-  replicaCount: z.number().default(1),
-  autoScaling: z
-    .object({
-      min: z.coerce.number(),
-      max: z.coerce.number(),
-      desired: z.coerce.number().optional(),
-      targetCpuUtilization: z.coerce.number().optional(),
-    })
-    .refine((value) => value.min <= value.max, {
-      message: "autoScaling.min must be less than or equal to autoScaling.max",
-    })
-    .optional(),
-  os: z.string().optional(),
-  architecture: z.enum(["x86_64", "arm64"]).optional(),
-  vcpu: z.coerce.number().optional(),
-  memoryGb: z.coerce.number().optional(),
-  hourlyCostUsd: z.coerce.number().optional(),
-  monthlyCostUsd: z.coerce.number().optional(),
-  reservation: z.enum(["reserved", "on-demand", "spot"]).optional(),
-  policyNotes: z.array(z.string()).optional(),
-});
+export const HIGH_COST_MONTHLY_USD = 500;
 
 export type ComputePlanData = z.infer<typeof computePlanSchema>;
 

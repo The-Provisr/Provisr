@@ -1,7 +1,9 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
+from app.outputs.models import ClarificationAnswerField
 from app.outputs.validation import validate_envelope
 
 REQUEST_ID = "8b8c64dc-6607-4a45-aa71-f51b2d381cdf"
@@ -151,3 +153,14 @@ def test_component_payload_is_recursively_immutable() -> None:
     with pytest.raises(TypeError):
         parsed_payload["items"][0]["name"] = "rds"  # type: ignore[index]
 
+
+@pytest.mark.parametrize("field_type", ["number", "boolean"])
+def test_rejects_answer_options_on_non_string_fields(field_type: str) -> None:
+    with pytest.raises(ValidationError):
+        ClarificationAnswerField(name="count", type=field_type, options=("1", "2"))
+
+
+@pytest.mark.parametrize("field_type", ["string", "strings"])
+def test_accepts_answer_options_on_string_fields(field_type: str) -> None:
+    field = ClarificationAnswerField(name="zones", type=field_type, options=("a", "b"))
+    assert field.options == ("a", "b")

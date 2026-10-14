@@ -1,6 +1,24 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+# A policy required-tag value meaning the key must be present with any
+# non-blank value; the policy service mandates tag keys, not values.
+ANY_TAG_VALUE = "*"
+
+
+def _reject_tag_placeholder(tags: dict[str, str]) -> dict[str, str]:
+    """ANY_TAG_VALUE is a policy placeholder, never a real tag value."""
+    placeholders = sorted(key for key, value in tags.items() if value.strip() == ANY_TAG_VALUE)
+    if placeholders:
+        raise ValueError(
+            f"tags {', '.join(placeholders)} use the placeholder {ANY_TAG_VALUE!r}; "
+            "a real value is required"
+        )
+    return tags
+
+
+TagMap = Annotated[dict[str, str], AfterValidator(_reject_tag_placeholder)]
 
 
 class StrictModel(BaseModel):
@@ -61,7 +79,7 @@ class ResourceManifest(StrictModel):
     region: str = Field(min_length=3, max_length=32)
     environment: Literal["development", "staging", "production", "sandbox"]
     monthly_budget_usd: float | None = Field(default=None, gt=0)
-    tags: dict[str, str] = Field(default_factory=dict)
+    tags: TagMap = Field(default_factory=dict)
     security: SecurityConfiguration
     backup: BackupConfiguration
     policy: PolicyApplication
@@ -142,7 +160,7 @@ class CanonicalResource(StrictModel):
     type: str = Field(min_length=1, max_length=64)
     provider_config: dict[str, object] = Field(default_factory=dict)
     dependencies: list[str] = Field(default_factory=list, max_length=20)
-    tags: dict[str, str] = Field(default_factory=dict)
+    tags: TagMap = Field(default_factory=dict)
     security_settings: SecuritySettings = Field(default_factory=SecuritySettings)
     cost_estimate: CostEstimate | None = None
     policy_refs: list[str] = Field(default_factory=list, max_length=20)
@@ -186,7 +204,7 @@ class CanonicalManifest(StrictModel):
     cloud_account: str = Field(default="", max_length=128)
     environment: Literal["development", "staging", "production", "sandbox"]
     metadata: ManifestMetadata
-    tags: dict[str, str] = Field(default_factory=dict)
+    tags: TagMap = Field(default_factory=dict)
     monthly_budget_usd: float | None = Field(default=None, gt=0)
     resources: list[CanonicalResource] = Field(min_length=1, max_length=50)
     # Top-level source provenance for key manifest fields

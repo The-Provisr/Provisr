@@ -8,8 +8,9 @@ import (
 
 func TestPolicyRequirementsSerialization(t *testing.T) {
 	// Case 1: No budget rule (nil pointer)
+	regions := []string{"us-east-1"}
 	reqsNoBudget := PolicyRequirements{
-		AllowedRegions: []string{"us-east-1"},
+		AllowedRegions: &regions,
 	}
 	bytesNoBudget, err := json.Marshal(reqsNoBudget)
 	if err != nil {
@@ -22,7 +23,7 @@ func TestPolicyRequirementsSerialization(t *testing.T) {
 	// Case 2: Zero budget ($0)
 	zero := 0.0
 	reqsZeroBudget := PolicyRequirements{
-		AllowedRegions:      []string{"us-east-1"},
+		AllowedRegions:      &regions,
 		MaxMonthlyBudgetUSD: &zero,
 	}
 	bytesZeroBudget, err := json.Marshal(reqsZeroBudget)
@@ -44,6 +45,25 @@ func TestPolicyRequirementsSerialization(t *testing.T) {
 	}
 	if !strings.Contains(string(bytesPositiveBudget), `"max_monthly_budget_usd":500`) {
 		t.Fatalf("expected max_monthly_budget_usd:500 to be present, got: %s", string(bytesPositiveBudget))
+	}
+}
+
+func TestAllowedRegionsSerializationDistinguishesNoRuleFromEmptyRule(t *testing.T) {
+	noRule, err := json.Marshal(PolicyRequirements{})
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+	if strings.Contains(string(noRule), "allowed_regions") {
+		t.Fatalf("expected allowed_regions to be omitted without a rule, got: %s", noRule)
+	}
+
+	empty := []string{}
+	emptyRule, err := json.Marshal(PolicyRequirements{AllowedRegions: &empty})
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+	if !strings.Contains(string(emptyRule), `"allowed_regions":[]`) {
+		t.Fatalf("expected allowed_regions:[] for an enabled rule with no regions, got: %s", emptyRule)
 	}
 }
 

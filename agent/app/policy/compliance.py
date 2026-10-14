@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.manifest import ResourceManifest
+from app.domain.manifest import ANY_TAG_VALUE, ResourceManifest
 from app.policy.models import PolicyRequirements
 
 
@@ -23,7 +23,11 @@ def validate_manifest_policy(
         return ()
 
     violations: list[PolicyViolation] = []
-    expected_references = {"allowed_regions"}
+    # Empty allowed_regions means the workspace has no region rule; the region is
+    # still bounded by the verified accounts' supported regions.
+    expected_references: set[str] = set()
+    if requirements.allowed_regions:
+        expected_references.add("allowed_regions")
     if requirements.max_budget is not None:
         expected_references.add("max_budget")
     if requirements.required_tags:
@@ -48,7 +52,7 @@ def validate_manifest_policy(
             )
         )
 
-    if manifest.region not in requirements.allowed_regions:
+    if requirements.allowed_regions and manifest.region not in requirements.allowed_regions:
         violations.append(
             PolicyViolation(
                 code="region_not_allowed",
@@ -85,7 +89,11 @@ def validate_manifest_policy(
     missing_tags = {
         key: value
         for key, value in requirements.required_tags.items()
-        if manifest.tags.get(key) != value
+        if (
+            not manifest.tags.get(key, "").strip()
+            if value == ANY_TAG_VALUE
+            else manifest.tags.get(key) != value
+        )
     }
     if missing_tags:
         violations.append(
@@ -94,7 +102,10 @@ def validate_manifest_policy(
                 message="The manifest is missing required workspace policy tags.",
                 alternatives=(
                     "Add these required tags: "
-                    + ", ".join(f"{key}={value}" for key, value in sorted(missing_tags.items())),
+                    + ", ".join(
+                        key if value == ANY_TAG_VALUE else f"{key}={value}"
+                        for key, value in sorted(missing_tags.items())
+                    ),
                 ),
             )
         )

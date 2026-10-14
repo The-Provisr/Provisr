@@ -6,6 +6,9 @@ import { PlanningClients } from "../../src/services/planning-clients";
 
 export const policy = { enabled: true, allowed_regions: ["us-east-1"], max_budget: 500,
   required_tags: { owner: "platform" }, prohibited_resource_types: [], required_encryption: true, required_backup: true };
+/** The policy-service (BE-M02) projection behind `policy`: flat, key-only tags, no backup rule. */
+export const policyServiceResponse = { allowed_regions: ["us-east-1"], max_monthly_budget_usd: 500,
+  required_tags: ["owner"], required_encryption: true };
 export const manifest = { schema_version: "1.0", provider: "aws", region: "us-east-1", environment: "development",
   monthly_budget_usd: 100, tags: { owner: "platform" }, security: { encryption_enabled: true }, backup: { enabled: true },
   policy: { requirements_loaded: true, applied_constraints: ["allowed_regions", "max_budget", "required_tags", "required_encryption", "required_backup"] },
@@ -65,14 +68,14 @@ export function memoryDb(initial: ProvisioningRun, failSql?: string) {
   return { db, query, release, audits, events, current: () => structuredClone(run) };
 }
 
-export function fakeClients(run: ProvisioningRun, outputs: Array<{ type: string; data: unknown }>, options: { invalidDrafts?: number; noProvider?: boolean } = {}) {
+export function fakeClients(run: ProvisioningRun, outputs: Array<{ type: string; data: unknown }>, options: { invalidDrafts?: number; noProvider?: boolean; policyResponse?: Record<string, unknown> } = {}) {
   let validationCalls = 0;
   let manifestVersion = 0;
   const cloud = contextFor(run);
   const fetcher = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
     const path = new URL(String(url)).pathname;
     let body: unknown;
-    if (path.endsWith("/policy-requirements")) body = { requirements: policy };
+    if (path.endsWith("/policy-requirements")) body = options.policyResponse ?? policyServiceResponse;
     else if (path === "/v1/cloud-accounts") body = { accounts: options.noProvider ? [] : cloud.active_accounts };
     else if (path.startsWith("/v1/cloud-accounts/")) body = { ...cloud.active_accounts[0], metadata: {
       supported_regions: ["us-east-1"], resource_counts: { aws_s3: 0 }, quota_limits: { aws_s3: 100 }, secret_access_key: "DO_NOT_COPY" } };

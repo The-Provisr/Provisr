@@ -10,6 +10,7 @@ export interface PlanningConfig {
   mcpUrl: string;
   manifestUrl: string;
   serviceToken: string;
+  policyServiceToken?: string;
 }
 
 /** URLs are resolved at app wiring time, never within business logic. */
@@ -22,6 +23,7 @@ export function loadPlanningConfig(env: NodeJS.ProcessEnv): PlanningConfig {
     mcpUrl: env.MCP_URL ?? "http://localhost:5100",
     manifestUrl: env.STATE_SERVICE_URL ?? "http://localhost:8082",
     serviceToken: env.ORCHESTRATOR_SERVICE_TOKEN,
+    ...(env.POLICY_SERVICE_SECRET ? { policyServiceToken: env.POLICY_SERVICE_SECRET } : {}),
   };
 }
 
@@ -37,7 +39,7 @@ export class NoConnectedProviderError extends Error {
 export class PlanningClients {
   readonly policy: HttpPolicyRequirementsClient;
   constructor(private readonly config: PlanningConfig, private readonly fetcher: typeof fetch = fetch) {
-    this.policy = new HttpPolicyRequirementsClient(config.policyUrl, fetcher);
+    this.policy = new HttpPolicyRequirementsClient(config.policyUrl, fetcher, config.policyServiceToken);
   }
 
   private async request(base: string, path: string, run: ProvisioningRun, body?: unknown, signal = AbortSignal.timeout(15000)): Promise<unknown> {

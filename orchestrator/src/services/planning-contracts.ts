@@ -24,6 +24,12 @@ const answerFieldSchema = z.object({
 export const questionSchema = z.object({
   question: z.string().trim().min(1).max(10000),
   fields: z.array(answerFieldSchema).min(1).max(20).default([{ name: "answer", type: "string" }]),
+  // Optional FE-C03 presentation detail from the agent's question bank; answers are still validated against `fields`.
+  question_id: z.string().min(1).max(64).nullish(),
+  input_type: z.enum(["text", "select", "multi_select", "boolean", "confirmation"]).nullish(),
+  options: z.array(z.string().min(1)).max(50).nullish(),
+  required: z.boolean().nullish(),
+  field_mapping: z.string().min(1).max(128).nullish(),
 }).strict().refine(q => new Set(q.fields.map(f => f.name)).size === q.fields.length, "Duplicate answer fields");
 export type ClarificationQuestion = z.infer<typeof questionSchema>;
 

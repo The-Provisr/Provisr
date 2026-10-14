@@ -5,6 +5,7 @@ import { z } from "zod";
 import { DbService } from "../db/db.service";
 import { AuditService } from "../services/audit.service";
 import { PlanningClients, NoConnectedProviderError } from "../services/planning-clients";
+import { PolicyDeniesAllRegionsError } from "../services/policy-service.client";
 import { CloudContext, ClarificationQuestion, cloudContextSchema, questionSchema, validateAnswers, validateComponent, manifestComponents } from "../services/planning-contracts";
 import { assertTransition, EMPTY_TRANSITION_CONDITIONS } from "./transitions";
 import { WORKFLOW_STATES, WorkflowState, isTerminalWorkflowState } from "./workflow-state";
@@ -327,9 +328,9 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
         if (error instanceof ConflictException) return;
         const current = await this.getRun(id, workspaceId);
         if (current.stateVersion !== run.stateVersion || isTerminalWorkflowState(current.state)) return;
-        const noProvider = error instanceof NoConnectedProviderError;
+        const userFacing = error instanceof NoConnectedProviderError || error instanceof PolicyDeniesAllRegionsError;
         await this.transitionState(id, workspaceId, run.stateVersion, "FAILED", "orchestrator", {
-          errorCode: noProvider ? error.code : "PLANNING_FAILED", errorMessage: noProvider ? error.message : "Planning could not be completed. Please try again.",
+          errorCode: userFacing ? error.code : "PLANNING_FAILED", errorMessage: userFacing ? error.message : "Planning could not be completed. Please try again.",
         });
       }
     } finally {

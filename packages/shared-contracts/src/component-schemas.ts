@@ -81,17 +81,28 @@ export const cloudStateSchema = z.object({
 
 export const computePlanSchema = z.object({
   service: z.string(),
+  provider: z.enum(["aws", "azure", "gcp"]).optional(),
   instanceType: z.string().optional(),
   replicaCount: z.number().default(1),
   autoScaling: z
     .object({
-      min: z.number(),
-      max: z.number(),
-      targetCpuUtilization: z.number().optional(),
+      min: z.coerce.number(),
+      max: z.coerce.number(),
+      desired: z.coerce.number().optional(),
+      targetCpuUtilization: z.coerce.number().optional(),
+    })
+    .refine((value) => value.min <= value.max, {
+      message: "autoScaling.min must be less than or equal to autoScaling.max",
     })
     .optional(),
   os: z.string().optional(),
   architecture: z.enum(["x86_64", "arm64"]).optional(),
+  vcpu: z.coerce.number().optional(),
+  memoryGb: z.coerce.number().optional(),
+  hourlyCostUsd: z.coerce.number().optional(),
+  monthlyCostUsd: z.coerce.number().optional(),
+  reservation: z.enum(["reserved", "on-demand", "spot"]).optional(),
+  policyNotes: z.array(z.string()).optional(),
 });
 
 export const containerCardSchema = z.object({
@@ -119,28 +130,51 @@ export const costEstimateSchema = z.object({
   deltaPercentage: z.number().optional(),
 });
 
+// Security fields and backup retention are required with no defaults: a payload
+// that omits them must fail validation instead of rendering as if it were safe.
 export const databaseConfigSchema = z.object({
-  engine: z.string(),
+  engine: z.string().min(1),
   version: z.string().optional(),
   instanceClass: z.string().optional(),
-  allocatedStorageGb: z.number().optional(),
-  multiAz: z.boolean().default(false),
+  allocatedStorageGb: z.number().positive(),
+  maxAllocatedStorageGb: z.number().positive().optional(),
   storageType: z.string().optional(),
-  backupRetentionDays: z.number().optional(),
-});
+  multiAz: z.boolean().default(false),
+  backupRetentionDays: z.number().int().min(0),
+  maintenanceWindow: z.string().optional(),
+  storageEncrypted: z.boolean(),
+  publiclyAccessible: z.boolean(),
+  deletionProtection: z.boolean(),
+}).refine(
+  (value) =>
+    value.maxAllocatedStorageGb === undefined ||
+    value.maxAllocatedStorageGb >= value.allocatedStorageGb,
+  {
+    message: "maxAllocatedStorageGb must be greater than or equal to allocatedStorageGb",
+    path: ["maxAllocatedStorageGb"],
+  },
+);
 
+// Provider support (`supported`, `managedServices`) comes from the payload so
+// the agent stays the source of truth; there is no frontend lookup table.
 export const databaseEngineSelectorSchema = z.object({
-  recommendedEngine: z.string(),
-  reasoning: z.string(),
-  availableEngines: z.array(
-    z.object({
-      engine: z.string(),
-      displayName: z.string(),
-      bestFor: z.string(),
-      isRecommended: z.boolean().optional(),
-    }),
-  ),
+  runId: z.string().min(1),
+  provider: z.enum(["aws", "azure", "gcp"]),
+  recommendedEngine: z.string().optional(),
   selectedEngine: z.string().optional(),
+  reasoning: z.string().optional(),
+  availableEngines: z
+    .array(
+      z.object({
+        engine: z.string().min(1),
+        displayName: z.string().min(1),
+        version: z.string().min(1),
+        supported: z.boolean(),
+        managedServices: z.array(z.string()).default([]),
+        bestFor: z.string().optional(),
+      }),
+    )
+    .min(1),
 });
 
 export const driftStatusSchema = z.object({
@@ -210,7 +244,16 @@ export const monitoringCardSchema = z.object({
   dashboardEnabled: z.boolean().default(true),
 });
 
+export const firewallRuleSchema = z.object({
+  direction: z.enum(["ingress", "egress"]),
+  protocol: z.string(),
+  portRange: z.string(),
+  source: z.string().optional(),
+  destination: z.string().optional(),
+});
+
 export const networkingTopologySchema = z.object({
+  vpcName: z.string().optional(),
   vpcCidr: z.string(),
   subnets: z.array(
     z.object({
@@ -226,7 +269,8 @@ export const networkingTopologySchema = z.object({
     .array(
       z.object({
         name: z.string(),
-        rulesCount: z.number(),
+        rulesCount: z.coerce.number().optional(),
+        rules: z.array(firewallRuleSchema).optional(),
       }),
     )
     .optional(),

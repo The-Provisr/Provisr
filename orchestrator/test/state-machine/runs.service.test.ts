@@ -72,6 +72,30 @@ describe("RunsService durable planning", () => {
     expect(c.fetcher.mock.calls.some(([url]) => String(url).includes("/sessions"))).toBe(false);
   });
 
+  it("snapshots the policy-service requirements before loading cloud context", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    const c = fakeClients(run, [{ type: "assistant_message", data: { message: "Ready to draft" } }]);
+    await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
+    expect(f.current().policyRequirements).toEqual({ enabled: true, allowed_regions: ["us-east-1"], max_budget: 500,
+      required_tags: { owner: "*" }, prohibited_resource_types: [], required_encryption: true, required_backup: false });
+  });
+
+  it("treats an absent allowed_regions rule as unrestricted", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    const c = fakeClients(run, [{ type: "assistant_message", data: { message: "Ready to draft" } }], { policyResponse: {} });
+    await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
+    expect(f.current()).toMatchObject({ state: "MANIFEST_CREATING", policyRequirements: { allowed_regions: [] } });
+  });
+
+  it("fails before drafting when the allowed_regions rule allows no regions", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    const c = fakeClients(run, [], { policyResponse: { allowed_regions: [] } });
+    await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
+    expect(f.current()).toMatchObject({ state: "FAILED", errorCode: "POLICY_NO_ALLOWED_REGIONS" });
+    expect(f.current().policyRequirements).toBeFalsy();
+    expect(c.fetcher.mock.calls.some(([url]) => String(url).includes("/sessions"))).toBe(false);
+  });
+
   it("suspends and resumes the existing agent session with validated answers", async () => {
     const run = makeRun(); const f = memoryDb(run);
     const c = fakeClients(run, [{ type: "clarification_question", data: { question: "Region?", fields: [{ name: "region", type: "string", options: ["us-east-1"] }] } },

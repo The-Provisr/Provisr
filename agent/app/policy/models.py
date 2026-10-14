@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _REGION_PATTERN = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-[0-9]+$")
 _RESOURCE_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -45,9 +45,3 @@ class PolicyRequirements(BaseModel):
         if any(not _RESOURCE_TYPE_PATTERN.fullmatch(value) for value in values):
             raise ValueError("prohibited_resource_types contains an invalid type")
         return values
-
-    @model_validator(mode="after")
-    def validate_enabled_constraints(self) -> PolicyRequirements:
-        if self.enabled and not self.allowed_regions:
-            raise ValueError("enabled policies must define at least one allowed region")
-        return self

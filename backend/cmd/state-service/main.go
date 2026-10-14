@@ -32,7 +32,7 @@ func main() {
 	if mcpURL == "" {
 		mcpURL = "http://localhost:5100"
 	}
-	handler := manifest.New(db, &http.Client{Timeout: 15 * time.Second}, mcpURL, token)
+	handler := manifest.NewDraftHandler(db, &http.Client{Timeout: 15 * time.Second}, mcpURL, token)
 
 	srv := &http.Server{
 		Addr:         ":" + port,

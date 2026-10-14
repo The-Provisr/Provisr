@@ -73,6 +73,11 @@ async def run_turn(
     session = await state.get_session(session_id)
     if session.execution_context is not None:
         require_orchestrator(request)
+    if body.answers:
+        await service.record_clarification_answers(
+            session_id=session_id,
+            answers=body.answers,
+        )
     result = await service.run_turn(session_id=session_id, message=body.message)
     return RunTurnResponse(result=result)
 

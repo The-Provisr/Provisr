@@ -4,6 +4,7 @@ package cloudaccount
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -57,6 +58,10 @@ type statusRequest struct {
 	Status string `json:"status"`
 }
 
+type verifyRequest struct {
+	ExternalID string `json:"external_id"`
+}
+
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
@@ -73,7 +78,15 @@ var (
 
 // New wires the routes and middleware for the cloud-account-service.
 func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Handler {
-	s := &server{db: db, log: log, master: master}
+	return NewWithVerifier(db, log, master, &DefaultAWSVerifier{})
+}
+
+// NewWithVerifier wires the routes and middleware with a specified AWSVerifier.
+func NewWithVerifier(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey, verifier AWSVerifier) http.Handler {
+	if verifier == nil {
+		verifier = &DefaultAWSVerifier{}
+	}
+	s := &server{db: db, log: log, master: master, awsVerifier: verifier}
 
 	mux := http.NewServeMux()
 	mux.Handle("/health/", health.Handler())
@@ -82,6 +95,7 @@ func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Hand
 	mux.HandleFunc("GET /v1/cloud-accounts", s.handleList)
 	mux.HandleFunc("GET /v1/cloud-accounts/{id}", s.handleGet)
 	mux.HandleFunc("PATCH /v1/cloud-accounts/{id}/status", s.handleUpdateStatus)
+	mux.HandleFunc("POST /v1/cloud-accounts/{id}/verify", s.handleVerify)
 	mux.HandleFunc("DELETE /v1/cloud-accounts/{id}", s.handleDelete)
 
 	// RequestLogger wraps Recover so panic handling runs inside the
@@ -91,9 +105,10 @@ func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Hand
 }
 
 type server struct {
-	db     *sql.DB
-	log    zerolog.Logger
-	master cloudcrypto.MasterKey
+	db          *sql.DB
+	log         zerolog.Logger
+	master      cloudcrypto.MasterKey
+	awsVerifier AWSVerifier
 }
 
 func (s *server) workspaceKey(ctx context.Context, workspaceID string) ([]byte, error) {
@@ -497,6 +512,248 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(r.Context(), w, http.StatusOK, map[string]string{"id": id, "status": req.Status})
+}
+
+// validateVerificationPreconditions checks provider, status, and input presence.
+func validateVerificationPreconditions(provider, currentStatus, externalID string) (int, string, string) {
+	if provider != "aws" {
+		return http.StatusBadRequest, "invalid_provider", "verification is only supported for aws accounts"
+	}
+	if currentStatus == "active" {
+		return http.StatusConflict, "already_active", "cloud account is already active"
+	}
+	if currentStatus != "pending" && currentStatus != "failed" {
+		return http.StatusBadRequest, "invalid_status", fmt.Sprintf("cannot verify account with status %q", currentStatus)
+	}
+	if strings.TrimSpace(externalID) == "" {
+		return http.StatusBadRequest, "validation_error", "external_id is required"
+	}
+	return 0, "", ""
+}
+
+// verifyExternalIDHash performs constant-time comparison of the provided external ID hash with the stored hash.
+func verifyExternalIDHash(workspaceKey []byte, providedExternalID string, storedHash sql.NullString) bool {
+	if !storedHash.Valid || storedHash.String == "" {
+		return false
+	}
+	computed, err := cloudcrypto.HashExternalID(workspaceKey, providedExternalID)
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(storedHash.String)) == 1
+}
+
+func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
+	log := zerolog.Ctx(r.Context())
+	workspaceID, ok := s.requireWorkspaceID(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !validWorkspaceID(id) {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "id must be a valid UUID")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	var req verifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "invalid_json", "request body is not valid JSON")
+		return
+	}
+
+	if strings.TrimSpace(req.ExternalID) == "" {
+		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "external_id is required")
+		return
+	}
+
+	var account cloudAccount
+	var externalIDHash sql.NullString
+	var metadataEncrypted sql.NullString
+	var verifiedAt sql.NullTime
+	var createdAt, updatedAt time.Time
+
+	err := s.db.QueryRow(
+		`SELECT id, workspace_id, provider, label, status, external_account_id_hash,
+		        metadata_encrypted, verified_at, created_at, updated_at
+		 FROM provisr_cloud.cloud_accounts
+		 WHERE id = $1 AND workspace_id = $2`,
+		id, workspaceID,
+	).Scan(
+		&account.ID, &account.WorkspaceID, &account.Provider, &account.Label, &account.Status,
+		&externalIDHash, &metadataEncrypted, &verifiedAt, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			s.writeError(r.Context(), w, http.StatusNotFound, "not_found", "cloud account not found")
+			return
+		}
+		log.Error().Err(err).Msg("failed to query cloud account for verification")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to query cloud account")
+		return
+	}
+
+	if code, errType, msg := validateVerificationPreconditions(account.Provider, account.Status, req.ExternalID); code != 0 {
+		s.writeError(r.Context(), w, code, errType, msg)
+		return
+	}
+
+	workspaceKey, err := s.workspaceKey(r.Context(), workspaceID)
+	if err != nil {
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to derive encryption key")
+		return
+	}
+
+	// Verify External ID hash
+	if !verifyExternalIDHash(workspaceKey, req.ExternalID, externalIDHash) {
+		tx, txErr := s.db.Begin()
+		if txErr == nil {
+			defer func() { _ = tx.Rollback() }()
+			_, _ = tx.Exec(
+				`UPDATE provisr_cloud.cloud_accounts
+				 SET status = 'failed'::provisr_cloud.account_status, updated_at = now()
+				 WHERE id = $1 AND workspace_id = $2`,
+				id, workspaceID,
+			)
+			_ = s.emitAudit(r.Context(), tx, workspaceID, "cloud_account_status_changed", id, map[string]any{
+				"status":   "failed",
+				"reason":   "external_id_mismatch",
+				"provider": "aws",
+			})
+			_ = tx.Commit()
+		}
+		s.writeError(r.Context(), w, http.StatusBadRequest, "external_id_mismatch", "provided external_id does not match configured account external id")
+		return
+	}
+
+	// Decrypt metadata and extract role ARN
+	metadata := map[string]any{}
+	if metadataEncrypted.Valid && metadataEncrypted.String != "" {
+		if err := cloudcrypto.DecryptJSON(workspaceKey, metadataEncrypted.String, &metadata); err != nil {
+			log.Error().Err(err).Str("account_id", id).Msg("failed to decrypt account metadata")
+			s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to decrypt account metadata")
+			return
+		}
+	}
+
+	roleARN, _ := metadata["role_arn"].(string)
+	if roleARN == "" {
+		roleARN, _ = metadata["roleArn"].(string)
+	}
+	if roleARN == "" {
+		tx, txErr := s.db.Begin()
+		if txErr == nil {
+			defer func() { _ = tx.Rollback() }()
+			_, _ = tx.Exec(
+				`UPDATE provisr_cloud.cloud_accounts
+				 SET status = 'failed'::provisr_cloud.account_status, updated_at = now()
+				 WHERE id = $1 AND workspace_id = $2`,
+				id, workspaceID,
+			)
+			_ = s.emitAudit(r.Context(), tx, workspaceID, "cloud_account_status_changed", id, map[string]any{
+				"status":   "failed",
+				"reason":   "missing_role_arn",
+				"provider": "aws",
+			})
+			_ = tx.Commit()
+		}
+		s.writeError(r.Context(), w, http.StatusBadRequest, "missing_role_arn", "account metadata does not contain a valid role_arn")
+		return
+	}
+
+	// Verify IAM role assumption and permissions
+	result, err := s.awsVerifier.VerifyRole(r.Context(), roleARN, req.ExternalID)
+	if err != nil {
+		tx, txErr := s.db.Begin()
+		if txErr == nil {
+			defer func() { _ = tx.Rollback() }()
+			_, _ = tx.Exec(
+				`UPDATE provisr_cloud.cloud_accounts
+				 SET status = 'failed'::provisr_cloud.account_status, updated_at = now()
+				 WHERE id = $1 AND workspace_id = $2`,
+				id, workspaceID,
+			)
+			_ = s.emitAudit(r.Context(), tx, workspaceID, "cloud_account_status_changed", id, map[string]any{
+				"status":   "failed",
+				"error":    err.Error(),
+				"provider": "aws",
+			})
+			_ = tx.Commit()
+		}
+		s.writeError(r.Context(), w, http.StatusUnprocessableEntity, "verification_failed", err.Error())
+		return
+	}
+
+	// Update metadata with verified regions and account ID
+	metadata["verified_account_id"] = result.AccountID
+	metadata["regions"] = result.Regions
+	metadata["verified_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+
+	newEncrypted, err := cloudcrypto.EncryptJSON(workspaceKey, metadata)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to re-encrypt account metadata after verification")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to encrypt account metadata")
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to begin transaction")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to verify cloud account")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if key := strings.TrimSpace(r.Header.Get("Idempotency-Key")); key != "" {
+		if err := s.claimIdempotencyKey(r.Context(), tx, r, workspaceID, "cloud_account.verify"); err != nil {
+			s.writeIdempotencyError(w, r, err)
+			return
+		}
+	}
+
+	now := time.Now().UTC()
+	_, err = tx.Exec(
+		`UPDATE provisr_cloud.cloud_accounts
+		 SET status = 'active'::provisr_cloud.account_status,
+		     verified_at = $1,
+		     metadata_encrypted = $2,
+		     updated_at = $1
+		 WHERE id = $3 AND workspace_id = $4`,
+		now, newEncrypted, id, workspaceID,
+	)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to update verified cloud account")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to update cloud account")
+		return
+	}
+
+	if err := s.emitAudit(r.Context(), tx, workspaceID, "cloud_account_status_changed", id, map[string]any{
+		"status":     "active",
+		"provider":   "aws",
+		"account_id": result.AccountID,
+		"regions":    result.Regions,
+	}); err != nil {
+		log.Error().Err(err).Msg("failed to emit audit event")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to emit audit event")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Error().Err(err).Msg("failed to commit transaction")
+		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to commit verification")
+		return
+	}
+
+	verifiedAtStr := now.Format(time.RFC3339Nano)
+	s.writeJSON(r.Context(), w, http.StatusOK, map[string]any{
+		"id":           id,
+		"workspace_id": workspaceID,
+		"provider":     "aws",
+		"status":       "active",
+		"account_id":   result.AccountID,
+		"regions":      result.Regions,
+		"verified_at":  verifiedAtStr,
+	})
 }
 
 func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {

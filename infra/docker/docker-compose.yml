@@ -44,6 +44,22 @@ services:
       - "4318:4318"
 
   # ── Backend services (profile: backend) ──
+  manifest-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./manifest-service"]
+    ports:
+      - "8090:8090"
+    environment:
+      PORT: "8090"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   policy-service:
     profiles: [all, backend]
     build:
@@ -54,6 +70,8 @@ services:
 
     environment:
       PORT: "8081"
+      # Shared service bearer for orchestrator calls; empty disables the match.
+      POLICY_SERVICE_SECRET: ${POLICY_SERVICE_SECRET:-}
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
       REDIS_URL: redis://redis:6379/0
     depends_on:
@@ -253,6 +271,7 @@ services:
       AGENT_URL: http://agent:5000
       CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089
       POLICY_SERVICE_URL: http://policy-service:8081
+      POLICY_SERVICE_SECRET: ${POLICY_SERVICE_SECRET:-}
       STATE_SERVICE_URL: http://state-service:8082
       MCP_URL: http://mcp:5100
       ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}

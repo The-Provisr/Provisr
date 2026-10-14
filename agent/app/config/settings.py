@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
 
+    # MCP policy server base URL (PROVISR_MCP_BASE_URL). Defaults to the Docker
+    # service name used in docker-compose. Override in local dev if running natively.
+    mcp_base_url: str = "http://mcp:5100"
+
 
 @lru_cache
 def load_settings() -> Settings:

@@ -50,6 +50,31 @@ def test_invalid_or_noncompliant_draft(change: dict[str, object]) -> None:
     assert validate_contextual_manifest(manifest, CLOUD, POLICY, WORKSPACE)
 
 
+def test_empty_allowed_regions_snapshot_is_unrestricted() -> None:
+    policy = {**POLICY, "allowed_regions": []}
+    assert validate_contextual_manifest(MANIFEST, CLOUD, policy, WORKSPACE) == []
+
+
+@pytest.mark.parametrize(
+    ("tags", "valid"),
+    [
+        ({"owner": "platform", "Team": "payments"}, True),
+        ({"owner": "platform"}, False),
+        ({"owner": "platform", "Team": ""}, False),
+        ({"owner": "platform", "Team": "  "}, False),
+        ({"owner": "platform", "Team": "*"}, False),
+        ({"owner": "other", "Team": "payments"}, False),
+    ],
+)
+def test_key_only_required_tags(tags: dict[str, str], valid: bool) -> None:
+    policy = {**POLICY, "required_tags": {"owner": "platform", "Team": "*"}}
+    manifest = {**MANIFEST, "tags": tags}
+    errors = validate_contextual_manifest(manifest, CLOUD, policy, WORKSPACE)
+    assert (errors == []) is valid
+    if not valid:
+        assert errors == ["Required policy tags are missing"]
+
+
 def test_disconnected_or_foreign_account() -> None:
     for change in [{"status": "disconnected"}, {"workspace_id": "other"}, {"verified_at": None}]:
         cloud = copy.deepcopy(CLOUD)

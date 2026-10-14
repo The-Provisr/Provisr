@@ -2,8 +2,9 @@ import { ProvisioningRunSnapshot } from "../state-machine/workflow-transition.se
 import { EMPTY_TRANSITION_CONDITIONS, TransitionConditions } from "../state-machine/transitions";
 
 export interface PolicyRequirements {
+  /** Empty means no region rule (unrestricted); a rule allowing no regions fails pre-flight instead. */
   allowedRegions: string[];
-  maxBudget: number;
+  maxBudget: number | null;
   requiredTags: Record<string, string>;
   prohibitedResourceTypes: string[];
   requiredEncryption: boolean;

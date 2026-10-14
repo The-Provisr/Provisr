@@ -12,6 +12,9 @@ from src.context.fastapi import require_context
 from src.context.models import MCPContext
 
 router = APIRouter()
+# Mirrors agent.app.domain.manifest.ANY_TAG_VALUE: the key is required, any
+# non-blank value is accepted, and the placeholder itself is never a value.
+ANY_TAG_VALUE = "*"
 # Generated from agent.app.domain.manifest.ResourceManifest; checked for drift in tests.
 _schema = json.loads(Path(__file__).with_name("manifest.schema.json").read_text())
 _validator = Draft202012Validator(_schema)
@@ -48,7 +51,10 @@ def validate_contextual_manifest(
     ):
         errors.append("Provider and region must belong to a verified active workspace account")
     if policy.get("enabled") is not False:
-        if manifest["region"] not in policy.get("allowed_regions", []):
+        # The orchestrator snapshot uses [] for "no region rule"; a rule that
+        # allows no regions fails pre-flight and never reaches validation.
+        allowed_regions = policy.get("allowed_regions", [])
+        if allowed_regions and manifest["region"] not in allowed_regions:
             errors.append("Region is prohibited by workspace policy")
         budget = policy.get("max_budget")
         if budget is not None and (
@@ -58,7 +64,10 @@ def validate_contextual_manifest(
         required_tags = policy.get("required_tags", {})
         if not isinstance(required_tags, dict):
             return ["Policy context must contain a required tags map"]
-        if any(manifest.get("tags", {}).get(k) != v for k, v in required_tags.items()):
+        tags = manifest.get("tags", {})
+        if any(
+            not _tag_satisfies(tags.get(k), v) for k, v in required_tags.items()
+        ) or ANY_TAG_VALUE in (str(v).strip() for v in tags.values()):
             errors.append("Required policy tags are missing")
         if policy.get("required_encryption") and not manifest["security"]["encryption_enabled"]:
             errors.append("Workspace policy requires encryption")
@@ -92,3 +101,9 @@ async def validate_manifest(
             manifest, body.get("cloud_context"), body.get("policy_context"), str(context.workspace_id)
         )
     return {"valid": not errors, "errors": errors}
+
+
+def _tag_satisfies(actual: object, required: object) -> bool:
+    if required == ANY_TAG_VALUE:
+        return isinstance(actual, str) and actual.strip() not in ("", ANY_TAG_VALUE)
+    return actual == required

@@ -513,3 +513,75 @@ def test_backend_error_codes_are_not_logged(caplog: pytest.LogCaptureFixture) ->
         call_tool(backend, tool_body())
     assert "outcome=invalid" in caplog.text
     assert "SECRET_FROM_BACKEND" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "policy_override",
+    [
+        {"allowed_regions": 42},
+        {"max_budget": "500"},
+        {"max_budget": True},
+        {"max_budget": float("nan")},
+        {"max_budget": float("inf")},
+        {"required_tags": {"owner": 42}},
+        {"prohibited_resource_types": None},
+        {"required_encryption": "false"},
+        {"enabled": "false"},
+        {},
+    ],
+)
+def test_malformed_policy_constraints_fail_closed_without_backend_call(
+    policy_override: dict[str, object],
+) -> None:
+    """Invalid constraints produce a safe verdict rather than HTTP 500 or ALLOW."""
+    from test_manifest_validation import CLOUD
+    from test_manifest_validation import MANIFEST as DRAFT
+
+    backend = backend_returning(json={"valid": True})
+    body = {
+        "context": valid_context_payload(),
+        "manifest": DRAFT,
+        "cloud_context": CLOUD,
+        "policy_context": {"enabled": True, **policy_override},
+    }
+    if not policy_override:
+        body["policy_context"] = {}
+    # JSON's nonfinite literals are accepted by Python's decoder; exercise the
+    # boundary with raw bytes rather than httpx's strict JSON encoder.
+    runtime = create_app(
+        membership_store=FakeMembershipStore(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(backend)),
+        backend_url=BACKEND_URL,
+    )
+    with TestClient(runtime) as client:
+        response = client.post(
+            "/tools/validate_manifest",
+            content=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+        )
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert "invalid constraint" in response.json()["errors"][0]["message"]
+    assert backend.requests == []
+
+
+def test_duplicate_draft_resources_are_rejected_before_projection() -> None:
+    """Generated logical identifiers must not conceal repeated cloud resources."""
+    from test_manifest_validation import CLOUD, POLICY
+    from test_manifest_validation import MANIFEST as DRAFT
+
+    resource = DRAFT["resources"][0]
+    backend = backend_returning(json={"valid": True})
+    response = call_tool(
+        backend,
+        {
+            "context": valid_context_payload(),
+            "manifest": {**DRAFT, "resources": [resource, dict(resource)]},
+            "cloud_context": CLOUD,
+            "policy_context": POLICY,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert "resources.1.name: duplicate" in response.json()["errors"][0]["message"]
+    assert backend.requests == []

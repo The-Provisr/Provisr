@@ -20,6 +20,9 @@ schema and cloud/policy checks run first, then a read-only projection maps the
 three supported draft types (EC2, RDS, S3) into BE-D01's canonical shape. Generated
 logical identifiers are separate from the original cloud names, which remain in
 resource properties. Neither the submitted draft nor stored manifest is mutated.
+Malformed policy constraint types and nonfinite budgets are rejected before
+evaluation. Duplicate resources with the same type and cloud name are rejected
+before generated logical identifiers can conceal them.
 This validation does not replace formal OPA checks or execution gates.
 
 The result is `{ valid, errors: [{ field, code, message, allowed_values }] }`.

@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
+from src.servers.manifest_server import router as manifest_creation_router
 from src.servers.manifest_validation import router as manifest_router
 
 
@@ -21,6 +22,7 @@ class Resources:
     membership_store: MembershipStore
     http_client: httpx.AsyncClient
     backend_url: str
+    manifest_url: str
 
 
 def create_app(
@@ -50,11 +52,13 @@ def create_app(
             or os.getenv("POLICY_SERVICE_URL")
             or os.getenv("BACKEND_URL", "http://localhost:8081")
         ).rstrip("/")
+        resolved_manifest_url = os.getenv("MANIFEST_SERVICE_URL", "http://localhost:8090").rstrip("/")
 
         application.state.resources = Resources(
             membership_store=resolved_store,
             http_client=client,
             backend_url=resolved_backend_url,
+            manifest_url=resolved_manifest_url,
         )
         try:
             yield
@@ -70,6 +74,7 @@ def create_app(
     )
     install_context_error_handler(application)
     application.include_router(manifest_router)
+    application.include_router(manifest_creation_router)
 
     @application.get("/health/live")
     async def live() -> dict[str, str]:

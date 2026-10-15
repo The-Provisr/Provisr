@@ -13,6 +13,7 @@ uv run ruff check src
 ## Tool architecture
 6 tool server groups, each exposes MCP-style tools. Tools return structured JSON.
 - `policy_server.py` — get_policy_requirements, check_policy, explain_policy_violation, suggest_policy_compliant_fix
+- `manifest_server.py` — create_manifest; validates canonical drafts and persists immutable versions through BE-D01/BE-D02
 - `cloud_state_server.py` — get_cloud_account_capabilities, get_existing_resources, check_name_conflicts, check_quota_limits, get_drift_status
 - `iac_server.py` — generate_iac, create_plan, get_iac_execution_status
 - `cost_server.py` — estimate_cost, compare_provider_costs, compare_cost_options

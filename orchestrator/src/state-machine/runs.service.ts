@@ -245,14 +245,28 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
     catch { throw new BadRequestException("Answers do not match the current question fields"); }
     const agentInput = JSON.stringify({ question: run.currentQuestion, answers });
     if (agentInput.length > 20000) throw new BadRequestException("Clarification answers are too large");
-    return this.mutate(id, workspaceId, run.stateVersion, actorId, current => {
+    try {
+      return await this.mutate(id, workspaceId, run.stateVersion, actorId, current => {
       if (current.state !== "CLARIFYING" || !current.clarificationExpiresAt || new Date(current.clarificationExpiresAt).getTime() <= Date.now()) throw new ConflictException("Clarification expired or is no longer pending");
       return {
       state: "MANIFEST_CREATING", updates: { currentQuestion: null, clarificationExpiresAt: null,
         answersHistory: [...current.answersHistory, { question: current.currentQuestion!, answers, answeredAt: new Date().toISOString(), idempotencyKey: dto?.idempotencyKey ?? randomUUID() }],
         agentInput, agentTurnPending: true }, eventType: "ClarificationAnsweredEvent",
       };
-    });
+      });
+    } catch (error) {
+      // Concurrent retries can both read CLARIFYING. Once one commits, the
+      // other's state-version check fails; recognize that committed replay.
+      if (!(error instanceof ConflictException) || !dto?.idempotencyKey) throw error;
+      const latest = await this.getRun(id, workspaceId, actorId);
+      const committed = latest.answersHistory.find(entry => entry.idempotencyKey === dto.idempotencyKey);
+      if (!committed) throw error;
+      let replayAnswers: Record<string, unknown>;
+      try { replayAnswers = validateAnswers(committed.question, dto.answers); }
+      catch { throw new ConflictException("Idempotency key already used for different answers"); }
+      if (JSON.stringify(committed.answers) !== JSON.stringify(replayAnswers)) throw new ConflictException("Idempotency key already used for different answers");
+      return latest;
+    }
   }
   async reviseRun(id: string, workspaceId: string, actorId: string, prompt: string): Promise<ProvisioningRun> {
     const run = await this.getRun(id, workspaceId, actorId);

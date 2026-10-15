@@ -84,7 +84,10 @@ export function fakeClients(run: ProvisioningRun, outputs: Array<{ type: string;
       const output = outputs.shift();
       if (!output) throw new Error("No test output remaining");
       body = { result: { ...output, version: "1.0.0", request_id: run.id, metadata: { confidence: 1, source: "llm_generated", warnings: [] } } };
-    } else if (path === "/tools/validate_manifest") body = { valid: ++validationCalls > (options.invalidDrafts ?? 0), errors: ["region validation failed"] };
+    } else if (path === "/tools/validate_manifest") {
+      const valid = ++validationCalls > (options.invalidDrafts ?? 0);
+      body = { valid, errors: valid ? [] : ["region validation failed"] };
+    }
     else if (path === "/tools/validate_manifest_schema") body = { valid: true, errors: [] };
     else if (path === "/v1/manifests") body = { version: ++manifestVersion };
     else throw new Error(`Unexpected test URL ${path}`);

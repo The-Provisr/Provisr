@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -87,8 +88,12 @@ def test_tools_require_authorized_context() -> None:
         async def get_role(self, *, user_id: UUID, workspace_id: UUID) -> str | None:
             return "engineer" if str(workspace_id) == WORKSPACE else None
     context = {"workspace_id": WORKSPACE, "user_id": WORKSPACE, "request_id": WORKSPACE,
-               "correlation_id": WORKSPACE, "session_id": WORKSPACE, "permissions": ["manifest:write"]}
-    with TestClient(create_app(membership_store=Membership())) as client:
+               "correlation_id": WORKSPACE, "session_id": WORKSPACE,
+               "permissions": ["manifest:read", "manifest:write"]}
+    backend = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, json={"valid": True, "errors": []}),
+    ))
+    with TestClient(create_app(membership_store=Membership(), http_client=backend)) as client:
         for tool in ["validate_manifest", "validate_manifest_schema"]:
             assert client.post(f"/tools/{tool}", json={"manifest": MANIFEST}).status_code == 403
             result = client.post(f"/tools/{tool}", json={"context": context, "manifest": MANIFEST,

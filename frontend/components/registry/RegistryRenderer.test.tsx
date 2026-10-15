@@ -1,12 +1,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { ComponentPayload, ComponentType } from "@provisr/shared-contracts";
 import { createRegistry, type ComponentRegistry } from "./registry";
 import { RegistryProvider } from "./RegistryProvider";
 import { RegistryRenderer } from "./RegistryRenderer";
+import { RegionSelectorComponent, regionSelectorSchema } from "./components/region_selector";
 import { useRegistry } from "./useRegistry";
 
 function TextComponent({ data }: { data: { text: string } }) {
@@ -163,6 +164,44 @@ describe("RegistryRenderer", () => {
     expect(screen.getByText("Default registry test message")).toBeInTheDocument();
     expect(screen.getByText("Provisr Bot")).toBeInTheDocument();
     expect(screen.queryByText(/no renderer is registered/i)).not.toBeInTheDocument();
+  });
+
+  it("delivers region selector updates through the renderer callback", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "region_selector",
+      version: "1.0",
+      schema: regionSelectorSchema,
+      component: RegionSelectorComponent,
+    });
+    const onRegionSelection = vi.fn();
+
+    render(
+      <RegistryProvider registry={registry}>
+        <RegistryRenderer
+          payload={payload({
+            type: "region_selector" as ComponentType,
+            data: {
+              provider: "aws",
+              selectedRegion: "ap-southeast-1",
+              availableRegions: [
+                { id: "ap-southeast-1", name: "Singapore" },
+                { id: "us-east-1", name: "N. Virginia" },
+              ],
+            },
+          })}
+          onRegionSelection={onRegionSelection}
+        />
+      </RegistryProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: /N\. Virginia/ }));
+
+    expect(onRegionSelection).toHaveBeenCalledExactlyOnceWith({
+      type: "region_selection",
+      provider: "aws",
+      regionId: "us-east-1",
+    });
   });
 
   it("registers all 23 FE-C component types into defaultRegistry", () => {

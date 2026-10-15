@@ -86,7 +86,7 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<WorkflowState, readonly Transi
     {
       to: "MANIFEST_CREATING",
       onEntry: "CREATE_MANIFEST",
-      requiredConditions: ["cloudContextLoaded"],
+      requiredConditions: ["policyRequirementsLoaded", "cloudContextLoaded"],
     },
     ...EXIT_TO_FAILURE_OR_CANCELLATION,
   ],
@@ -99,7 +99,7 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<WorkflowState, readonly Transi
     {
       to: "MANIFEST_CREATING",
       onEntry: "CREATE_MANIFEST",
-      requiredConditions: ["cloudContextLoaded", "clarificationCompleted"],
+      requiredConditions: ["policyRequirementsLoaded", "cloudContextLoaded", "clarificationCompleted"],
     },
     ...EXIT_TO_FAILURE_OR_CANCELLATION,
   ],
@@ -113,7 +113,7 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<WorkflowState, readonly Transi
     ...EXIT_TO_FAILURE_OR_CANCELLATION,
   ],
   MANIFEST_VALIDATING: [
-    { to: "MANIFEST_CREATING", onEntry: "CREATE_MANIFEST", requiredConditions: ["cloudContextLoaded"] },
+    { to: "MANIFEST_CREATING", onEntry: "CREATE_MANIFEST", requiredConditions: ["policyRequirementsLoaded", "cloudContextLoaded"] },
     {
       to: "IAC_GENERATING",
       onEntry: "GENERATE_IAC",
@@ -159,7 +159,7 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<WorkflowState, readonly Transi
     ...EXIT_TO_FAILURE_OR_CANCELLATION,
   ],
   APPROVING: [
-    { to: "MANIFEST_CREATING", onEntry: "CREATE_MANIFEST", requiredConditions: ["cloudContextLoaded"] },
+    { to: "MANIFEST_CREATING", onEntry: "CREATE_MANIFEST", requiredConditions: ["policyRequirementsLoaded", "cloudContextLoaded"] },
     {
       to: "EXECUTING",
       onEntry: "EXECUTE_IAC",

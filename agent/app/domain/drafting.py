@@ -64,6 +64,7 @@ class DraftingContext:
     user_prompt: str
     policy: PolicyConstraints = field(default_factory=PolicyConstraints)
     cloud_account: str = ""
+    cloud_default_region: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +138,9 @@ def draft_manifest(
         tags=merged_tags,
         monthly_budget_usd=raw.monthly_budget_usd,
         resources=resources,
-        region_source=_annotate_region(raw.region, context.policy),
+        region_source=_annotate_region(
+            raw.region, context.policy, context.cloud_default_region
+        ),
         environment_source=FieldSource(source="user_prompt", confidence=1.0),
         provider_source=FieldSource(source="user_prompt", confidence=1.0),
     )
@@ -354,7 +357,11 @@ def _build_policy_refs(rtype: str, policy: PolicyConstraints) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _annotate_region(region: str, policy: PolicyConstraints) -> FieldSource:
+def _annotate_region(
+    region: str,
+    policy: PolicyConstraints,
+    cloud_default_region: str | None = None,
+) -> FieldSource:
     """Annotate the region field with its provenance.
 
     If the region appears in the policy allowed list it is considered a
@@ -363,4 +370,6 @@ def _annotate_region(region: str, policy: PolicyConstraints) -> FieldSource:
     """
     if policy.allowed_regions and region in policy.allowed_regions:
         return FieldSource(source="policy_default", confidence=1.0)
+    if cloud_default_region == region:
+        return FieldSource(source="cloud_state", confidence=1.0)
     return FieldSource(source="user_prompt", confidence=0.95)

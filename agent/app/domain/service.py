@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
@@ -10,7 +11,7 @@ from app.domain.drafting import (
     draft_manifest,
 )
 from app.domain.errors import InvalidModelResponseError, SessionFailedError
-from app.domain.manifest import CanonicalManifest
+from app.domain.manifest import CanonicalManifest, ResourceManifest
 from app.domain.models import (
     AgentEvent,
     AgentEventType,
@@ -152,9 +153,35 @@ class AgentService:
             user_context,
             answered_questions=session.answered_questions,
             resolved_fields=_context_resolved_fields(session.execution_context),
+            connected_providers=(
+                session.execution_context.cloud_context.connected_providers
+                if session.execution_context
+                else None
+            ),
+            verified_regions=_context_region_options(
+                session.execution_context, session.answered_questions
+            ),
         )
-        if gaps:
-            result: AgentOutputEnvelope = _clarification_envelope(session, gaps[0])
+        unsupported_provider = _unsupported_selected_provider(
+            session.execution_context, session.answered_questions, user_context
+        )
+        if unsupported_provider:
+            provider = unsupported_provider
+            result = AssistantMessageEnvelope(
+                version="1.0.0",
+                request_id=session.request_id,
+                metadata=OutputMetadata(confidence=1.0, source="template"),
+                type="assistant_message",
+                data={
+                    "message": (
+                        f"This workspace is connected to {provider}, but the current "
+                        "manifest format supports AWS resources only. I can't draft a "
+                        "manifest for this workspace yet."
+                    )
+                },
+            )
+        elif gaps:
+            result = _clarification_envelope(session, gaps[0])
         else:
             await self._ensure_policy_requirements(session)
             result = await self._run_model_turn(session, profile)
@@ -219,6 +246,7 @@ class AgentService:
             workspace_id=session.organization_id,
             user_prompt=user_prompt,
             policy=_policy_constraints(session.policy_requirements),
+            cloud_default_region=_workspace_default_region(session),
         )
         try:
             return draft_manifest(envelope.data.manifest, context)
@@ -254,6 +282,12 @@ class AgentService:
                     raise InvalidModelResponseError(
                         "Manifest draft was produced before policy requirements were loaded"
                     )
+                result = _apply_workspace_region_default(result, session)
+                context_error = _manifest_cloud_context_error(
+                    result.data.manifest, session.execution_context
+                )
+                if context_error:
+                    raise InvalidModelResponseError(context_error)
                 violations = validate_manifest_policy(
                     result.data.manifest,
                     session.policy_requirements,
@@ -393,10 +427,138 @@ def _context_resolved_fields(context: ExecutionContext | None) -> frozenset[str]
     resolved: set[str] = set()
     if len(context.cloud_context.connected_providers) == 1:
         resolved.add("provider")
-    regions = {r for a in context.cloud_context.active_accounts for r in a.supported_regions}
-    if len(regions) == 1:
+    regions = _context_region_options(context, []) or []
+    if context.cloud_context.default_region or len(regions) == 1:
         resolved.add("region")
     return frozenset(resolved)
+
+
+def _unsupported_selected_provider(
+    context: ExecutionContext | None,
+    answered_questions: list[AnsweredQuestion],
+    user_text: str,
+) -> str | None:
+    if context is None:
+        return None
+    connected = context.cloud_context.connected_providers
+    selected = next(
+        (
+            answer.answer.strip().lower()
+            for answer in reversed(answered_questions)
+            if answer.field_mapping == "provider"
+        ),
+        None,
+    )
+    if selected is None:
+        mentions = []
+        for provider, patterns in (
+            ("aws", (r"\baws\b",)),
+            ("azure", (r"\bazure\b",)),
+            ("gcp", (r"\bgcp\b", r"\bgoogle cloud\b")),
+        ):
+            if any(re.search(pattern, user_text, re.IGNORECASE) for pattern in patterns):
+                mentions.append(provider)
+        selected = mentions[0] if len(mentions) == 1 else None
+    if selected is None and len(connected) == 1:
+        selected = connected[0]
+    if selected in connected and selected != "aws":
+        return selected
+    return None
+
+
+def _context_region_options(
+    context: ExecutionContext | None,
+    answered_questions: list[AnsweredQuestion],
+) -> list[str] | None:
+    if context is None:
+        return None
+    provider = next(
+        (
+            answer.answer
+            for answer in reversed(answered_questions)
+            if answer.field_mapping == "provider"
+        ),
+        None,
+    )
+    account_regions = [
+        region
+        for account in context.cloud_context.active_accounts
+        if provider is None or account.provider == provider
+        for region in account.supported_regions
+    ]
+    regions = account_regions or context.cloud_context.regions
+    if context.cloud_context.default_region:
+        return list(dict.fromkeys([context.cloud_context.default_region, *regions]))
+    return list(dict.fromkeys(regions)) or None
+
+
+def _manifest_cloud_context_error(
+    manifest: ResourceManifest,
+    context: ExecutionContext | None,
+) -> str | None:
+    if context is None:
+        return None
+    cloud = context.cloud_context
+    provider = manifest.provider
+    if provider not in cloud.connected_providers:
+        return "The proposed provider is not connected to this workspace."
+
+    provider_regions = [
+        region
+        for account in cloud.active_accounts
+        if account.provider == provider
+        for region in account.supported_regions
+    ]
+    verified_regions = provider_regions or cloud.regions
+    if verified_regions and manifest.region not in verified_regions:
+        return "The proposed region is not verified for the connected workspace account."
+
+    existing_names = {
+        resource.name.casefold()
+        for resource in cloud.existing_resources
+        if resource.name
+        and (resource.provider is None or resource.provider == provider)
+        and (resource.region is None or resource.region == manifest.region)
+    }
+    if any(resource.name.casefold() in existing_names for resource in manifest.resources):
+        return "The proposed manifest reuses a resource name that already exists in this workspace."
+
+    for account in cloud.active_accounts:
+        if account.provider != provider or account.quota_limits is None:
+            continue
+        for resource in manifest.resources:
+            quota = account.quota_limits.get(resource.type)
+            count = account.resource_counts.get(resource.type, 0) if account.resource_counts else 0
+            requested = getattr(resource, "count", 1)
+            if quota is not None and count + requested > quota:
+                return "The proposed resource count exceeds a reported workspace quota."
+
+    return None
+
+
+def _apply_workspace_region_default(
+    result: ManifestDraftEnvelope,
+    session: AgentSession,
+) -> ManifestDraftEnvelope:
+    default_region = _workspace_default_region(session)
+    if default_region is None:
+        return result
+    manifest = result.data.manifest.model_copy(update={"region": default_region})
+    return result.model_copy(update={"data": result.data.model_copy(update={"manifest": manifest})})
+
+
+def _workspace_default_region(session: AgentSession) -> str | None:
+    context = session.execution_context
+    if context is None or context.cloud_context.default_region is None:
+        return None
+    if any(answer.field_mapping == "region" for answer in session.answered_questions):
+        return None
+    user_text = "\n".join(
+        message.content for message in session.messages if message.role == "user"
+    )
+    if re.search(r"\b(?:us|eu|ap|sa|ca|me|af)-[a-z]+-[0-9]\b", user_text):
+        return None
+    return context.cloud_context.default_region
 
 
 _ANSWER_FIELD_TYPES: dict[ClarificationInputType, Literal["string", "strings", "boolean"]] = {

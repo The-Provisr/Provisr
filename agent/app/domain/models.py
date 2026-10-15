@@ -73,9 +73,71 @@ class CloudAccountContext(DomainModel):
     quota_limits: dict[str, float] | None = None
 
 
+class ExistingResourceContext(BaseModel):
+    """Safe inventory fields needed for duplicate detection; drop all extras."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    provider: Literal["aws", "azure", "gcp"] | None = None
+    region: str | None = None
+    name: str | None = None
+    id: str | None = None
+    type: str | None = None
+    resource_type: str | None = None
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> Self:
+        if not self.name and not self.id:
+            raise ValueError("Existing resources must include a name or id")
+        return self
+
+
 class CloudContext(DomainModel):
-    connected_providers: list[Literal["aws", "azure", "gcp"]] = Field(min_length=1)
-    active_accounts: list[CloudAccountContext] = Field(min_length=1)
+    # `providers`/`regions`/`existing_resources`/`default_region` are the
+    # OR-009 cloud-context envelope. Keep account fields for older callers.
+    connected_providers: list[Literal["aws", "azure", "gcp"]] = Field(default_factory=list)
+    providers: list[Literal["aws", "azure", "gcp"]] = Field(default_factory=list)
+    regions: list[str] = Field(default_factory=list)
+    existing_resources: list[ExistingResourceContext] = Field(default_factory=list)
+    default_region: str | None = None
+    active_accounts: list[CloudAccountContext] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_context_envelope(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        providers = normalized.get("providers") or normalized.get("connected_providers")
+        if providers:
+            normalized.setdefault("providers", providers)
+            normalized.setdefault("connected_providers", providers)
+        accounts = normalized.get("active_accounts") or []
+        if not normalized.get("regions") and accounts:
+            regions: list[str] = []
+            for account in accounts:
+                if isinstance(account, dict):
+                    regions.extend(account.get("supported_regions", []))
+                elif isinstance(account, CloudAccountContext):
+                    regions.extend(account.supported_regions)
+            normalized["regions"] = list(
+                dict.fromkeys(regions)
+            )
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_provider_accounts(self) -> Self:
+        providers = set(self.connected_providers)
+        if not providers:
+            raise ValueError("Cloud context must include at least one connected provider")
+        if self.providers and set(self.providers) != providers:
+            raise ValueError("providers must match connected_providers")
+        account_providers = {account.provider for account in self.active_accounts}
+        if self.active_accounts and providers != account_providers:
+            raise ValueError("Connected providers must match active accounts")
+        if self.default_region and self.regions and self.default_region not in self.regions:
+            raise ValueError("default_region must be one of the verified regions")
+        return self
 
 
 class ExecutionContext(DomainModel):
@@ -88,7 +150,7 @@ class ExecutionContext(DomainModel):
     def validate_accounts(self) -> Self:
         if any(a.workspace_id != self.workspace_id for a in self.cloud_context.active_accounts):
             raise ValueError("Cloud accounts must belong to the execution workspace")
-        if set(self.cloud_context.connected_providers) != {
+        if self.cloud_context.active_accounts and set(self.cloud_context.connected_providers) != {
             a.provider for a in self.cloud_context.active_accounts
         }:
             raise ValueError("Connected providers must match active accounts")

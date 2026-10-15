@@ -1,12 +1,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { ComponentPayload, ComponentType } from "@provisr/shared-contracts";
 import { createRegistry, type ComponentRegistry } from "./registry";
 import { RegistryProvider } from "./RegistryProvider";
 import { RegistryRenderer } from "./RegistryRenderer";
+import { ResourceTableComponent, resourceTableSchema } from "./components/resource_table";
 import { useRegistry } from "./useRegistry";
 
 function TextComponent({ data }: { data: { text: string } }) {
@@ -163,6 +164,39 @@ describe("RegistryRenderer", () => {
     expect(screen.getByText("Default registry test message")).toBeInTheDocument();
     expect(screen.getByText("Provisr Bot")).toBeInTheDocument();
     expect(screen.queryByText(/no renderer is registered/i)).not.toBeInTheDocument();
+  });
+
+  it("delivers resource navigation through the renderer callback", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "resource_table",
+      version: "1.0",
+      schema: resourceTableSchema,
+      component: ResourceTableComponent,
+    });
+    const onNavigateResource = vi.fn();
+
+    render(
+      <RegistryProvider registry={registry}>
+        <RegistryRenderer
+          payload={payload({
+            type: "resource_table" as ComponentType,
+            data: {
+              rows: [{ id: "db-1", name: "orders-db", type: "aws_rds", provider: "aws", region: "us-east-1", status: "draft" }],
+            },
+          })}
+          onNavigateResource={onNavigateResource}
+        />
+      </RegistryProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open domain card for orders-db" }));
+    expect(onNavigateResource).toHaveBeenCalledExactlyOnceWith({
+      type: "resource_navigation",
+      target: "domain_card",
+      resourceId: "db-1",
+      resourceName: "orders-db",
+    });
   });
 
   it("registers all 23 FE-C component types into defaultRegistry", () => {

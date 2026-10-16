@@ -52,10 +52,10 @@ var catalog = map[string]spec{
 
 // SupportedDomains reports only domains with phase-one templates for this provider.
 func SupportedDomains(provider string) []string {
-	if provider != "aws" {
+	if strings.ToLower(strings.TrimSpace(provider)) != "aws" {
 		return []string{}
 	}
-	return []string{"compute", "database", "networking", "storage"}
+	return []string{"compute", "database", "network", "storage"}
 }
 
 // Render validates typed inputs, then renders stable files without executing or persisting them.
@@ -68,17 +68,22 @@ func Render(m *manifest.Manifest) (Result, error) {
 	if len(m.Unknowns) > 0 {
 		return out, fmt.Errorf("resolve manifest unknowns before rendering")
 	}
-	for _, r := range m.Resources {
-		if _, ok := catalog[r.Type]; !ok || m.Provider != "aws" {
+	resources := append([]manifest.Resource(nil), m.Resources...)
+	for index := range resources {
+		r := &resources[index]
+		if r.LogicalName != strings.TrimSpace(r.LogicalName) {
+			return out, fmt.Errorf("resource logical_name must not contain surrounding whitespace")
+		}
+		r.Type = strings.TrimSpace(r.Type)
+		if _, ok := catalog[r.Type]; !ok || strings.ToLower(strings.TrimSpace(m.Provider)) != "aws" {
 			out.Unsupported = append(out.Unsupported, Unsupported{r.LogicalName, r.Type, "unsupported"})
 		}
 	}
 	if len(out.Unsupported) > 0 {
 		return out, nil
 	}
-	resources := append([]manifest.Resource(nil), m.Resources...)
 	sort.Slice(resources, func(i, j int) bool { return resources[i].LogicalName < resources[j].LogicalName })
-	files := []File{{"providers.tf", "terraform {\n  required_providers {\n    aws = { source = \"hashicorp/aws\", version = \"~> 5.0\" }\n  }\n}\nprovider \"aws\" {\n  region = " + hcl(m.Region) + "\n}\n"}}
+	files := []File{{"providers.tf", "terraform {\n  required_providers {\n    aws = { source = \"hashicorp/aws\", version = \"~> 5.0\" }\n  }\n}\nprovider \"aws\" {\n  region = " + hcl(strings.TrimSpace(m.Region)) + "\n}\n"}}
 	for _, r := range resources {
 		s := catalog[r.Type]
 		p, err := properties(r, s)
@@ -96,12 +101,12 @@ func Render(m *manifest.Manifest) (Result, error) {
 		for _, name := range r.DependsOn {
 			for _, dep := range resources {
 				if dep.LogicalName == name {
-					deps = append(deps, catalog[dep.Type].terraformType+"."+name)
+					deps = append(deps, catalog[dep.Type].terraformType+".r_"+name)
 				}
 			}
 		}
 		sort.Strings(deps)
-		data := map[string]any{"Name": r.LogicalName, "P": p, "Tags": tags, "Dependencies": strings.Join(deps, ", ")}
+		data := map[string]any{"Name": "r_" + r.LogicalName, "P": p, "Tags": tags, "Dependencies": strings.Join(deps, ", ")}
 		raw, err := assets.ReadFile("templates/" + s.path)
 		if err != nil {
 			return out, fmt.Errorf("template unavailable")
@@ -114,7 +119,7 @@ func Render(m *manifest.Manifest) (Result, error) {
 		if err := t.Execute(&buf, data); err != nil {
 			return out, fmt.Errorf("template rendering failed")
 		}
-		files = append(files, File{r.LogicalName + ".tf", buf.String()})
+		files = append(files, File{"resource_" + r.LogicalName + ".tf", buf.String()})
 	}
 	out.Files = files
 	return out, nil
@@ -186,7 +191,8 @@ func properties(r manifest.Resource, s spec) (map[string]any, error) {
 			return nil, fmt.Errorf("resource %s: unsupported database engine", r.LogicalName)
 		}
 	}
-	if r.SecuritySettings != nil && (r.SecuritySettings.PublicAccess || !r.SecuritySettings.EncryptionEnabled) {
+	if r.SecuritySettings != nil && (r.SecuritySettings.PublicAccess ||
+		(!strings.HasPrefix(r.Type, "network.") && !r.SecuritySettings.EncryptionEnabled)) {
 		return nil, fmt.Errorf("resource %s: phase-one templates require private encrypted resources", r.LogicalName)
 	}
 	return p, nil

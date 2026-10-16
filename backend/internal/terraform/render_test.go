@@ -97,12 +97,43 @@ func TestEscapesHCLInterpolationAndOrdersDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.Files[1].Content
-	if !strings.Contains(text, "$${file(") || !strings.Contains(text, "%%{ if true }") || !strings.Contains(text, "depends_on = [aws_vpc.base]") {
+	if !strings.Contains(text, "$${file(") || !strings.Contains(text, "%%{ if true }") || !strings.Contains(text, "depends_on = [aws_vpc.r_base]") {
 		t.Fatal(text)
 	}
 	m.Resources[0], m.Resources[1] = m.Resources[1], m.Resources[0]
 	again, err := Render(m)
 	if err != nil || !reflect.DeepEqual(out, again) {
 		t.Fatal("resource ordering changed output")
+	}
+}
+
+func TestNormalizedInputsAndDistinctSafeIdentifiers(t *testing.T) {
+	m := input(" storage.aws.s3 ", map[string]any{"bucket": "example"})
+	m.Provider = " AWS "
+	m.Region = " us-east-1 "
+	m.Resources[0].LogicalName = "providers"
+	out, err := Render(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Files[1].Path == out.Files[0].Path || !strings.Contains(out.Files[1].Content, `"r_providers"`) || !strings.Contains(out.Files[0].Content, `region = "us-east-1"`) {
+		t.Fatalf("unsafe identifiers: %+v", out)
+	}
+	if !reflect.DeepEqual(SupportedDomains(" AWS "), []string{"compute", "database", "network", "storage"}) {
+		t.Fatal("inconsistent catalog domains")
+	}
+	m.Resources[0].LogicalName = "bucket\n"
+	if _, err := Render(m); err == nil {
+		t.Fatal("padded logical name accepted")
+	}
+	m = input("network.aws.vpc", map[string]any{"cidr_block": "10.0.0.0/16"})
+	m.Resources[0].LogicalName = "123"
+	m.Resources[0].SecuritySettings = &manifest.SecuritySettings{EncryptionEnabled: false}
+	out, err = Render(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.Files[1].Content, `"r_123"`) {
+		t.Fatal("numeric logical identifier not safely mapped")
 	}
 }

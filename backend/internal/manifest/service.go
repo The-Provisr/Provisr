@@ -210,8 +210,9 @@ func (s *server) store(w http.ResponseWriter, r *http.Request) {
 	}
 	var state string
 	var stateVersion int
-	err = tx.QueryRowContext(r.Context(), `SELECT state, state_version FROM provisr_state.provisioning_runs
-      WHERE id = $1 AND workspace_id = $2 AND requester_id = $3 FOR UPDATE`, body.RunID, body.Context.WorkspaceID, body.Context.UserID).Scan(&state, &stateVersion)
+	var agentSession sql.NullString
+	err = tx.QueryRowContext(r.Context(), `SELECT state, state_version, agent_session_id FROM provisr_state.provisioning_runs
+      WHERE id = $1 AND workspace_id = $2 AND requester_id = $3 FOR UPDATE`, body.RunID, body.Context.WorkspaceID, body.Context.UserID).Scan(&state, &stateVersion, &agentSession)
 	if err != nil || state != "MANIFEST_CREATING" || stateVersion != body.ExpectedStateVersion {
 		fail(w, 409, "Run state or version changed")
 		return
@@ -232,13 +233,21 @@ func (s *server) store(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var version int
-	err = tx.QueryRowContext(r.Context(), `INSERT INTO provisr_manifest.manifests (run_id, version, content, idempotency_key)
-      SELECT $1, COALESCE(MAX(version), 0) + 1, $2::jsonb, $3 FROM provisr_manifest.manifests WHERE run_id = $1 RETURNING version`, body.RunID, []byte(body.Content), body.Context.IdempotencyKey).Scan(&version)
+	// Record provenance from the authenticated run context, never from a caller's
+	// claimed source. The same snapshot is stored immutably and covered by the audit hash.
+	sourceMetadata := map[string]any{"source": "agent", "request_id": body.RunID,
+		"user_id": body.Context.UserID, "state_version": stateVersion}
+	if agentSession.Valid {
+		sourceMetadata["agent_session_id"] = agentSession.String
+	}
+	sourceJSON, _ := json.Marshal(sourceMetadata)
+	err = tx.QueryRowContext(r.Context(), `INSERT INTO provisr_manifest.manifests (run_id, version, content, idempotency_key, source_metadata)
+      SELECT $1, COALESCE(MAX(version), 0) + 1, $2::jsonb, $3, $4::jsonb FROM provisr_manifest.manifests WHERE run_id = $1 RETURNING version`, body.RunID, []byte(body.Content), body.Context.IdempotencyKey, sourceJSON).Scan(&version)
 	if err != nil {
 		fail(w, 503, "Manifest storage unavailable")
 		return
 	}
-	payload, _ := json.Marshal(map[string]any{"manifest_version": version, "run_id": body.RunID})
+	payload, _ := json.Marshal(map[string]any{"manifest_version": version, "run_id": body.RunID, "source_metadata": sourceMetadata})
 	if _, err = tx.ExecContext(r.Context(), "SELECT pg_advisory_xact_lock(hashtext('provisr_audit.chain'), 0)"); err != nil {
 		fail(w, 503, "Manifest audit unavailable")
 		return

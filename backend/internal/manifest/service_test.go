@@ -78,8 +78,8 @@ func seedDraft(t *testing.T, db *sql.DB, role string) draftRequest {
 	cloud := map[string]any{"active_accounts": []any{map[string]any{"workspace_id": workspace, "provider": "aws", "status": "active", "verified_at": "2026-10-09T00:00:00Z", "supported_regions": []string{"us-east-1"}}}}
 	policy := `{"enabled":false,"allowed_regions":[],"max_budget":null,"required_tags":{},"prohibited_resource_types":[],"required_encryption":false,"required_backup":false}`
 	cloudJSON, _ := json.Marshal(cloud)
-	exec(`INSERT INTO provisr_state.provisioning_runs (id,session_id,workspace_id,requester_id,prompt,idempotency_key,correlation_id,state,cloud_context,policy_requirements)
-      VALUES ($1,$2,$3,$4,'Test',$5,$6,'MANIFEST_CREATING',$7,$8)`, run, session, workspace, user, run, correlation, cloudJSON, policy)
+	exec(`INSERT INTO provisr_state.provisioning_runs (id,session_id,workspace_id,requester_id,prompt,idempotency_key,correlation_id,state,cloud_context,policy_requirements,agent_session_id)
+      VALUES ($1,$2,$3,$4,'Test',$5,$6,'MANIFEST_CREATING',$7,$8,$1)`, run, session, workspace, user, run, correlation, cloudJSON, policy)
 	return draftRequest{RunID: run, ExpectedStateVersion: 0, Content: json.RawMessage(`{"provider":"aws","region":"us-east-1","resources":[{"type":"aws_s3","name":"test-bucket"}]}`),
 		Context: Context{WorkspaceID: workspace, UserID: user, SessionID: session, RequestID: run, CorrelationID: correlation, Permissions: []string{"manifest:write"}, IdempotencyKey: "manifest:" + run + ":0"}}
 }
@@ -136,6 +136,26 @@ func TestManifestStorePostgres(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM provisr_audit.audit_events WHERE resource_id=$1 AND event_type='manifest_created'`, body.RunID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("audit count %d, error %v", count, err)
+	}
+	var provenanceJSON []byte
+	if err := db.QueryRow(`SELECT source_metadata FROM provisr_manifest.manifests WHERE run_id=$1`, body.RunID).Scan(&provenanceJSON); err != nil {
+		t.Fatal(err)
+	}
+	var provenance map[string]any
+	if err := json.Unmarshal(provenanceJSON, &provenance); err != nil {
+		t.Fatal(err)
+	}
+	if provenance["source"] != "agent" || provenance["request_id"] != body.RunID || provenance["user_id"] != body.Context.UserID || provenance["agent_session_id"] != body.RunID || provenance["state_version"] != float64(0) {
+		t.Fatalf("incorrect provenance: %s", provenanceJSON)
+	}
+	var audited bool
+	if err := db.QueryRow(`SELECT a.payload->'source_metadata' = m.source_metadata
+      FROM provisr_audit.audit_events a JOIN provisr_manifest.manifests m ON m.run_id::text = a.resource_id
+      WHERE m.run_id=$1 AND a.event_type='manifest_created'`, body.RunID).Scan(&audited); err != nil || !audited {
+		t.Fatalf("provenance is not audited: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE provisr_manifest.manifests SET source_metadata='{}' WHERE run_id=$1`, body.RunID); err == nil {
+		t.Fatal("Stored provenance must be immutable")
 	}
 	body.Content = json.RawMessage(`{"provider":"aws","region":"us-west-2","resources":[]}`)
 	if w := send(handler, body); w.Code != 409 {

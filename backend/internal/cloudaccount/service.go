@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -83,16 +84,27 @@ func New(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey) http.Hand
 
 // NewWithVerifier wires the routes and middleware with a specified AWSVerifier.
 func NewWithVerifier(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey, verifier AWSVerifier) http.Handler {
+	return newWithCapabilities(db, log, master, verifier,
+		NewStoredCapabilities(db, master, os.Getenv("ORCHESTRATOR_SERVICE_TOKEN")))
+}
+
+// NewWithCapabilities shares discovery state with the production refresh job.
+func NewWithCapabilities(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey, capabilities http.Handler) http.Handler {
+	return newWithCapabilities(db, log, master, &DefaultAWSVerifier{}, capabilities)
+}
+
+func newWithCapabilities(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKey, verifier AWSVerifier, capabilities http.Handler) http.Handler {
 	if verifier == nil {
 		verifier = &DefaultAWSVerifier{}
 	}
-	s := &server{db: db, log: log, master: master, awsVerifier: verifier}
+	s := &server{db: db, log: log, master: master, awsVerifier: verifier, capabilities: capabilities}
 
 	mux := http.NewServeMux()
 	mux.Handle("/health/", health.Handler())
 
 	mux.HandleFunc("POST /v1/cloud-accounts", s.handleCreate)
 	mux.HandleFunc("GET /v1/cloud-accounts", s.handleList)
+	mux.Handle("GET /v1/workspaces/{workspace_id}/cloud-capabilities", capabilities)
 	mux.HandleFunc("GET /v1/cloud-accounts/{id}", s.handleGet)
 	mux.HandleFunc("PATCH /v1/cloud-accounts/{id}/status", s.handleUpdateStatus)
 	mux.HandleFunc("POST /v1/cloud-accounts/{id}/verify", s.handleVerify)
@@ -105,10 +117,11 @@ func NewWithVerifier(db *sql.DB, log zerolog.Logger, master cloudcrypto.MasterKe
 }
 
 type server struct {
-	db          *sql.DB
-	log         zerolog.Logger
-	master      cloudcrypto.MasterKey
-	awsVerifier AWSVerifier
+	db           *sql.DB
+	log          zerolog.Logger
+	master       cloudcrypto.MasterKey
+	awsVerifier  AWSVerifier
+	capabilities http.Handler
 }
 
 func (s *server) workspaceKey(ctx context.Context, workspaceID string) ([]byte, error) {
@@ -430,6 +443,7 @@ func (s *server) handleGet(w http.ResponseWriter, r *http.Request) {
 		"label": account.Label, "status": account.Status, "metadata": metadata,
 		"created_at": account.CreatedAt, "updated_at": account.UpdatedAt,
 	}
+	redactDiscoverySecrets(metadata)
 	if account.VerifiedAt != nil {
 		response["verified_at"] = *account.VerifiedAt
 	}
@@ -686,6 +700,9 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 
 	// Update metadata with verified regions and account ID
 	metadata["verified_account_id"] = result.AccountID
+	// Required for later delegated discovery; encrypted at rest, never returned
+	// by the metadata detail endpoint or included in audit payloads.
+	metadata["external_id"] = req.ExternalID
 	metadata["regions"] = result.Regions
 	metadata["verified_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 
@@ -745,6 +762,9 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	verifiedAtStr := now.Format(time.RFC3339Nano)
+	if refresh, ok := s.capabilities.(interface{ Refresh(context.Context, string) }); ok {
+		go refresh.Refresh(context.Background(), workspaceID)
+	}
 	s.writeJSON(r.Context(), w, http.StatusOK, map[string]any{
 		"id":           id,
 		"workspace_id": workspaceID,

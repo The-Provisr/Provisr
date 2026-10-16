@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -46,16 +49,26 @@ func main() {
 		logger.Fatal().Err(err).Msg("failed to ping database")
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	capabilities := cloudaccount.NewStoredCapabilities(db, master, os.Getenv("ORCHESTRATOR_SERVICE_TOKEN"))
+	go cloudaccount.RunCapabilityRefresh(ctx, db, capabilities)
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      cloudaccount.New(db, logger, master),
+		Handler:      cloudaccount.NewWithCapabilities(db, logger, master, capabilities),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,
 	}
 
 	logger.Info().Str("port", port).Msg("cloud-account-service starting")
-	if err := srv.ListenAndServe(); err != nil {
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdown)
+	}()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Fatal().Err(err).Msg("server stopped")
 	}
 }

@@ -212,6 +212,8 @@ services:
       # Local dev only. Production must inject this via Vault/infra config.
       # No fallback: an unset key must fail startup, never ship a known key.
       CLOUD_ACCOUNT_MASTER_KEY: ${CLOUD_ACCOUNT_MASTER_KEY:?CLOUD_ACCOUNT_MASTER_KEY must be set}
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     depends_on:
       postgres:
         condition: service_healthy

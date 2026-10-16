@@ -57,6 +57,7 @@ describe("RunsService durable planning", () => {
     expect(stored.cloudContext?.active_accounts[0]?.supported_regions).toEqual(["us-east-1"]);
     expect(JSON.stringify(stored)).not.toContain("DO_NOT_COPY");
     const sessionRequest = c.fetcher.mock.calls.find(([url]) => String(url).endsWith("/v1/sessions"))!;
+    expect(JSON.parse(sessionRequest[1]!.body as string).profile_id).toBe("provisioning");
     expect(JSON.parse(sessionRequest[1]!.body as string).execution_context).toMatchObject({ workspace_id: run.workspaceId, user_id: run.requesterId, cloud_context: stored.cloudContext });
     expect(stored.agentSessionId).toMatch(/^[a-f0-9-]{36}$/);
     expect(stored.agentTurnPending).toBe(false);
@@ -123,6 +124,24 @@ describe("RunsService durable planning", () => {
     await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
     expect(f.current()).toMatchObject({ state: "FAILED", manifestVersion: null });
     expect(c.fetcher.mock.calls.some(([url]) => String(url).endsWith("/v1/manifests"))).toBe(false);
+  });
+
+  it("persists validation feedback before retrying and shares the dispatch deadline", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    const c = fakeClients(run, Array.from({ length: 2 }, () => ({ type: "manifest_draft", data: { message: "Draft", manifest } })), { invalidDrafts: 1 });
+    const original = c.fetcher.getMockImplementation()!;
+    let turns = 0;
+    c.fetcher.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/turns") && ++turns === 2) {
+        expect(f.current().agentInput).toContain("region validation failed");
+        expect(JSON.parse(init!.body as string).message).toBe(f.current().agentInput);
+      }
+      return original(url, init);
+    });
+    await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
+    const requests = c.fetcher.mock.calls.filter(([url]) => /\/sessions|\/tools\/validate_manifest|\/v1\/manifests/.test(String(url)));
+    expect(new Set(requests.map(([, init]) => init!.signal)).size).toBe(1);
+    expect(f.current()).toMatchObject({ state: "MANIFEST_VALIDATING", agentInput: null });
   });
 
   it("revisions reuse the conversation and allocate the next version", async () => {

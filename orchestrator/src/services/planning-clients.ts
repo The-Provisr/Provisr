@@ -79,7 +79,7 @@ export class PlanningClients {
   async createAgentSession(run: ProvisioningRun, signal: AbortSignal): Promise<string> {
     const body = z.object({ session: z.object({ session_id: z.string().uuid() }) }).parse(
       await this.request(this.config.agentUrl, "/v1/sessions", run, {
-        organization_id: run.workspaceId, request_id: run.id,
+        organization_id: run.workspaceId, request_id: run.id, profile_id: "provisioning",
         execution_context: { workspace_id: run.workspaceId, user_id: run.requesterId,
           policy_context: run.policyRequirements, cloud_context: run.cloudContext },
       }, signal));
@@ -100,20 +100,20 @@ export class PlanningClients {
       idempotency_key: `manifest:${run.id}:${run.stateVersion}` };
   }
 
-  async validateManifest(run: ProvisioningRun, manifest: Record<string, unknown>): Promise<{ valid: boolean; errors: string[] }> {
+  async validateManifest(run: ProvisioningRun, manifest: Record<string, unknown>, signal?: AbortSignal): Promise<{ valid: boolean; errors: string[] }> {
     const schema = z.object({ valid: z.boolean(), errors: z.array(z.string()).default([]) });
     for (const tool of ["validate_manifest", "validate_manifest_schema"]) {
       const result = schema.parse(await this.request(this.config.mcpUrl, `/tools/${tool}`, run,
-        { context: this.context(run), manifest, cloud_context: run.cloudContext, policy_context: run.policyRequirements }));
+        { context: this.context(run), manifest, cloud_context: run.cloudContext, policy_context: run.policyRequirements }, signal));
       if (!result.valid) return result;
     }
     return { valid: true, errors: [] };
   }
 
-  async storeManifest(run: ProvisioningRun, manifest: Record<string, unknown>): Promise<number> {
+  async storeManifest(run: ProvisioningRun, manifest: Record<string, unknown>, signal?: AbortSignal): Promise<number> {
     const result = z.object({ version: z.number().int().positive() }).parse(await this.request(
       this.config.manifestUrl, "/v1/manifests", run,
-      { context: this.context(run), run_id: run.id, expected_state_version: run.stateVersion, content: manifest }));
+      { context: this.context(run), run_id: run.id, expected_state_version: run.stateVersion, content: manifest }, signal));
     return result.version;
   }
 }

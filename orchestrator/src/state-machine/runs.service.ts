@@ -353,7 +353,7 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
         if (output.type === "clarification_question") { await this.suspendRun(run, output.data); return; }
         if (output.type === "error") throw new Error("Agent returned error");
         if (output.type === "manifest_draft") {
-          const validation = await clients.validateManifest(run, output.data.manifest);
+          const validation = await clients.validateManifest(run, output.data.manifest, signal);
           if (!validation.valid) {
             const attempts = run.manifestValidationAttempts + 1;
             if (attempts >= 3) {
@@ -363,11 +363,11 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
               });
               return;
             }
-            run = await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ updates: { manifestValidationAttempts: attempts }, eventType: "ManifestValidationFailedEvent" }));
             message = `Revise the draft to fix these validation errors: ${JSON.stringify(validation.errors)}`;
+            run = await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ updates: { manifestValidationAttempts: attempts, agentInput: message }, eventType: "ManifestValidationFailedEvent" }));
             continue;
           }
-          const version = await clients.storeManifest(run, output.data.manifest);
+          const version = await clients.storeManifest(run, output.data.manifest, signal);
           const components = manifestComponents(output.data.manifest, run.id, version);
           await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ state: "MANIFEST_VALIDATING",
             updates: { manifestVersion: version, manifestValidatedVersion: version, agentTurnPending: false, agentInput: null, manifestConfirmedVersion: null, manifestConfirmedAt: null },

@@ -82,29 +82,29 @@ func NewCapabilitiesHandler(store CapabilityStore, provider ProviderDiscovery, t
 func (h *capabilitiesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if h.token == "" {
-		http.Error(w, `{"error":"capabilities_not_configured"}`, 503)
+		http.Error(w, `{"error":"capabilities_not_configured"}`, http.StatusServiceUnavailable)
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+h.token)) != 1 {
-		http.Error(w, `{"error":"unauthorized"}`, 401)
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
 	workspace := r.PathValue("workspace_id")
 	if !validWorkspaceID(workspace) {
-		http.Error(w, `{"error":"invalid_workspace"}`, 400)
+		http.Error(w, `{"error":"invalid_workspace"}`, http.StatusBadRequest)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	accounts, err := h.store.Accounts(ctx, workspace)
 	if err != nil {
-		http.Error(w, `{"error":"capabilities_unavailable"}`, 502)
+		http.Error(w, `{"error":"capabilities_unavailable"}`, http.StatusBadGateway)
 		return
 	}
 	out := Capabilities{WorkspaceID: workspace, Accounts: []AccountCapability{}}
 	for _, a := range accounts {
 		if a.WorkspaceID != workspace {
-			http.Error(w, `{"error":"capabilities_unavailable"}`, 502)
+			http.Error(w, `{"error":"capabilities_unavailable"}`, http.StatusBadGateway)
 			return
 		}
 		item := AccountCapability{ID: a.ID, Provider: a.Provider, Status: a.Status, AccountAlias: a.Label, AvailableRegions: []string{}, SupportedDomains: []string{}}
@@ -162,7 +162,7 @@ func (s sqlCapabilityStore) Accounts(ctx context.Context, workspace string) ([]C
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []CapabilityAccount
 	for rows.Next() {
 		a := CapabilityAccount{WorkspaceID: workspace}

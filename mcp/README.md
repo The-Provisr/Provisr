@@ -36,3 +36,22 @@ validator checks resource domains/type format but has no complete supported-kind
 registry; this adapter does not claim to establish template availability.
 
 Run `uv run pytest` and `uv run ruff check src tests` from `mcp/`.
+
+## MCP-007 cloud capabilities
+
+`POST /tools/get_cloud_account_capabilities` is mounted in the same port-5100
+runtime. It requires a validated `cloud:read` context with workspace membership;
+an optional top-level `workspace_id` must match that context. No idempotency key
+is required for this read-only tool.
+
+Set `CLOUD_ACCOUNT_SERVICE_URL` (default localhost:8089) and inject
+`ORCHESTRATOR_SERVICE_TOKEN` into MCP and cloud-account-service. The tool calls
+`GET /v1/workspaces/{workspace_id}/cloud-capabilities`, forwards trace IDs, checks
+the returned workspace, filters unrestricted fields, and validates masked
+identities and readiness timestamps. Empty workspaces return `accounts: []` and
+a warning. Unconfigured authentication returns 503; unavailable/malformed backend
+responses return a sanitized 502 without raw provider text or metadata.
+
+This task consumes BE-B08 (PR #136, following BE-D03 #135). OR-009 calls the tool
+before agent planning. Discovery facts do not replace execution authorization,
+formal policy checks, quotas, drift checks, confirmation or approval.

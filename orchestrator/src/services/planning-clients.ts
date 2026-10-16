@@ -61,7 +61,8 @@ export class PlanningClients {
       available_regions: z.array(z.string().min(1)), checked_at: z.string().datetime({ offset: true }).nullable(),
       execution_ready: z.boolean() });
     const body = z.object({ workspace_id: z.string().uuid(), accounts: z.array(accountSchema) }).parse(
-      await this.request(this.config.cloudAccountUrl, `/v1/workspaces/${encodeURIComponent(run.workspaceId)}/cloud-capabilities`, run));
+      await this.request(this.config.mcpUrl, "/tools/get_cloud_account_capabilities", run,
+        { context: { ...this.context(run), permissions: ["cloud:read"] } }));
     if (body.workspace_id !== run.workspaceId) throw new PlanningDependencyError();
     const accounts = body.accounts.filter(a => a.status === "active" && a.checked_at && a.available_regions.length > 0)
       .map(a => ({ id: a.id, workspace_id: run.workspaceId, provider: a.provider, label: a.account_alias,

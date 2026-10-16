@@ -57,8 +57,10 @@ describe("BE-B08 cloud capability contract", () => {
     expect(context.active_accounts[0]?.supported_regions).toEqual(["us-east-1"]);
     expect(context.active_accounts[0]?.quota_limits).toBeNull();
     expect(JSON.stringify(context)).not.toContain("DO_NOT_COPY");
-    expect(fetcher.mock.calls[0]![0]).toBe(`http://cloud/v1/workspaces/${run.workspaceId}/cloud-capabilities`);
-    expect(fetcher.mock.calls[0]![1]!.headers).toMatchObject({ Authorization: "Bearer test-only-token" });
+    expect(fetcher.mock.calls[0]![0]).toBe("http://mcp/tools/get_cloud_account_capabilities");
+    expect(JSON.parse(fetcher.mock.calls[0]![1]!.body as string).context).toMatchObject({
+      workspace_id: run.workspaceId, permissions: ["cloud:read"],
+    });
   });
 
   it("rejects foreign workspace capability responses", async () => {

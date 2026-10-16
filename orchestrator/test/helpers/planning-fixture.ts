@@ -76,7 +76,7 @@ export function fakeClients(run: ProvisioningRun, outputs: Array<{ type: string;
     const path = new URL(String(url)).pathname;
     let body: unknown;
     if (path.endsWith("/policy-requirements")) body = options.policyResponse ?? policyServiceResponse;
-    else if (path.endsWith("/cloud-capabilities")) body = { workspace_id: run.workspaceId,
+    else if (path === "/tools/get_cloud_account_capabilities") body = { workspace_id: run.workspaceId,
       accounts: options.noProvider ? [] : cloud.active_accounts.map(a => ({ id: a.id, provider: a.provider,
         status: a.status, account_alias: a.label, available_regions: a.supported_regions,
         checked_at: a.verified_at, execution_ready: false })) };

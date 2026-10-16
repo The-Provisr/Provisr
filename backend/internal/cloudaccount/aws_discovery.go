@@ -115,7 +115,7 @@ func describeAWSRegions(ctx context.Context, cfg aws.Config) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != 200 {
 		return nil, errors.New("region discovery failed")
 	}

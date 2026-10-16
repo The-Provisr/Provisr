@@ -43,7 +43,7 @@ func main() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to open database connection")
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.Ping(); err != nil {
 		logger.Fatal().Err(err).Msg("failed to ping database")

@@ -351,7 +351,7 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "failed to list cloud accounts")
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	accounts := []listCloudAccount{}
 	for rows.Next() {

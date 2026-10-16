@@ -35,7 +35,7 @@ class AccountCapability(BaseModel):
         Literal[
             "compute",
             "database",
-            "networking",
+            "network",
             "storage",
             "containers",
             "monitoring",

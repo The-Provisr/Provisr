@@ -26,7 +26,7 @@ ACCOUNT = {
     "account_identity": "********9012",
     "default_region": "us-east-1",
     "available_regions": ["us-east-1"],
-    "supported_domains": ["compute", "storage"],
+    "supported_domains": ["compute", "network", "storage"],
     "execution_ready": True,
     "checked_at": datetime.now(UTC).isoformat(),
 }

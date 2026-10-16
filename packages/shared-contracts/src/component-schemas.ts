@@ -230,18 +230,18 @@ export const loadbalancerCardSchema = z.object({
     .optional(),
 });
 
+export const notificationTargetSchema = z.object({
+  type: z.enum(["sns", "email", "webhook"]),
+  destination: z.string().min(1),
+});
+
 export const monitoringCardSchema = z.object({
-  service: z.string(),
-  metrics: z.array(
-    z.object({
-      name: z.string(),
-      unit: z.string(),
-      threshold: z.string().optional(),
-    }),
-  ),
-  alertEndpoints: z.array(z.string()).optional(),
-  logRetentionDays: z.number().optional(),
-  dashboardEnabled: z.boolean().default(true),
+  logGroupNames: z.array(z.string().min(1)),
+  metricNamespaces: z.array(z.string().min(1)).default([]),
+  alarmCount: z.number().int().nonnegative(),
+  retentionDays: z.number().int().positive(),
+  notificationTargets: z.array(notificationTargetSchema).default([]),
+  policyNotes: z.array(z.string()).default([]),
 });
 
 export const firewallRuleSchema = z.object({

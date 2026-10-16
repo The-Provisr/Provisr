@@ -73,8 +73,8 @@ describe("RegionSelectorComponent", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Azure" }));
 
-    expect(screen.getByText("southeastasia")).toBeInTheDocument();
-    expect(screen.queryByText("ap-southeast-1")).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Southeast Asia/ })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /Singapore/ })).not.toBeInTheDocument();
   });
 
   it("renders loading and empty states with a connect action", () => {

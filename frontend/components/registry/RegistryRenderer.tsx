@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentPayload } from "@provisr/shared-contracts";
-import type { ComponentType } from "react";
+import { useMemo, type ComponentType } from "react";
 import { useRegistry } from "./useRegistry";
 import { resolvePayload } from "./dispatch";
 import { UnknownComponentFallback } from "./fallbacks/UnknownComponentFallback";
@@ -18,7 +18,10 @@ export function RegistryRenderer({
   onConnectProvider?: () => void;
 }) {
   const registry = useRegistry();
-  const result = resolvePayload(registry, payload);
+  const result = useMemo(
+    () => resolvePayload(registry, payload),
+    [registry, payload],
+  );
 
   switch (result.kind) {
     case "unknown":

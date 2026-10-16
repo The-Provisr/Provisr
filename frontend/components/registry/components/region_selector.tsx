@@ -18,6 +18,12 @@ const providerLabels: Record<RegionSelectorData["provider"], string> = {
   gcp: "Google Cloud",
 };
 
+const providerLogos: Record<RegionSelectorData["provider"], string> = {
+  aws: "aws-2.svg",
+  azure: "azure-2.svg",
+  gcp: "google-cloud-1.svg",
+};
+
 function latencyStatus(latencyMs?: number): { color: string; label: string } | undefined {
   if (latencyMs === undefined) return undefined;
   if (latencyMs < 100) return { color: "bg-green-500", label: "Low latency" };
@@ -73,6 +79,7 @@ export function RegionSelectorComponent({
     );
   }
 
+  const activeProviderId = activeProvider?.provider ?? data.provider;
   const regions = activeProvider?.availableRegions ?? [];
 
   return (
@@ -98,7 +105,7 @@ export function RegionSelectorComponent({
           </div>
         ) : (
           <span className="rounded bg-blue-50 px-2 py-0.5 text-xs font-semibold uppercase text-blue-700">
-            {providerLabels[activeProvider?.provider ?? data.provider]}
+            {providerLabels[activeProviderId]}
           </span>
         )}
       </div>
@@ -138,7 +145,7 @@ export function RegionSelectorComponent({
                   disabled={disabled}
                   onClick={() => {
                     setSelectedRegion(region.id);
-                    onUpdate?.({ type: "region_selection", provider: activeProvider?.provider ?? data.provider, regionId: region.id });
+                    onUpdate?.({ type: "region_selection", provider: activeProviderId, regionId: region.id });
                   }}
                   className={`relative flex min-h-16 items-center justify-between rounded-lg border p-2.5 text-left text-xs transition-colors disabled:cursor-not-allowed ${
                     disabled ? "border-gray-200 bg-gray-100 text-gray-400" : selectedRegion === region.id ? "border-blue-500 bg-blue-50/40" : "border-gray-200 bg-white hover:border-blue-300"
@@ -146,7 +153,7 @@ export function RegionSelectorComponent({
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-gray-50">
-                      <img src={`/assets/${activeProvider.provider === "aws" ? "aws-2.svg" : activeProvider.provider === "azure" ? "azure-2.svg" : "google-cloud-1.svg"}`} alt="" className="h-5 w-5 object-contain" />
+                      <img src={`/assets/${providerLogos[activeProviderId]}`} alt="" className="h-5 w-5 object-contain" />
                     </span>
                     <span className="min-w-0">
                       <span className="block truncate font-semibold text-gray-800">{region.name}</span>

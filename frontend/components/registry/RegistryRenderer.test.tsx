@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -202,6 +203,63 @@ describe("RegistryRenderer", () => {
       provider: "aws",
       regionId: "us-east-1",
     });
+  });
+
+  it("preserves a user's region selection across unrelated parent re-renders", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "region_selector",
+      version: "1.0",
+      schema: regionSelectorSchema,
+      component: RegionSelectorComponent,
+    });
+
+    const stablePayload = payload({
+      type: "region_selector" as ComponentType,
+      data: {
+        provider: "aws",
+        selectedRegion: "ap-southeast-1",
+        availableRegions: [
+          { id: "ap-southeast-1", name: "Singapore" },
+          { id: "us-east-1", name: "N. Virginia" },
+        ],
+      },
+    });
+
+    function Harness() {
+      const [, forceRender] = useState(0);
+      return (
+        <>
+          <RegistryRenderer payload={stablePayload} />
+          <button type="button" onClick={() => forceRender((n) => n + 1)}>
+            rerender
+          </button>
+        </>
+      );
+    }
+
+    render(
+      <RegistryProvider registry={registry}>
+        <Harness />
+      </RegistryProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: /N\. Virginia/ }));
+    expect(screen.getByRole("radio", { name: /N\. Virginia/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "rerender" }));
+
+    expect(screen.getByRole("radio", { name: /N\. Virginia/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("radio", { name: /Singapore/ })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
   });
 
   it("registers all 23 FE-C component types into defaultRegistry", () => {

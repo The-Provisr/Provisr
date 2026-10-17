@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { z } from "zod";
 import { CloudProviderLogo, type CloudProviderId } from "@/components/ui/cloud-provider-logo";
 import {
@@ -64,17 +64,28 @@ function ResourceStatus({ status }: { status: string }) {
   return <span className="inline-flex items-center gap-1.5 text-gray-600"><span className="size-2 rounded-full bg-gray-400" aria-hidden="true" /><span>{status}</span></span>;
 }
 
-function rowDomId(id: string) {
-  return `resource-row-${encodeURIComponent(id)}`;
+function rowDomId(tableId: string, id: string) {
+  return `${tableId}-resource-row-${encodeURIComponent(id)}`;
+}
+
+const sensitiveField = /(password|secret|token|private.?key|access.?key|api.?key|credential)/i;
+
+function dependencyTarget(rows: ResourceRow[], reference: string) {
+  return rows.find((row) => row.id === reference) ?? rows.find((row) => row.name === reference);
 }
 
 function redactSensitiveFields(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactSensitiveFields);
   if (typeof value !== "object" || value === null) return value;
+  const record = value as Record<string, unknown>;
+  if (record.sensitive === true) return "[REDACTED]";
+  const namedSecret = [record.name, record.key].some(
+    (name) => typeof name === "string" && sensitiveField.test(name),
+  );
   return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [
+    Object.entries(record).map(([key, entry]) => [
       key,
-      /(password|secret|token|private.?key|access.?key|api.?key|credential)/i.test(key)
+      sensitiveField.test(key) || (namedSecret && key !== "name" && key !== "key")
         ? "[REDACTED]"
         : redactSensitiveFields(entry),
     ]),
@@ -95,6 +106,7 @@ export function ResourceTableComponent({
   data: ResourceTableData;
   onNavigateResource?: (request: ResourceNavigationRequest) => void;
 }) {
+  const tableId = useId();
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<FilterValue>("all");
   const [providerFilter, setProviderFilter] = useState<FilterValue>("all");
@@ -109,6 +121,12 @@ export function ResourceTableComponent({
     regions: [...new Set(data.rows.map((row) => row.region).filter((region): region is string => Boolean(region)))].sort((a, b) => a.localeCompare(b)),
   }), [data.rows]);
 
+  useEffect(() => {
+    setTypeFilter((current) => filterOptions.types.includes(current) ? current : "all");
+    setProviderFilter((current) => filterOptions.providers.includes(current) ? current : "all");
+    setRegionFilter((current) => filterOptions.regions.includes(current) ? current : "all");
+  }, [filterOptions]);
+
   const visibleRows = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     const filtered = data.rows.filter((row) => {
@@ -116,7 +134,8 @@ export function ResourceTableComponent({
       if (providerFilter !== "all" && row.provider !== providerFilter) return false;
       if (regionFilter !== "all" && row.region !== regionFilter) return false;
       if (!normalizedQuery) return true;
-      const searchable = [row.name, row.type, row.provider, row.region ?? "", row.status, ...row.dependsOn].join(" ").toLocaleLowerCase();
+      const dependencyNames = row.dependsOn.map((reference) => dependencyTarget(data.rows, reference)?.name ?? reference);
+      const searchable = [row.name, row.type, row.provider, row.region ?? "", row.status, ...row.dependsOn, ...dependencyNames].join(" ").toLocaleLowerCase();
       return searchable.includes(normalizedQuery);
     });
     return filtered.sort((left, right) => {
@@ -127,9 +146,11 @@ export function ResourceTableComponent({
 
   useEffect(() => {
     if (!focusResourceId) return;
-    document.getElementById(rowDomId(focusResourceId))?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    const target = document.getElementById(rowDomId(tableId, focusResourceId));
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
     setFocusResourceId(null);
-  }, [focusResourceId, visibleRows]);
+  }, [focusResourceId, tableId, visibleRows]);
 
   function toggleSort(key: SortKey) {
     setSort((current) => ({
@@ -138,13 +159,17 @@ export function ResourceTableComponent({
     }));
   }
 
-  function navigateDependency(name: string) {
-    const target = data.rows.find((row) => row.name === name || row.id === name);
-    if (!target) return;
+  function clearFilters() {
     setQuery("");
     setTypeFilter("all");
     setProviderFilter("all");
     setRegionFilter("all");
+  }
+
+  function navigateDependency(name: string) {
+    const target = dependencyTarget(data.rows, name);
+    if (!target) return;
+    clearFilters();
     setExpandedId(target.id);
     setFocusResourceId(target.id);
   }
@@ -201,6 +226,15 @@ export function ResourceTableComponent({
         </label>
       </div>
 
+      <button
+        type="button"
+        onClick={clearFilters}
+        disabled={!query && typeFilter === "all" && providerFilter === "all" && regionFilter === "all"}
+        className="mt-2 rounded px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-gray-400"
+      >
+        Clear filters
+      </button>
+
       <div className="mt-3 max-h-[34rem] overflow-auto rounded-lg border border-gray-200">
         <table className="w-full min-w-[880px] border-collapse text-left text-xs">
           <thead className="sticky top-0 z-10 bg-gray-50 text-[10px] font-semibold uppercase tracking-wider text-gray-500 shadow-[0_1px_0_0_#e5e7eb]">
@@ -219,7 +253,8 @@ export function ResourceTableComponent({
               return (
                 <Fragment key={row.id}>
                   <tr
-                    id={rowDomId(row.id)}
+                    id={rowDomId(tableId, row.id)}
+                    tabIndex={-1}
                     onClick={() => setExpandedId(expanded ? null : row.id)}
                     className={cn("cursor-pointer align-top hover:bg-blue-50/40", expanded && "bg-blue-50/30")}
                   >
@@ -232,7 +267,7 @@ export function ResourceTableComponent({
                     <td className="px-3 py-3 text-gray-700">{knownProvider(row.provider) ? <span className="inline-flex items-center gap-2"><CloudProviderLogo provider={row.provider} size="sm" /><span>{providerNames[row.provider]}</span></span> : <span className="inline-flex items-center gap-2"><span className="flex size-6 items-center justify-center rounded bg-gray-100 text-[9px] font-bold text-gray-600">{row.provider.slice(0, 2).toUpperCase()}</span>{row.provider}</span>}</td>
                     <td className="px-3 py-3"><span className="rounded-full bg-indigo-50 px-2 py-1 font-mono text-[10px] text-indigo-800">{row.region ?? "—"}</span></td>
                     <td className="px-3 py-3 text-gray-600">
-                      {row.dependsOn.length ? <ul className="space-y-1">{row.dependsOn.map((dependency) => <li key={dependency}><button type="button" onClick={(event) => { event.stopPropagation(); navigateDependency(dependency); }} className="text-blue-700 underline-offset-2 hover:underline">{dependency}</button></li>)}</ul> : <span aria-label="No dependencies">—</span>}
+                      {row.dependsOn.length ? <ul className="space-y-1">{row.dependsOn.map((dependency) => <li key={dependency}><button type="button" onClick={(event) => { event.stopPropagation(); navigateDependency(dependency); }} className="text-blue-700 underline-offset-2 hover:underline">{dependencyTarget(data.rows, dependency)?.name ?? dependency}</button></li>)}</ul> : <span aria-label="No dependencies">—</span>}
                     </td>
                     <td className="px-3 py-3"><span className={cn("inline-flex min-w-6 items-center justify-center rounded-full px-2 py-1 text-[10px] font-bold", row.warningCount > 0 ? "bg-amber-100 text-amber-800" : "bg-gray-100 text-gray-500")} aria-label={`${row.warningCount} warnings`}>{row.warningCount}</span></td>
                     <td className="whitespace-nowrap px-3 py-3"><ResourceStatus status={row.status} /></td>

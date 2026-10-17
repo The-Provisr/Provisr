@@ -92,4 +92,39 @@ describe("RegionSelectorComponent", () => {
     expect(screen.getByText("Medium latency")).toBeInTheDocument();
     expect(screen.getByText("High latency")).toBeInTheDocument();
   });
+  it("keeps the accepted selection until the host returns a new payload", () => {
+    const onUpdate = vi.fn();
+    const { rerender } = render(<RegionSelectorComponent data={data} onUpdate={onUpdate} />);
+    fireEvent.click(screen.getByRole("radio", { name: /US East/ }));
+    expect(screen.getByRole("radio", { name: /Singapore/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /US East/ })).toHaveAttribute("aria-checked", "false");
+    rerender(<RegionSelectorComponent data={{ ...data, selectedRegion: "us-east-1" }} onUpdate={onUpdate} />);
+    expect(screen.getByRole("radio", { name: /US East/ })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("stays read-only when no host update handler is connected", () => {
+    render(<RegionSelectorComponent data={data} />);
+    expect(screen.getByRole("radio", { name: /US East/ })).toBeDisabled();
+  });
+
+  it("honors an explicitly empty connected provider list", () => {
+    render(<RegionSelectorComponent data={{ ...data, providers: [] }} />);
+    expect(screen.getByText("No connected provider regions")).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  });
+
+  it("preserves the browsed provider across equivalent payload refreshes", () => {
+    const { rerender } = render(<RegionSelectorComponent data={data} />);
+    fireEvent.click(screen.getByRole("button", { name: "Azure" }));
+    rerender(<RegionSelectorComponent data={regionSelectorSchema.parse(data)} />);
+    expect(screen.getByRole("button", { name: "Azure" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("radio", { name: /Southeast Asia/ })).toBeInTheDocument();
+  });
+
+  it.each(["eu-west-1", "ap-northeast-1", "unknown"])("does not mark invalid accepted region %s as selected", (selectedRegion) => {
+    render(<RegionSelectorComponent data={{ ...data, selectedRegion }} />);
+    expect(screen.queryByRole("radio", { checked: true })).not.toBeInTheDocument();
+    expect(screen.getByText("Choose a region")).toBeInTheDocument();
+  });
+
 });

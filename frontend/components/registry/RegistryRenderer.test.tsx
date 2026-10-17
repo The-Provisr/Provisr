@@ -228,9 +228,13 @@ describe("RegistryRenderer", () => {
 
     function Harness() {
       const [, forceRender] = useState(0);
+      const [selectedRegion, setSelectedRegion] = useState("ap-southeast-1");
       return (
         <>
-          <RegistryRenderer payload={stablePayload} />
+          <RegistryRenderer
+            payload={{ ...stablePayload, data: { ...(stablePayload.data as object), selectedRegion } }}
+            onRegionSelection={(update) => setSelectedRegion(update.regionId)}
+          />
           <button type="button" onClick={() => forceRender((n) => n + 1)}>
             rerender
           </button>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 import { defaultRegistry } from "../registry";
 
@@ -40,31 +40,15 @@ export function RegionSelectorComponent({
   onUpdate?: (update: RegionSelectionUpdate) => void;
   onConnectProvider?: () => void;
 }) {
-  const providerOptions = useMemo(
-    () =>
-      data.providers?.length
-        ? data.providers
-        : [{ provider: data.provider, selectedRegion: data.selectedRegion, availableRegions: data.availableRegions }],
-    [data.availableRegions, data.provider, data.providers, data.selectedRegion],
-  );
-  const preferredProvider = providerOptions.find((option) => option.provider === data.provider) ?? providerOptions[0];
-  const [provider, setProvider] = useState(preferredProvider?.provider ?? data.provider);
+  const providerOptions = data.providers ?? [
+    { provider: data.provider, selectedRegion: data.selectedRegion, availableRegions: data.availableRegions },
+  ];
+  const [provider, setProvider] = useState(data.provider);
   const activeProvider = providerOptions.find((option) => option.provider === provider) ?? providerOptions[0];
-  const [selectedRegion, setSelectedRegion] = useState(
-    preferredProvider?.provider === data.provider
-      ? data.selectedRegion
-      : preferredProvider?.selectedRegion ?? "",
-  );
 
   useEffect(() => {
-    const nextProvider = providerOptions.find((option) => option.provider === data.provider) ?? providerOptions[0];
-    setProvider(nextProvider?.provider ?? data.provider);
-    setSelectedRegion(
-      nextProvider?.provider === data.provider
-        ? data.selectedRegion
-        : nextProvider?.selectedRegion ?? "",
-    );
-  }, [data.provider, data.selectedRegion, providerOptions]);
+    setProvider(data.provider);
+  }, [data.provider]);
 
   if (data.loading) {
     return (
@@ -81,6 +65,10 @@ export function RegionSelectorComponent({
 
   const activeProviderId = activeProvider?.provider ?? data.provider;
   const regions = activeProvider?.availableRegions ?? [];
+  const acceptedRegion = activeProviderId === data.provider ? data.selectedRegion : activeProvider?.selectedRegion;
+  const selectedRegion = regions.find(
+    (region) => region.id === acceptedRegion && region.available && !region.restrictedByPolicy,
+  )?.id;
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-xs" aria-label="Target region selection">
@@ -92,12 +80,11 @@ export function RegionSelectorComponent({
               <button
                 key={option.provider}
                 type="button"
-                aria-pressed={provider === option.provider}
+                aria-pressed={activeProviderId === option.provider}
                 onClick={() => {
                   setProvider(option.provider);
-                  setSelectedRegion(option.selectedRegion ?? "");
                 }}
-                className={`rounded px-2 py-1 text-xs font-semibold ${provider === option.provider ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}`}
+                className={`rounded px-2 py-1 text-xs font-semibold ${activeProviderId === option.provider ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}`}
               >
                 {providerLabels[option.provider]}
               </button>
@@ -128,10 +115,11 @@ export function RegionSelectorComponent({
       ) : (
         <>
           <div className="mt-3 text-xs text-gray-500">Selected region: <span className="font-semibold text-gray-800">{selectedRegion || "Choose a region"}</span></div>
+          {!onUpdate ? <p className="mt-1 text-xs text-gray-500">Region selection is unavailable in this view.</p> : null}
           <div className="mt-2 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Regions">
             {regions.map((region) => {
               const unavailable = !region.available;
-              const disabled = unavailable || region.restrictedByPolicy;
+              const disabled = unavailable || region.restrictedByPolicy || !onUpdate;
               const latency = latencyStatus(region.latencyMs);
               return (
                 <button
@@ -144,7 +132,6 @@ export function RegionSelectorComponent({
                   title={region.restrictedByPolicy ? "Restricted by policy" : undefined}
                   disabled={disabled}
                   onClick={() => {
-                    setSelectedRegion(region.id);
                     onUpdate?.({ type: "region_selection", provider: activeProviderId, regionId: region.id });
                   }}
                   className={`relative flex min-h-16 items-center justify-between rounded-lg border p-2.5 text-left text-xs transition-colors disabled:cursor-not-allowed ${

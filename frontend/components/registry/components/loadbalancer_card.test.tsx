@@ -270,9 +270,25 @@ describe("helpers", () => {
   it("isTlsListener detects TLS protocols and SSL policies", () => {
     expect(isTlsListener({ port: 443, protocol: "HTTPS" })).toBe(true);
     expect(isTlsListener({ port: 443, protocol: " tls " })).toBe(true);
-    expect(isTlsListener({ port: 8443, protocol: "TCP", sslPolicy: "tls-1-2" })).toBe(true);
+    expect(isTlsListener({ port: 8443, protocol: "TCP", sslPolicy: "tls-1-2" })).toBe(false);
     expect(isTlsListener({ port: 80, protocol: "HTTP" })).toBe(false);
     expect(isTlsListener({ port: 80, protocol: "HTTP", sslPolicy: "  " })).toBe(false);
+  });
+});
+
+describe("exposure review regressions", () => {
+  it("does not mark plaintext as TLS because a policy string is present", () => {
+    const data=loadbalancerCardSchema.parse({...fullData,listeners:[{port:80,protocol:"HTTP",sslPolicy:"tls-policy"}]});
+    render(<LoadbalancerCardComponent data={data} />);
+    expect(screen.queryByText("TLS")).not.toBeInTheDocument();
+    expect(screen.getByText("Unencrypted")).toBeInTheDocument();
+  });
+  it("warns about plaintext on explicitly exposed internal-scheme balancers", () => {
+    render(<LoadbalancerCardComponent data={{...internalData,publicExposure:true}} />);
+    expect(screen.getByText("Unencrypted")).toBeInTheDocument();
+  });
+  it("does not invent a required approval decision", () => {
+    expect(DEFAULT_APPROVAL_NOTE).not.toMatch(/require approval/i);
   });
 });
 

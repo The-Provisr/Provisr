@@ -28,7 +28,7 @@ export const LB_TYPE_LABELS: Record<LoadbalancerCardData["lbType"], string> = {
 };
 
 export const DEFAULT_APPROVAL_NOTE =
-  "Internet-facing load balancers require approval before apply.";
+  "Review public exposure and policy results before apply.";
 
 const TLS_PROTOCOLS = ["HTTPS", "TLS"];
 
@@ -39,10 +39,7 @@ export function isPubliclyExposed(
 }
 
 export function isTlsListener(listener: LoadbalancerListener): boolean {
-  return (
-    TLS_PROTOCOLS.includes(listener.protocol.trim().toUpperCase()) ||
-    Boolean(listener.sslPolicy?.trim())
-  );
+  return TLS_PROTOCOLS.includes(listener.protocol.trim().toUpperCase());
 }
 
 function Skeleton({ className }: { className: string }) {
@@ -220,7 +217,6 @@ export function LoadbalancerCardComponent({
   }
 
   const exposed = isPubliclyExposed(data);
-  const internetFacing = data.scheme === "internet-facing";
   const policyNotes = Array.from(new Set(data.policyNotes));
 
   return (
@@ -293,7 +289,7 @@ export function LoadbalancerCardComponent({
                             <span className="rounded bg-green-100 px-1 py-0.5 text-[9px] font-bold text-green-700">
                               TLS
                             </span>
-                          ) : internetFacing ? (
+                          ) : exposed ? (
                             <span className="rounded bg-amber-50 px-1 py-0.5 text-[9px] font-bold text-amber-700">
                               Unencrypted
                             </span>

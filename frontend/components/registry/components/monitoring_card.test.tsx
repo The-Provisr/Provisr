@@ -73,7 +73,7 @@ describe("MonitoringCardComponent (details)", () => {
       "Emailoncall@example.com",
     );
     expect(screen.getByTestId("notification-target-webhook")).toHaveTextContent(
-      "Webhookhttps://hooks.slack.com/services/…",
+      "Webhookhttps://hooks.slack.com/…",
     );
     expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("no-notification-targets")).not.toBeInTheDocument();
@@ -118,16 +118,21 @@ describe("formatDestination", () => {
   it("redacts webhook paths, queries, fragments and credentials", () => {
     expect(
       formatDestination({ type: "webhook", destination: "https://hooks.slack.com/services/T/B/x" }),
-    ).toBe("https://hooks.slack.com/services/…");
+    ).toBe("https://hooks.slack.com/…");
     expect(
       formatDestination({ type: "webhook", destination: "https://api.example.com/alerts?token=abc" }),
-    ).toBe("https://api.example.com/alerts/…");
+    ).toBe("https://api.example.com/…");
     expect(
       formatDestination({ type: "webhook", destination: "https://user:pass@example.com/hook" }),
-    ).toBe("https://example.com/hook");
+    ).toBe("https://example.com/…");
     expect(formatDestination({ type: "webhook", destination: "https://example.com" })).toBe(
       "https://example.com",
     );
+  });
+
+  it("hides single-segment tokens and opaque URL payloads", () => {
+    expect(formatDestination({ type: "webhook", destination: "https://example.com/SECRET" })).toBe("https://example.com/…");
+    expect(formatDestination({ type: "webhook", destination: "data:text/plain,SECRET" })).toBe("Unrecognized webhook URL");
   });
 
   it("does not echo unparseable webhook destinations", () => {

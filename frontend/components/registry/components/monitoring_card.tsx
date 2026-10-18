@@ -27,7 +27,7 @@ const TARGET_META: Record<
 };
 
 // Webhook URLs often embed secrets in the path or query (e.g. Slack/Teams
-// hooks), so only the origin and first path segment are shown.
+// hooks), so only HTTP(S) origins are shown.
 export function formatDestination(target: NotificationTarget): string {
   if (target.type !== "webhook") return target.destination;
 
@@ -38,10 +38,9 @@ export function formatDestination(target: NotificationTarget): string {
     return "Unrecognized webhook URL";
   }
 
-  const segments = url.pathname.split("/").filter(Boolean);
-  const firstSegment = segments[0] ? `/${segments[0]}` : "";
-  const redacted = segments.length > 1 || url.search !== "" || url.hash !== "";
-  return `${url.origin}${firstSegment}${redacted ? "/…" : ""}`;
+  if (url.protocol !== "https:" && url.protocol !== "http:") return "Unrecognized webhook URL";
+  const redacted = url.pathname !== "/" || url.search !== "" || url.hash !== "";
+  return `${url.origin}${redacted ? "/…" : ""}`;
 }
 
 function pluralize(count: number, singular: string, plural: string) {

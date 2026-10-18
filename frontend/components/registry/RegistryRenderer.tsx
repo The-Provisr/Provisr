@@ -6,14 +6,17 @@ import { useRegistry } from "./useRegistry";
 import { resolvePayload } from "./dispatch";
 import { UnknownComponentFallback } from "./fallbacks/UnknownComponentFallback";
 import { InvalidPayloadFallback } from "./fallbacks/InvalidPayloadFallback";
+import type { ResourceNavigationRequest } from "./components/resource_table";
 import type { RegionSelectionUpdate } from "./components/region_selector";
 
 export function RegistryRenderer({
   payload,
+  onNavigateResource,
   onRegionSelection,
   onConnectProvider,
 }: {
   payload: ComponentPayload | unknown;
+  onNavigateResource?: (request: ResourceNavigationRequest) => void;
   onRegionSelection?: (update: RegionSelectionUpdate) => void;
   onConnectProvider?: () => void;
 }) {
@@ -32,6 +35,13 @@ export function RegistryRenderer({
       );
     case "render": {
       const { Component, data } = result;
+      if (result.type === "resource_table") {
+        const ResourceComponent = Component as ComponentType<{
+          data: typeof data;
+          onNavigateResource?: (request: ResourceNavigationRequest) => void;
+        }>;
+        return <ResourceComponent data={data} onNavigateResource={onNavigateResource} />;
+      }
       if (result.type === "region_selector") {
         const RegionComponent = Component as ComponentType<{
           data: typeof data;

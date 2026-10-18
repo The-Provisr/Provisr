@@ -324,12 +324,16 @@ export const resourceTableSchema = z.object({
   columns: z.array(z.string()).optional(),
   rows: z.array(
     z.object({
-      id: z.string(),
-      name: z.string(),
-      type: z.string(),
-      provider: z.string(),
-      status: z.string(),
+      id: z.string().min(1),
+      name: z.string().min(1),
+      type: z.string().min(1),
+      provider: z.string().min(1),
+      status: z.string().min(1),
       monthlyCostUsd: z.number().optional(),
+      region: z.string().optional(),
+      dependsOn: z.array(z.string()).default([]),
+      warningCount: z.number().int().nonnegative().default(0),
+      spec: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
 });

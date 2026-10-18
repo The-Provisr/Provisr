@@ -76,9 +76,10 @@ export function fakeClients(run: ProvisioningRun, outputs: Array<{ type: string;
     const path = new URL(String(url)).pathname;
     let body: unknown;
     if (path.endsWith("/policy-requirements")) body = options.policyResponse ?? policyServiceResponse;
-    else if (path === "/v1/cloud-accounts") body = { accounts: options.noProvider ? [] : cloud.active_accounts };
-    else if (path.startsWith("/v1/cloud-accounts/")) body = { ...cloud.active_accounts[0], metadata: {
-      supported_regions: ["us-east-1"], resource_counts: { aws_s3: 0 }, quota_limits: { aws_s3: 100 }, secret_access_key: "DO_NOT_COPY" } };
+    else if (path.endsWith("/cloud-capabilities")) body = { workspace_id: run.workspaceId,
+      accounts: options.noProvider ? [] : cloud.active_accounts.map(a => ({ id: a.id, provider: a.provider,
+        status: a.status, account_alias: a.label, available_regions: a.supported_regions,
+        checked_at: a.verified_at, execution_ready: false })) };
     else if (path === "/v1/sessions") body = { session: { session_id: randomUUID() } };
     else if (path.endsWith("/turns")) {
       const output = outputs.shift();

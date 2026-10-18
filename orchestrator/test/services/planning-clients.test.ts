@@ -44,3 +44,34 @@ describe("MCP manifest validation contract", () => {
     await expect(clients.validateManifest(makeRun(), manifest)).rejects.toThrow();
   });
 });
+
+describe("BE-B08 cloud capability contract", () => {
+  it("uses only discovered regions and never imports raw account metadata", async () => {
+    const run = makeRun();
+    const { clients, fetcher } = clientsReturning({ workspace_id: run.workspaceId, accounts: [{
+      id: run.workspaceId, provider: "aws", status: "active", account_alias: "Dev",
+      available_regions: ["us-east-1"], checked_at: new Date().toISOString(), execution_ready: false,
+      metadata: { secret: "DO_NOT_COPY" },
+    }] });
+    const context = await clients.loadCloudContext(run);
+    expect(context.active_accounts[0]?.supported_regions).toEqual(["us-east-1"]);
+    expect(context.active_accounts[0]?.quota_limits).toBeNull();
+    expect(JSON.stringify(context)).not.toContain("DO_NOT_COPY");
+    expect(fetcher.mock.calls[0]![0]).toBe(`http://cloud/v1/workspaces/${run.workspaceId}/cloud-capabilities`);
+    expect(fetcher.mock.calls[0]![1]!.headers).toMatchObject({ Authorization: "Bearer test-only-token" });
+  });
+
+  it("rejects foreign workspace capability responses", async () => {
+    const { clients } = clientsReturning({ workspace_id: makeRun().workspaceId, accounts: [] });
+    await expect(clients.loadCloudContext(makeRun())).rejects.toThrow("planning service");
+  });
+
+  it("cannot draft against a provider whose live discovery failed", async () => {
+    const run = makeRun();
+    const { clients } = clientsReturning({ workspace_id: run.workspaceId, accounts: [{
+      id: run.workspaceId, provider: "aws", status: "active", account_alias: "Dev",
+      available_regions: [], checked_at: null, execution_ready: false,
+    }] });
+    await expect(clients.loadCloudContext(run)).rejects.toThrow("Connect a provider");
+  });
+});

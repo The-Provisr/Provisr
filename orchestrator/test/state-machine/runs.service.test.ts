@@ -133,7 +133,7 @@ describe("RunsService durable planning", () => {
     const service = new RunsService(f.db, new AuditService(f.db), c.clients);
     await service.processRun(run.id, run.workspaceId);
     expect(f.current()).toMatchObject({ state: "MANIFEST_VALIDATING", manifestVersion: 1, manifestValidatedVersion: 1, manifestConfirmedVersion: null });
-    expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/v1/manifests"))).toHaveLength(1);
+    expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/tools/create_manifest"))).toHaveLength(3);
     expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/turns"))).toHaveLength(3);
     expect(f.events.at(-1)).toMatchObject({ type: "ManifestReadyEvent", payload: { manifest_version: 1, components: [{ type: "architecture_summary" }, { type: "storage_card" }] } });
     await expect(service.transitionState(run.id, run.workspaceId, f.current().stateVersion, "IAC_GENERATING", run.requesterId)).rejects.toThrow("manifestConfirmed");

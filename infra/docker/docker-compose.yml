@@ -256,6 +256,9 @@ services:
       provisioning-service:
         condition: service_started
         required: false
+      manifest-service:
+        condition: service_started
+        required: false
 
   # ── Orchestrator (profile: orchestrator) ──
   orchestrator:

@@ -74,7 +74,7 @@ export function validateComponent(id: string, payload: unknown): Record<string, 
 
 /** Project validated manifest data into the existing domain registry. */
 export function manifestComponents(manifest: Record<string, unknown>, requestId: string, version: number) {
-  const resources = z.array(z.object({ name: z.string().optional(), logical_name: z.string().optional(), type: z.string() }).passthrough())
+  const resources: Array<Record<string, unknown> & { name: string; type: string }> = z.array(z.object({ name: z.string().optional(), logical_name: z.string().optional(), type: z.string() }).passthrough())
     .parse(manifest.resources).map(resource => ({ ...resource, name: resource.name ?? resource.logical_name ?? "resource" }));
   const component = (type: string, data: unknown) => ({ type, version: "1.0.0", requestId, data: validateComponent(type, data) });
   return [component("architecture_summary", { provider: manifest.provider, region: manifest.region,

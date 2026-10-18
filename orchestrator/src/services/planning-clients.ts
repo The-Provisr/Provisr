@@ -97,13 +97,17 @@ export class PlanningClients {
   }
 
   context(run: ProvisioningRun) {
-    return { workspace_id: run.workspaceId, user_id: run.requesterId, permissions: ["manifest:write"],
+    return { workspace_id: run.workspaceId, user_id: run.requesterId, permissions: ["manifest:read", "manifest:write"],
       request_id: run.id, correlation_id: run.correlationId, session_id: run.sessionId,
       idempotency_key: `manifest:${run.id}:${run.stateVersion}` };
   }
 
   async validateManifest(run: ProvisioningRun, manifest: Record<string, unknown>): Promise<{ valid: boolean; errors: string[] }> {
-    const schema = z.object({ valid: z.boolean(), errors: z.array(z.string()).default([]) });
+    const errorSchema = z.union([z.string(), z.object({
+      field: z.string(), code: z.string(), message: z.string(), allowed_values: z.array(z.unknown()).nullish(),
+    }).transform(error => `${error.field}: ${error.code}: ${error.message}`)]);
+    const schema = z.object({ valid: z.boolean(), errors: z.array(errorSchema).default([]) })
+      .refine(result => result.valid === (result.errors.length === 0), "Contradictory validation result");
     for (const tool of ["validate_manifest", "validate_manifest_schema"]) {
       const result = schema.parse(await this.request(this.config.mcpUrl, `/tools/${tool}`, run,
         { context: this.context(run), manifest, cloud_context: run.cloudContext, policy_context: run.policyRequirements }));
@@ -136,7 +140,7 @@ export class PlanningClients {
       clarifications: run.answersHistory,
       agent_output: output,
     }));
-    if ("valid" in response && response.valid === false) {
+    if ("valid" in response) {
       return { valid: false, errors: response.errors.map(error => typeof error === "string" ? error : `${error.field ?? "manifest"}: ${error.message ?? error.code ?? "validation failed"}`) };
     }
     return { valid: true, version: response.version };

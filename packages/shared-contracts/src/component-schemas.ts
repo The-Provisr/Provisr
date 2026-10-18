@@ -401,13 +401,21 @@ export const resourceTableSchema = z.object({
   ),
 });
 
-export const securityWarningSchema = z.object({
-  title: z.string(),
+export const securityFindingSchema = z.object({
+  title: z.string().trim().min(1).max(256),
   severity: z.enum(["critical", "high", "medium", "low"]),
-  description: z.string(),
-  affectedResource: z.string().optional(),
-  mitigationSteps: z.array(z.string()).optional(),
-});
+  description: z.string().trim().min(1).max(4000),
+  affectedResource: z.string().trim().min(1).max(256).optional(),
+  suggestedFix: z.string().trim().min(1).max(2000).optional(),
+  mitigationSteps: z.array(z.string().trim().min(1).max(2000)).max(30).optional(),
+}).strict();
+
+// Preserve the original single-finding contract. Only explicit findings: []
+// means clear; missing data and mixed legacy/list payloads must fail validation.
+export const securityWarningSchema = z.union([
+  z.object({ findings: z.array(securityFindingSchema).max(200) }).strict(),
+  securityFindingSchema,
+]);
 
 export const storageCardSchema = z.object({
   bucketName: z.string(),

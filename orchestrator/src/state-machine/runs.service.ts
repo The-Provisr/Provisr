@@ -6,7 +6,7 @@ import { DbService } from "../db/db.service";
 import { AuditService } from "../services/audit.service";
 import { PlanningClients, NoConnectedProviderError } from "../services/planning-clients";
 import { PolicyDeniesAllRegionsError } from "../services/policy-service.client";
-import { CloudContext, ClarificationQuestion, cloudContextSchema, questionSchema, validateAnswers, validateComponent, manifestComponents } from "../services/planning-contracts";
+import { CloudContext, ClarificationQuestion, ComponentPayloadValidationError, cloudContextSchema, questionSchema, validateAnswers, validateComponent, manifestComponents } from "../services/planning-contracts";
 import { assertTransition, EMPTY_TRANSITION_CONDITIONS } from "./transitions";
 import { WORKFLOW_STATES, WorkflowState, isTerminalWorkflowState } from "./workflow-state";
 
@@ -164,6 +164,7 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
       if (!run) throw new NotFoundException("Run not found");
       if (run.stateVersion !== expectedVersion) throw new ConflictException("State version conflict");
       const change = operation(run);
+      this.validateSseComponents(change.eventType, change.payload);
       if (actorId !== "orchestrator") await this.assertMutationPermission(client, workspaceId, actorId,
         run.state === "APPROVING" && change.state !== "CANCELLED");
       if (change.state) {
@@ -200,6 +201,18 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('provisr_sse'), hashtext($1))", [run.workspaceId]);
     await client.query(`INSERT INTO provisr_events.sse_events (workspace_id, event_id, event_type, correlation_id, payload)
       VALUES ($1,$2,$3,$4,$5)`, [run.workspaceId, randomUUID(), type, run.correlationId, JSON.stringify(payload)]);
+  }
+
+  private validateSseComponents(eventType?: string, payload?: Record<string, unknown>): void {
+    const values = eventType === "ManifestReadyEvent" ? payload?.components
+      : ["ComponentPayloadEvent", "ClarificationQuestionEvent"].includes(eventType ?? "") ? [payload?.component] : [];
+    if (!Array.isArray(values)) throw new Error("Malformed component event");
+    for (const value of values) {
+      if (!value || typeof value !== "object") throw new Error("Malformed component event");
+      const component = value as Record<string, unknown>;
+      if (typeof component.type !== "string" || typeof component.version !== "string") throw new Error("Malformed component event");
+      validateComponent(component.type, component.data, component.version);
+    }
   }
 
   async cancelRun(id: string, workspaceId: string, actorId: string): Promise<ProvisioningRun> {
@@ -245,14 +258,28 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
     catch { throw new BadRequestException("Answers do not match the current question fields"); }
     const agentInput = JSON.stringify({ question: run.currentQuestion, answers });
     if (agentInput.length > 20000) throw new BadRequestException("Clarification answers are too large");
-    return this.mutate(id, workspaceId, run.stateVersion, actorId, current => {
+    try {
+      return await this.mutate(id, workspaceId, run.stateVersion, actorId, current => {
       if (current.state !== "CLARIFYING" || !current.clarificationExpiresAt || new Date(current.clarificationExpiresAt).getTime() <= Date.now()) throw new ConflictException("Clarification expired or is no longer pending");
       return {
       state: "MANIFEST_CREATING", updates: { currentQuestion: null, clarificationExpiresAt: null,
         answersHistory: [...current.answersHistory, { question: current.currentQuestion!, answers, answeredAt: new Date().toISOString(), idempotencyKey: dto?.idempotencyKey ?? randomUUID() }],
         agentInput, agentTurnPending: true }, eventType: "ClarificationAnsweredEvent",
       };
-    });
+      });
+    } catch (error) {
+      // Concurrent retries can both read CLARIFYING. Once one commits, the
+      // other's state-version check fails; recognize that committed replay.
+      if (!(error instanceof ConflictException) || !dto?.idempotencyKey) throw error;
+      const latest = await this.getRun(id, workspaceId, actorId);
+      const committed = latest.answersHistory.find(entry => entry.idempotencyKey === dto.idempotencyKey);
+      if (!committed) throw error;
+      let replayAnswers: Record<string, unknown>;
+      try { replayAnswers = validateAnswers(committed.question, dto.answers); }
+      catch { throw new ConflictException("Idempotency key already used for different answers"); }
+      if (JSON.stringify(committed.answers) !== JSON.stringify(replayAnswers)) throw new ConflictException("Idempotency key already used for different answers");
+      return latest;
+    }
   }
   async reviseRun(id: string, workspaceId: string, actorId: string, prompt: string): Promise<ProvisioningRun> {
     const run = await this.getRun(id, workspaceId, actorId);
@@ -360,8 +387,8 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
         if (output.type === "clarification_question") { await this.suspendRun(run, output.data); return; }
         if (output.type === "error") throw new Error("Agent returned error");
         if (output.type === "manifest_draft") {
-          const validation = await clients.validateManifest(run, output.data.manifest);
-          if (!validation.valid) {
+          const created = await clients.createManifest(run, output.data);
+          if (!created.valid) {
             const attempts = run.manifestValidationAttempts + 1;
             if (attempts >= 3) {
               await this.transitionState(run.id, run.workspaceId, run.stateVersion, "FAILED", "orchestrator", {
@@ -371,10 +398,10 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
               return;
             }
             run = await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ updates: { manifestValidationAttempts: attempts }, eventType: "ManifestValidationFailedEvent" }));
-            message = `Revise the draft to fix these validation errors: ${JSON.stringify(validation.errors)}`;
+            message = `Revise the draft to fix these validation errors: ${JSON.stringify(created.errors)}`;
             continue;
           }
-          const version = await clients.storeManifest(run, output.data.manifest);
+          const version = created.version;
           const components = manifestComponents(output.data.manifest, run.id, version);
           await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ state: "MANIFEST_VALIDATING",
             updates: { manifestVersion: version, manifestValidatedVersion: version, agentTurnPending: false, agentInput: null, manifestConfirmedVersion: null, manifestConfirmedAt: null },
@@ -382,7 +409,7 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
           return;
         }
         const payload = output.type === "component_payload"
-          ? { component: { type: output.data.component_id, version: "1.0.0", requestId: run.id, data: validateComponent(output.data.component_id, output.data.payload) } }
+          ? { component: { type: output.data.component_id, version: output.data.component_version, requestId: run.id, data: validateComponent(output.data.component_id, output.data.payload, output.data.component_version) } }
           : output.data;
         await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ updates: { agentTurnPending: false, agentInput: null },
           eventType: output.type === "component_payload" ? "ComponentPayloadEvent" : "AssistantMessageEvent", payload }));
@@ -393,6 +420,16 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
       if (error instanceof ConflictException) return;
       const current = await this.getRun(run.id, run.workspaceId);
       if (current.stateVersion !== run.stateVersion || isTerminalWorkflowState(current.state)) return;
+      if (error instanceof ComponentPayloadValidationError) {
+        this.logger.error({ message: "Component payload rejected", run_id: run.id, component_type: error.componentType,
+          component_version: error.componentVersion, issues: error.issues });
+        await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ state: "FAILED",
+          updates: { errorCode: "COMPONENT_PAYLOAD_INVALID", errorMessage: "The assistant response could not be safely displayed." },
+          eventType: "ComponentPayloadRejectedEvent", payload: { error_code: "COMPONENT_PAYLOAD_INVALID",
+            error_message: "The assistant response could not be safely displayed.", component_type: error.componentType,
+            component_version: error.componentVersion, validation_issues: error.issues } }));
+        return;
+      }
       await this.transitionState(run.id, run.workspaceId, run.stateVersion, "FAILED", "orchestrator", {
         errorCode: signal.aborted ? "AGENT_TIMEOUT" : "AGENT_FAILED",
         errorMessage: signal.aborted ? "Agent request timed out after 120 seconds." : "The agent could not complete this request. Please try again.",

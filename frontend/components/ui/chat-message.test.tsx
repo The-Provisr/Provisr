@@ -181,7 +181,7 @@ describe("ChatMessage", () => {
         <ChatMessage message={{ ...base, components: [payload] }} />
       </RegistryProvider>,
     );
-    expect(screen.getByText("Cost Estimation Breakdown")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Cost estimate" })).toHaveTextContent("ECS Fargate tasks");
     expect(screen.queryByText("Rendered once the component registry")).toBeNull();
   });
 

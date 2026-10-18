@@ -14,6 +14,7 @@ from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
 from src.servers.cloud_state_server import router as cloud_router
+from src.servers.manifest_creation import router as manifest_creation_router
 from src.servers.manifest_server import router as backend_manifest_router
 from src.servers.manifest_validation import router as manifest_router
 
@@ -88,6 +89,7 @@ def create_app(
     application.include_router(manifest_router)
     application.include_router(backend_manifest_router)
     application.include_router(cloud_router)
+    application.include_router(manifest_creation_router)
 
     @application.get("/health/live")
     async def live() -> dict[str, str]:

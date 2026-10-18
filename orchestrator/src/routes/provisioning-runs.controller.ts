@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Post,
@@ -100,8 +101,14 @@ export class ProvisioningRunsController {
     @Param("id", new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(clarifyRunSchema)) dto: ClarifyRunDto,
     @CurrentUser() user: RequestUser,
+    @Headers("idempotency-key") headerIdempotencyKey?: string,
   ) {
-    return this.runsService.clarifyRun(id, workspaceId, user.userId, dto);
+    const idempotencyKey = headerIdempotencyKey ?? dto.idempotencyKey;
+    const validated = new ZodValidationPipe(clarifyRunSchema).transform(
+      { ...dto, ...(idempotencyKey !== undefined ? { idempotencyKey } : {}) },
+      { type: "body" },
+    );
+    return this.runsService.clarifyRun(id, workspaceId, user.userId, validated);
   }
 
   @Post(":id/revise")

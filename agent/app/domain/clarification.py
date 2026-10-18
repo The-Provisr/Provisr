@@ -100,6 +100,8 @@ def detect_gaps(
     *,
     answered_questions: list[AnsweredQuestion],
     resolved_fields: frozenset[str] = frozenset(),
+    connected_providers: list[str] | None = None,
+    verified_regions: list[str] | None = None,
 ) -> list[ClarificationQuestion]:
     """Return structured clarification questions for gaps in *message*.
 
@@ -115,13 +117,23 @@ def detect_gaps(
 
     candidates: list[ClarificationQuestion] = []
 
-    # 1 — Provider missing / ambiguous
-    if "provider" not in answered_fields and not _message_mentions_provider(normalized):
-        candidates.append(_question_provider())
+    # 1 — Provider missing / ambiguous or explicitly disconnected.
+    mentioned_providers = _mentioned_providers(normalized)
+    allowed_providers = connected_providers or None
+    provider_unavailable = (
+        bool(mentioned_providers)
+        and allowed_providers is not None
+        and any(provider not in allowed_providers for provider in mentioned_providers)
+    )
+    provider_ambiguous = len(mentioned_providers) > 1
+    if (provider_unavailable or provider_ambiguous) and "provider" not in {
+        a.field_mapping for a in answered_questions
+    } or "provider" not in answered_fields and not _message_mentions_provider(normalized):
+        candidates.append(_question_provider(allowed_providers))
 
     # 2 — Region missing or unrecognisable
     if "region" not in answered_fields:
-        region_q = _check_region(normalized, answered_fields)
+        region_q = _check_region(normalized, answered_fields, verified_regions)
         if region_q is not None:
             candidates.append(region_q)
 
@@ -194,17 +206,30 @@ def _message_mentions_provider(normalized: str) -> bool:
     return _contains_term(normalized, _KNOWN_PROVIDERS)
 
 
+def _mentioned_providers(normalized: str) -> list[str]:
+    providers: list[str] = []
+    if _contains_term(normalized, ("aws",)):
+        providers.append("aws")
+    if _contains_term(normalized, ("azure",)):
+        providers.append("azure")
+    if _contains_term(normalized, ("gcp", "google cloud")):
+        providers.append("gcp")
+    return providers
+
+
 def _check_region(
     normalized: str,
     answered_fields: set[str],
+    verified_regions: list[str] | None = None,
 ) -> ClarificationQuestion | None:
     """Return a region question only when no recognisable region is present."""
-    if _AWS_REGION_PATTERN.search(normalized):
+    mentioned = _AWS_REGION_PATTERN.search(normalized)
+    if mentioned and (not verified_regions or mentioned.group(0) in verified_regions):
         return None
     # Tolerate explicit "no preference" phrasing
     if any(phrase in normalized for phrase in ("any region", "no preference", "don't care")):
         return None
-    return _question_region()
+    return _question_region(verified_regions)
 
 
 def _message_mentions_environment(normalized: str) -> bool:
@@ -232,25 +257,24 @@ def _mentions_db_engine(normalized: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _question_provider() -> ClarificationQuestion:
+def _question_provider(connected_providers: list[str] | None = None) -> ClarificationQuestion:
+    options = connected_providers or ["aws"]
     return ClarificationQuestion(
         question_id="provider",
-        question_text=(
-            "Which cloud provider should host this infrastructure? Currently supported: AWS."
-        ),
+        question_text="Which connected cloud provider should host this infrastructure?",
         input_type="select",
-        options=["aws"],
+        options=options,
         required=True,
         field_mapping="provider",
     )
 
 
-def _question_region() -> ClarificationQuestion:
+def _question_region(verified_regions: list[str] | None = None) -> ClarificationQuestion:
     return ClarificationQuestion(
         question_id="region",
-        question_text="Which AWS region should host this workload?",
+        question_text="Which verified cloud region should host this workload?",
         input_type="select",
-        options=list(AWS_REGIONS),
+        options=verified_regions or list(AWS_REGIONS),
         required=True,
         field_mapping="region",
     )

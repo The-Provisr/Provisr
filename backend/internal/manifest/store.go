@@ -24,7 +24,8 @@ var (
 	ErrInvalidRunID = errors.New("run_id must be a valid UUID")
 
 	// ErrEmptyContent is returned when manifest content is empty or invalid.
-	ErrEmptyContent = errors.New("manifest content must not be empty")
+	ErrEmptyContent        = errors.New("manifest content must not be empty")
+	ErrIdempotencyConflict = errors.New("idempotency key already used for different manifest content")
 )
 
 // ManifestRecord represents a persisted version of an infrastructure manifest.
@@ -36,6 +37,11 @@ type ManifestRecord struct {
 	SourceMetadata json.RawMessage `json:"source_metadata"`
 	Hash           string          `json:"hash"`
 	CreatedAt      time.Time       `json:"created_at"`
+}
+
+// IdempotentStore persists a manifest version once per run and idempotency key.
+type IdempotentStore interface {
+	StoreManifestVersionWithKey(ctx context.Context, runID, key string, content any, sourceMetadata any) (*ManifestRecord, error)
 }
 
 // ManifestRecordMeta contains summary metadata for a manifest version.
@@ -69,6 +75,60 @@ type DBStore struct {
 // NewStore creates a new DBStore instance.
 func NewStore(db *sql.DB) *DBStore {
 	return &DBStore{db: db}
+}
+
+// StoreManifestVersionWithKey makes retries return the original immutable version.
+func (s *DBStore) StoreManifestVersionWithKey(ctx context.Context, runID, key string, content, sourceMetadata any) (*ManifestRecord, error) {
+	if _, err := uuid.Parse(runID); err != nil {
+		return nil, ErrInvalidRunID
+	}
+	if strings.TrimSpace(key) == "" || len(key) > 255 {
+		return nil, errors.New("invalid idempotency key")
+	}
+	contentBytes, err := normalizeContentBytes(content)
+	if err != nil {
+		return nil, err
+	}
+	hash := ComputeContentHash(contentBytes)
+	metaBytes, err := normalizeMetaBytes(sourceMetadata, hash)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin manifest transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, runID); err != nil {
+		return nil, err
+	}
+	var record ManifestRecord
+	err = tx.QueryRowContext(ctx, `SELECT id, run_id, version, content, source_metadata, created_at
+		FROM provisr_manifest.manifests WHERE run_id = $1 AND idempotency_key = $2`, runID, key).Scan(
+		&record.ID, &record.RunID, &record.Version, &record.Content, &record.SourceMetadata, &record.CreatedAt)
+	if err == nil {
+		if !sameManifestContent(record.Content, contentBytes) {
+			return nil, ErrIdempotencyConflict
+		}
+		record.Hash = extractOrComputeHash(record.Content, record.SourceMetadata)
+		return &record, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("failed to check manifest idempotency: %w", err)
+	}
+	err = tx.QueryRowContext(ctx, `INSERT INTO provisr_manifest.manifests (run_id, version, content, source_metadata, idempotency_key)
+		SELECT $1, COALESCE(MAX(version), 0) + 1, $2::jsonb, $3::jsonb, $4
+		FROM provisr_manifest.manifests WHERE run_id = $1
+		RETURNING id, run_id, version, content, source_metadata, created_at`, runID, string(contentBytes), string(metaBytes), key).Scan(
+		&record.ID, &record.RunID, &record.Version, &record.Content, &record.SourceMetadata, &record.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to persist manifest version: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit manifest version: %w", err)
+	}
+	record.Hash = hash
+	return &record, nil
 }
 
 // maxVersionRetries bounds how many times StoreManifestVersion retries when a
@@ -248,13 +308,49 @@ func (s *DBStore) ListManifestVersions(ctx context.Context, runID string) ([]Man
 type MemoryStore struct {
 	mu      sync.RWMutex
 	records map[string][]ManifestRecord
+	keys    map[string]ManifestRecord
 }
 
 // NewMemoryStore creates a new in-memory Store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		records: make(map[string][]ManifestRecord),
+		keys:    make(map[string]ManifestRecord),
 	}
+}
+
+// StoreManifestVersionWithKey mirrors database idempotency behavior for tests.
+func (m *MemoryStore) StoreManifestVersionWithKey(ctx context.Context, runID, key string, content, sourceMetadata any) (*ManifestRecord, error) {
+	if _, err := uuid.Parse(runID); err != nil {
+		return nil, ErrInvalidRunID
+	}
+	if strings.TrimSpace(key) == "" || len(key) > 255 {
+		return nil, errors.New("invalid idempotency key")
+	}
+	contentBytes, err := normalizeContentBytes(content)
+	if err != nil {
+		return nil, err
+	}
+	hash := ComputeContentHash(contentBytes)
+	metaBytes, err := normalizeMetaBytes(sourceMetadata, hash)
+	if err != nil {
+		return nil, err
+	}
+	mapKey := runID + ":" + key
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.keys[mapKey]; ok {
+		if !sameManifestContent(existing.Content, contentBytes) {
+			return nil, ErrIdempotencyConflict
+		}
+		return &existing, nil
+	}
+	history := m.records[runID]
+	record := ManifestRecord{ID: uuid.New().String(), RunID: runID, Version: len(history) + 1,
+		Content: json.RawMessage(contentBytes), SourceMetadata: json.RawMessage(metaBytes), Hash: hash, CreatedAt: time.Now().UTC()}
+	m.records[runID] = append(history, record)
+	m.keys[mapKey] = record
+	return &record, nil
 }
 
 // StoreManifestVersion stores a manifest version in memory.
@@ -351,6 +447,22 @@ func (m *MemoryStore) ListManifestVersions(ctx context.Context, runID string) ([
 		}
 	}
 	return metas, nil
+}
+
+// JSONB may reorder keys and add whitespace; retain numeric precision during replay checks.
+func sameManifestContent(left, right []byte) bool {
+	decode := func(data []byte) ([]byte, error) {
+		decoder := json.NewDecoder(strings.NewReader(string(data)))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	}
+	a, errA := decode(left)
+	b, errB := decode(right)
+	return errA == nil && errB == nil && string(a) == string(b)
 }
 
 func normalizeContentBytes(content any) ([]byte, error) {

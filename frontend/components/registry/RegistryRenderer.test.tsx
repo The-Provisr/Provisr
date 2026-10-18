@@ -1,12 +1,15 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { useState } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { ComponentPayload, ComponentType } from "@provisr/shared-contracts";
 import { createRegistry, type ComponentRegistry } from "./registry";
 import { RegistryProvider } from "./RegistryProvider";
 import { RegistryRenderer } from "./RegistryRenderer";
+import { RegionSelectorComponent, regionSelectorSchema } from "./components/region_selector";
+import { ResourceTableComponent, resourceTableSchema } from "./components/resource_table";
 import { useRegistry } from "./useRegistry";
 
 function TextComponent({ data }: { data: { text: string } }) {
@@ -163,6 +166,138 @@ describe("RegistryRenderer", () => {
     expect(screen.getByText("Default registry test message")).toBeInTheDocument();
     expect(screen.getByText("Provisr Bot")).toBeInTheDocument();
     expect(screen.queryByText(/no renderer is registered/i)).not.toBeInTheDocument();
+  });
+
+  it("delivers region selector updates through the renderer callback", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "region_selector",
+      version: "1.0",
+      schema: regionSelectorSchema,
+      component: RegionSelectorComponent,
+    });
+    const onRegionSelection = vi.fn();
+
+    render(
+      <RegistryProvider registry={registry}>
+        <RegistryRenderer
+          payload={payload({
+            type: "region_selector" as ComponentType,
+            data: {
+              provider: "aws",
+              selectedRegion: "ap-southeast-1",
+              availableRegions: [
+                { id: "ap-southeast-1", name: "Singapore" },
+                { id: "us-east-1", name: "N. Virginia" },
+              ],
+            },
+          })}
+          onRegionSelection={onRegionSelection}
+        />
+      </RegistryProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: /N\. Virginia/ }));
+
+    expect(onRegionSelection).toHaveBeenCalledExactlyOnceWith({
+      type: "region_selection",
+      provider: "aws",
+      regionId: "us-east-1",
+    });
+  });
+
+  it("preserves a user's region selection across unrelated parent re-renders", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "region_selector",
+      version: "1.0",
+      schema: regionSelectorSchema,
+      component: RegionSelectorComponent,
+    });
+
+    const stablePayload = payload({
+      type: "region_selector" as ComponentType,
+      data: {
+        provider: "aws",
+        selectedRegion: "ap-southeast-1",
+        availableRegions: [
+          { id: "ap-southeast-1", name: "Singapore" },
+          { id: "us-east-1", name: "N. Virginia" },
+        ],
+      },
+    });
+
+    function Harness() {
+      const [, forceRender] = useState(0);
+      const [selectedRegion, setSelectedRegion] = useState("ap-southeast-1");
+      return (
+        <>
+          <RegistryRenderer
+            payload={{ ...stablePayload, data: { ...(stablePayload.data as object), selectedRegion } }}
+            onRegionSelection={(update) => setSelectedRegion(update.regionId)}
+          />
+          <button type="button" onClick={() => forceRender((n) => n + 1)}>
+            rerender
+          </button>
+        </>
+      );
+    }
+
+    render(
+      <RegistryProvider registry={registry}>
+        <Harness />
+      </RegistryProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: /N\. Virginia/ }));
+    expect(screen.getByRole("radio", { name: /N\. Virginia/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "rerender" }));
+
+    expect(screen.getByRole("radio", { name: /N\. Virginia/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("radio", { name: /Singapore/ })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+  });
+
+  it("delivers resource navigation through the renderer callback", () => {
+    const registry = createRegistry();
+    registry.register({
+      type: "resource_table",
+      version: "1.0",
+      schema: resourceTableSchema,
+      component: ResourceTableComponent,
+    });
+    const onNavigateResource = vi.fn();
+
+    render(
+      <RegistryProvider registry={registry}>
+        <RegistryRenderer
+          payload={payload({
+            type: "resource_table" as ComponentType,
+            data: {
+              rows: [{ id: "db-1", name: "orders-db", type: "aws_rds", provider: "aws", region: "us-east-1", status: "draft" }],
+            },
+          })}
+          onNavigateResource={onNavigateResource}
+        />
+      </RegistryProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open domain card for orders-db" }));
+    expect(onNavigateResource).toHaveBeenCalledExactlyOnceWith({
+      type: "resource_navigation",
+      target: "domain_card",
+      resourceId: "db-1",
+      resourceName: "orders-db",
+    });
   });
 
   it("registers all 23 FE-C component types into defaultRegistry", () => {

@@ -176,6 +176,14 @@ describe("RunsService durable planning", () => {
     expect(JSON.stringify(f.events)).not.toContain("<script>");
   });
 
+  it("rejects producer-valid unsupported prerelease component versions through the safe fallback", async () => {
+    const run=makeRun();const f=memoryDb(run);
+    const c=fakeClients(run,[{type:"component_payload",data:{component_id:"chat_message",component_version:"1.0.0-beta",payload:{}}}]);
+    await new RunsService(f.db,new AuditService(f.db),c.clients).processRun(run.id,run.workspaceId);
+    expect(f.current().errorCode).toBe("COMPONENT_PAYLOAD_INVALID");
+    expect(f.events.at(-1)).toMatchObject({type:"ComponentPayloadRejectedEvent",payload:{component_type:"chat_message",component_version:"unsupported"}});
+  });
+
   it("discards agent output when cancellation wins during the HTTP request", async () => {
     const run = makeRun(); const f = memoryDb(run);
     const c = fakeClients(run, [{ type: "assistant_message", data: { message: "Stale output" } }]);

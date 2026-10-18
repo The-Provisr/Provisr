@@ -55,7 +55,7 @@ export const agentEnvelopeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("assistant_message"), data: z.object({ message: text }).strict() }),
   z.object({ type: z.literal("clarification_question"), data: questionSchema }),
   z.object({ type: z.literal("manifest_draft"), data: z.object({ message: text, manifest: z.record(z.unknown()) }).strict() }),
-  z.object({ type: z.literal("component_payload"), data: z.object({ component_id: z.string(), component_version: z.string().regex(/^\d+\.\d+\.\d+$/).default(COMPONENT_SCHEMA_VERSION), payload: z.record(z.unknown()) }).strict() }),
+  z.object({ type: z.literal("component_payload"), data: z.object({ component_id: z.string(), component_version: z.string().max(128).regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/).default(COMPONENT_SCHEMA_VERSION), payload: z.record(z.unknown()) }).strict() }),
   z.object({ type: z.literal("tool_summary"), data: z.object({ tool_name: text, summary: text }).strict() }),
   z.object({ type: z.literal("error"), data: z.object({ code: text, message: text, retryable: z.boolean().default(false) }).strict() }),
 ]);

@@ -461,3 +461,13 @@ export const componentSchemas = {
   terraform_plan_diff: terraformPlanDiffSchema,
   terraform_review: terraformReviewSchema,
 } as const;
+
+/** Schema contract version carried by component envelopes. */
+export const COMPONENT_SCHEMA_VERSION = "1.0.0" as const;
+
+/** Keep the current schemas addressable by version so older payloads can retain their validator. */
+export const componentSchemasByVersion = Object.fromEntries(
+  Object.entries(componentSchemas).map(([type, schema]) => [type, { [COMPONENT_SCHEMA_VERSION]: schema }]),
+) as {
+  readonly [Type in keyof typeof componentSchemas]: Readonly<Record<typeof COMPONENT_SCHEMA_VERSION, (typeof componentSchemas)[Type]>>;
+};

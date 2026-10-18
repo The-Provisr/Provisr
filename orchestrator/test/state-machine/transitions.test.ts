@@ -90,6 +90,15 @@ describe("OR-006 strict workflow transition map", () => {
     }
   });
 
+  it.each(["CLOUD_CONTEXT_LOADED", "CLARIFYING", "MANIFEST_VALIDATING", "APPROVING"] as const)(
+    "requires completed preflight before drafting from %s, including disabled-policy skips", (from) => {
+      for (const policiesEnabled of [true, false]) {
+        expect(() => assertTransition(from, "MANIFEST_CREATING", { ...allConditions, policiesEnabled, policyRequirementsLoaded: false })).toThrow(UnsatisfiedWorkflowGateError);
+        expect(() => assertTransition(from, "MANIFEST_CREATING", { ...allConditions, policiesEnabled, policyRequirementsLoaded: true })).not.toThrow();
+      }
+    },
+  );
+
   it("keeps terminal states terminal", () => {
     for (const state of ["COMPLETED", "FAILED", "CANCELLED"] as WorkflowState[]) {
       expect(ALLOWED_TRANSITIONS[state]).toEqual([]);

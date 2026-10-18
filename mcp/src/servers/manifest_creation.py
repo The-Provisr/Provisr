@@ -23,9 +23,7 @@ router = APIRouter()
 @router.post("/tools/create_manifest")
 async def create_manifest(
     request: Request,
-    context: MCPContext = Depends(
-        require_context("manifest:write", require_idempotency_key=True)  # noqa: B008
-    ),
+    context: MCPContext = Depends(require_context("manifest:write", require_idempotency_key=True)),  # noqa: B008
 ) -> dict[str, Any]:
     body = await request.json()
     draft = body.get("agent_output")

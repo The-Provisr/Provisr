@@ -122,4 +122,27 @@ export class PlanningClients {
       { context: this.context(run), run_id: run.id, expected_state_version: run.stateVersion, content: manifest }));
     return result.version;
   }
+
+  async createManifest(run: ProvisioningRun, output: Record<string, unknown>): Promise<
+    { valid: true; version: number } | { valid: false; errors: string[] }
+  > {
+    const response = z.union([
+      z.object({ manifest_id: z.string().uuid(), version: z.number().int().positive(), url: z.string().url(),
+        validation: z.object({ valid: z.literal(true) }) }),
+      z.object({ valid: z.literal(false), errors: z.array(z.union([z.string(), z.object({
+        field: z.string().optional(), message: z.string().optional(), code: z.string().optional(),
+      })])).default([]) }),
+    ]).parse(await this.request(this.config.mcpUrl, "/tools/create_manifest", run, {
+      context: this.context(run), prompt: run.prompt,
+      policies_enabled: run.policyRequirements?.enabled === true,
+      policy_requirements: run.policyRequirements,
+      cloud_context: run.cloudContext,
+      clarifications: run.answersHistory,
+      agent_output: output,
+    }));
+    if ("valid" in response) {
+      return { valid: false, errors: response.errors.map(error => typeof error === "string" ? error : `${error.field ?? "manifest"}: ${error.message ?? error.code ?? "validation failed"}`) };
+    }
+    return { valid: true, version: response.version };
+  }
 }

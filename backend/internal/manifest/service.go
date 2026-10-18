@@ -140,12 +140,32 @@ func (s *server) handleStoreVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	record, err := s.store.StoreManifestVersion(r.Context(), runID, req.Content, req.SourceMetadata)
+	var record *ManifestRecord
+	var err error
+	key := r.Header.Get("Idempotency-Key")
+	if key != "" {
+		idempotent, ok := s.store.(IdempotentStore)
+		if !ok {
+			s.writeError(r.Context(), w, http.StatusInternalServerError, "internal_error", "idempotent manifest storage unavailable")
+			return
+		}
+		record, err = idempotent.StoreManifestVersionWithKey(r.Context(), runID, key, req.Content, req.SourceMetadata)
+	} else {
+		record, err = s.store.StoreManifestVersion(r.Context(), runID, req.Content, req.SourceMetadata)
+	}
 	if err != nil {
+		if errors.Is(err, ErrIdempotencyConflict) {
+			s.writeError(r.Context(), w, http.StatusConflict, "idempotency_conflict", "idempotency key was already used for different manifest content")
+			return
+		}
 		s.writeStoreError(r.Context(), w, err)
 		return
 	}
-	s.writeJSON(r.Context(), w, http.StatusCreated, record)
+	statusCode := http.StatusCreated
+	if key != "" {
+		statusCode = http.StatusOK
+	}
+	s.writeJSON(r.Context(), w, statusCode, record)
 }
 
 func (s *server) handleListVersions(w http.ResponseWriter, r *http.Request) {

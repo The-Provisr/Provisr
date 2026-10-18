@@ -21,6 +21,8 @@ the requested engine/version and existing subnet/security groups, uses managed
 passwords, encryption, private access, seven-day backups and deletion protection.
 Destroy/snapshot naming is outside this phase and needs a separate reviewed flow.
 
+Explicit encryption-type overrides are unsupported in this phase and fail before files are returned; fixed defaults never silently replace a requested mode.
+
 All resources must be supported before any files are returned. HCL strings escape
 Terraform interpolation; generated files remain subject to plan, formal policy
 checks, confirmation and approval gates. Run `go test ./internal/terraform`.

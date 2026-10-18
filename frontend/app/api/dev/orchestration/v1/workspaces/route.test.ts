@@ -5,7 +5,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 
 import { verifyToken } from "@clerk/nextjs/server";
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const UNIQUE = () => `Test ${Math.random().toString(36).slice(2, 10)}`;
 
@@ -115,5 +115,49 @@ describe("dev orchestration POST /v1/workspaces", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("dev orchestration GET /v1/workspaces", () => {
+  function getRequest(headers: Record<string, string> = {}): Request {
+    return new Request("http://localhost/api/dev/orchestration/v1/workspaces", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-token", ...headers },
+    });
+  }
+
+  beforeEach(() => {
+    vi.mocked(verifyToken).mockResolvedValue({ sub: "user_1" } as never);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("returns 404 in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const res = await GET(getRequest());
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects a request without a bearer token", async () => {
+    const res = await GET(getRequest({ Authorization: "" }));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns the created workspaces as admin memberships", async () => {
+    const name = UNIQUE();
+    const created = await POST(makeRequest({ name, environment: "development" }));
+    const record = await created.json();
+
+    const res = await GET(getRequest());
+    expect(res.status).toBe(200);
+
+    const list = await res.json();
+    expect(Array.isArray(list)).toBe(true);
+    expect(list).toContainEqual(
+      expect.objectContaining({ id: record.id, name, slug: record.slug, role: "admin" }),
+    );
   });
 });

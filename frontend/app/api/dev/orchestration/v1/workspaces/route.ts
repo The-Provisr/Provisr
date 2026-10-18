@@ -30,11 +30,7 @@ function slugify(name: string): string {
   return slug === "" ? "workspace" : slug;
 }
 
-export async function POST(req: Request) {
-  if (process.env.NODE_ENV === "production") {
-    return new Response(null, { status: 404 });
-  }
-
+async function authenticate(req: Request): Promise<Response | null> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -46,6 +42,40 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
+  return null;
+}
+
+export async function GET(req: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return new Response(null, { status: 404 });
+  }
+
+  const unauthorized = await authenticate(req);
+  if (unauthorized) return unauthorized;
+
+  // BE-A03 returns a top-level array of workspace + role. The in-memory
+  // workspaces were all created by the caller in dev, so they are admin.
+  const list = Array.from(workspaces.values()).map((workspace) => ({
+    id: workspace.id,
+    name: workspace.name,
+    slug: workspace.slug,
+    environment: workspace.environment,
+    description: workspace.description,
+    created_at: workspace.created_at,
+    updated_at: workspace.updated_at,
+    role: "admin",
+  }));
+
+  return Response.json(list, { status: 200 });
+}
+
+export async function POST(req: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return new Response(null, { status: 404 });
+  }
+
+  const unauthorized = await authenticate(req);
+  if (unauthorized) return unauthorized;
 
   const idempotencyKey = req.headers.get("Idempotency-Key")?.trim();
   if (!idempotencyKey) {

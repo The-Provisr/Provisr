@@ -1,21 +1,22 @@
 import "server-only";
 
-export type WorkspaceEnvironment = "development" | "staging" | "production";
+import { isWorkspaceRole } from "@/components/layout/permissions";
+import type {
+  WorkspaceEnvironment,
+  WorkspaceMembership,
+  WorkspaceRecord,
+} from "./workspace-types";
+
+export type {
+  WorkspaceEnvironment,
+  WorkspaceMembership,
+  WorkspaceRecord,
+} from "./workspace-types";
 
 export type CreateWorkspaceInput = {
   name: string;
   description?: string;
   environment: WorkspaceEnvironment;
-};
-
-export type WorkspaceRecord = {
-  id: string;
-  name: string;
-  slug: string;
-  environment: string;
-  description?: string | null;
-  created_at?: string;
-  updated_at?: string;
 };
 
 export type WorkspaceCreateErrorCode =
@@ -116,4 +117,59 @@ export async function createWorkspace(
   }
 
   return (await res.json()) as WorkspaceRecord;
+}
+
+const LIST_WORKSPACES_TIMEOUT_MS = 5000;
+
+/**
+ * List the workspaces the caller is a member of, with their role in each
+ * (BE-A03 `GET /workspaces`). The gateway resolves the caller from the token, so
+ * no `user_id` is sent from the client.
+ *
+ * BE-A03 returns a top-level array of `workspace + role`. Any item missing a
+ * recognized role is downgraded to `viewer` rather than trusted, so a malformed
+ * payload cannot widen the shell's navigation.
+ */
+export async function listWorkspaces(token: string): Promise<WorkspaceMembership[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${process.env.ORCHESTRATION_API_URL}/v1/workspaces`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(LIST_WORKSPACES_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new Error(`listWorkspaces timed out after ${LIST_WORKSPACES_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
+
+  if (!res.ok) {
+    throw new Error(`listWorkspaces failed: ${res.status}`);
+  }
+
+  const body: unknown = await res.json();
+  if (!Array.isArray(body)) {
+    throw new Error("listWorkspaces returned an unexpected payload");
+  }
+
+  return body
+    .filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === "object" && item !== null,
+    )
+    .map((item) => ({
+      id: String(item.id ?? ""),
+      name: String(item.name ?? ""),
+      slug: String(item.slug ?? ""),
+      environment: String(item.environment ?? ""),
+      description: typeof item.description === "string" ? item.description : null,
+      created_at: typeof item.created_at === "string" ? item.created_at : undefined,
+      updated_at: typeof item.updated_at === "string" ? item.updated_at : undefined,
+      role: isWorkspaceRole(item.role) ? item.role : "viewer",
+    }));
 }

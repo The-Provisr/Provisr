@@ -135,6 +135,8 @@ class CloudContext(DomainModel):
         account_providers = {account.provider for account in self.active_accounts}
         if self.active_accounts and providers != account_providers:
             raise ValueError("Connected providers must match active accounts")
+        if not self.regions:
+            raise ValueError("Cloud context must include verified regions")
         if self.default_region and self.regions and self.default_region not in self.regions:
             raise ValueError("default_region must be one of the verified regions")
         return self

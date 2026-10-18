@@ -191,6 +191,9 @@ func properties(r manifest.Resource, s spec) (map[string]any, error) {
 			return nil, fmt.Errorf("resource %s: unsupported database engine", r.LogicalName)
 		}
 	}
+	if r.SecuritySettings != nil && strings.TrimSpace(r.SecuritySettings.EncryptionType) != "" {
+		return nil, fmt.Errorf("resource %s: encryption type overrides are unsupported in phase one", r.LogicalName)
+	}
 	if r.SecuritySettings != nil && (r.SecuritySettings.PublicAccess ||
 		(!strings.HasPrefix(r.Type, "network.") && !r.SecuritySettings.EncryptionEnabled)) {
 		return nil, fmt.Errorf("resource %s: phase-one templates require private encrypted resources", r.LogicalName)

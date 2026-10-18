@@ -10,8 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.context.fastapi import require_context
 from src.context.models import MCPContext
+from src.servers.manifest_server import (
+    _backend_manifest,
+    _MalformedResponseError,
+    _parse_validation_result,
+)
 from src.servers.manifest_validation import validate_contextual_manifest
-from src.servers.manifest_server import _backend_manifest, _parse_validation_result, _MalformedResponseError
 
 router = APIRouter()
 
@@ -19,8 +23,8 @@ router = APIRouter()
 @router.post("/tools/create_manifest")
 async def create_manifest(
     request: Request,
-    context: MCPContext = Depends(  # noqa: B008
-        require_context("manifest:write", require_idempotency_key=True)
+    context: MCPContext = Depends(
+        require_context("manifest:write", require_idempotency_key=True)  # noqa: B008
     ),
 ) -> dict[str, Any]:
     body = await request.json()

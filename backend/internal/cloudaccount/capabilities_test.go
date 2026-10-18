@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -181,5 +182,36 @@ func TestProactiveRefreshDropsPreviousReadinessOnFailure(t *testing.T) {
 	w := callCapabilities(h, "token", capabilityWorkspace)
 	if strings.Contains(w.Body.String(), `"execution_ready":true`) {
 		t.Fatal("refresh failure retained readiness")
+	}
+}
+
+type discoveryFunc func(context.Context, CapabilityAccount) (Discovery, error)
+
+func (f discoveryFunc) Discover(ctx context.Context, a CapabilityAccount) (Discovery, error) {
+	return f(ctx, a)
+}
+func TestRefreshInvalidatesInFlightDiscovery(t *testing.T) {
+	s := &memoryCapabilityStore{accounts: []CapabilityAccount{account()}}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	var calls atomic.Int32
+	p := discoveryFunc(func(context.Context, CapabilityAccount) (Discovery, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+			return Discovery{AccountID: "123456789012", Regions: []string{"us-east-1"}, PermissionsVerified: true}, nil
+		}
+		return Discovery{}, errors.New("revoked")
+	})
+	h := NewCapabilitiesHandler(s, p, "token").(*capabilitiesHandler)
+	go func() { defer close(done); callCapabilities(h, "token", capabilityWorkspace) }()
+	<-started
+	h.Refresh(context.Background(), capabilityWorkspace)
+	close(release)
+	<-done
+	w := callCapabilities(h, "token", capabilityWorkspace)
+	if strings.Contains(w.Body.String(), `"execution_ready":true`) {
+		t.Fatal("stale in-flight discovery restored readiness")
 	}
 }

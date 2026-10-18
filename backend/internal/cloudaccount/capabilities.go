@@ -65,18 +65,19 @@ type capabilityCache struct {
 	expires, checked time.Time
 }
 type capabilitiesHandler struct {
-	store    CapabilityStore
-	provider ProviderDiscovery
-	token    string
-	mu       sync.Mutex
-	cache    map[string]capabilityCache
-	now      func() time.Time
+	store      CapabilityStore
+	provider   ProviderDiscovery
+	token      string
+	mu         sync.Mutex
+	cache      map[string]capabilityCache
+	generation map[string]uint64
+	now        func() time.Time
 }
 
 // NewCapabilitiesHandler requires a trusted service token; MCP/gateway authorize the user.
 // A cache hit cannot revive a disconnected account because store state is always reread.
 func NewCapabilitiesHandler(store CapabilityStore, provider ProviderDiscovery, token string) http.Handler {
-	return &capabilitiesHandler{store: store, provider: provider, token: token, cache: map[string]capabilityCache{}, now: time.Now}
+	return &capabilitiesHandler{store: store, provider: provider, token: token, cache: map[string]capabilityCache{}, generation: map[string]uint64{}, now: time.Now}
 }
 
 func (h *capabilitiesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -209,6 +210,7 @@ func (h *capabilitiesHandler) discover(ctx context.Context, a CapabilityAccount,
 	now := h.now().UTC()
 	h.mu.Lock()
 	cached, ok := h.cache[key]
+	generation := h.generation[a.WorkspaceID]
 	h.mu.Unlock()
 	if ok && !force && now.Before(cached.expires) {
 		return cached, nil
@@ -220,6 +222,9 @@ func (h *capabilitiesHandler) discover(ctx context.Context, a CapabilityAccount,
 	cached = capabilityCache{value: facts, checked: now, expires: now.Add(time.Hour)}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.generation[a.WorkspaceID] != generation {
+		return capabilityCache{}, fmt.Errorf("discovery invalidated by refresh")
+	}
 	for k, v := range h.cache {
 		if !now.Before(v.expires) {
 			delete(h.cache, k)
@@ -238,6 +243,7 @@ func (h *capabilitiesHandler) Refresh(ctx context.Context, workspace string) {
 		return
 	}
 	h.mu.Lock()
+	h.generation[workspace]++
 	for key := range h.cache {
 		if strings.HasPrefix(key, workspace+":") {
 			delete(h.cache, key)

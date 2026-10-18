@@ -109,4 +109,54 @@ describe("CostEstimateComponent", () => {
     expect(costEstimateSchema.safeParse({ ...canonicalEstimate, currency: "US dollars" }).success).toBe(false);
     expect(costEstimateSchema.safeParse({ breakdown_by_service: [] }).success).toBe(false);
   });
+
+  it("preserves legacy unit prices without claiming a monthly share", () => {
+    const data = costEstimateSchema.parse({
+      monthlyTotalUsd: 87.6,
+      breakdown: [{ category: "Compute", serviceName: "EC2 rate", costUsd: 0.12, unit: "hour" }],
+    });
+    render(<CostEstimateComponent data={data} />);
+    expect(screen.getByText(/\/hour/)).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /EC2 rate/ })).not.toBeInTheDocument();
+    expect(data.services[0]?.percentage).toBeUndefined();
+  });
+
+  it("uses the supplied share when a partial estimate has no total", () => {
+    const data = costEstimateSchema.parse({
+      state: "partial",
+      breakdown_by_service: [{ service: "Compute", monthly_cost: 75, percentage: 25 }],
+    });
+    render(<CostEstimateComponent data={data} />);
+    const bar = screen.getByRole("img", { name: /Compute:.*25.0 percent/ });
+    expect(bar.firstElementChild).toHaveStyle({ width: "25%" });
+    expect(screen.getByText("Total not available")).toBeInTheDocument();
+  });
+
+  it("does not invent percentages for legacy partial data without a total", () => {
+    const data = costEstimateSchema.parse({
+      state: "partial",
+      breakdown: [{ category: "Compute", serviceName: "EC2", costUsd: 75 }],
+    });
+    render(<CostEstimateComponent data={data} />);
+    expect(data.services[0]?.percentage).toBeUndefined();
+    expect(screen.queryByRole("img", { name: /EC2/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Total not available")).toBeInTheDocument();
+  });
+
+  it("retains the supplied currency's standard fractional precision", () => {
+    const data = costEstimateSchema.parse({ total_monthly_estimate: 1.234, currency: "BHD" });
+    render(<CostEstimateComponent data={data} />);
+    expect(screen.getByRole("region", { name: "Cost estimate" }).querySelector("strong")?.textContent).toBe(
+      new Intl.NumberFormat(undefined, { style: "currency", currency: "BHD" }).format(1.234),
+    );
+  });
+
+  it("keeps zero-total bars finite and zero width", () => {
+    const data = costEstimateSchema.parse({
+      total_monthly_estimate: 0,
+      breakdown_by_service: [{ service: "Free tier", monthly_cost: 0, percentage: 0 }],
+    });
+    render(<CostEstimateComponent data={data} />);
+    expect(screen.getByRole("img", { name: /Free tier/ }).firstElementChild).toHaveStyle({ width: "0%" });
+  });
 });

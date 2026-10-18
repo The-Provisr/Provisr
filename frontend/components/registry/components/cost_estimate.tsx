@@ -11,7 +11,6 @@ function formatCurrency(amount: number, currency: string) {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency,
-    maximumFractionDigits: 2,
   }).format(amount);
 }
 
@@ -36,7 +35,7 @@ export function CostEstimateComponent({ data }: { data: CostEstimateData }) {
     );
   }
 
-  const chartDenominator = data.totalMonthlyEstimate ?? data.services.reduce((sum, service) => sum + service.monthly_cost, 0);
+  const chartDenominator = data.totalMonthlyEstimate;
 
   return (
     <section aria-label="Cost estimate" className="rounded-xl border border-gray-200 bg-white p-5 shadow-xs">
@@ -76,21 +75,24 @@ export function CostEstimateComponent({ data }: { data: CostEstimateData }) {
         {data.services.length ? (
           <ul className="mt-2 space-y-3">
             {data.services.map((service, index) => {
-              const proportionalWidth = chartDenominator > 0
-                ? Math.min(100, Math.max(0, (service.monthly_cost / chartDenominator) * 100))
-                : 0;
+              let proportionalWidth = service.percentage;
+              if (proportionalWidth !== undefined && chartDenominator !== undefined) {
+                proportionalWidth = chartDenominator > 0
+                  ? Math.min(100, Math.max(0, (service.monthly_cost / chartDenominator) * 100))
+                  : 0;
+              }
               return (
                 <li key={`${service.service}-${index}`}>
                   <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-gray-800">{service.service}</span>
                     <span className="flex items-baseline gap-2 text-gray-700">
-                      <strong>{formatCurrency(service.monthly_cost, data.currency)}</strong>
-                      <span className="text-gray-500">{service.percentage.toFixed(1)}%</span>
+                      <strong>{formatCurrency(service.monthly_cost, data.currency)}{service.unit ? `/${service.unit}` : ""}</strong>
+                      <span className="text-gray-500">{service.percentage !== undefined ? `${service.percentage.toFixed(1)}%` : "Share unavailable"}</span>
                     </span>
                   </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-gray-100" role="img" aria-label={`${service.service}: ${formatCurrency(service.monthly_cost, data.currency)}, ${service.percentage.toFixed(1)} percent of estimate`}>
+                  {proportionalWidth !== undefined ? <div className="h-2.5 overflow-hidden rounded-full bg-gray-100" role="img" aria-label={`${service.service}: ${formatCurrency(service.monthly_cost, data.currency)}, ${service.percentage?.toFixed(1)} percent of estimate`}>
                     <div className="h-full rounded-full bg-emerald-500 transition-[width]" style={{ width: `${proportionalWidth}%` }} />
-                  </div>
+                  </div> : null}
                 </li>
               );
             })}

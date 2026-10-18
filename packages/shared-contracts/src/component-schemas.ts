@@ -162,12 +162,17 @@ export const costEstimateSchema = z
   })
   .transform((data) => {
     const totalMonthlyEstimate = data.total_monthly_estimate ?? data.monthlyTotalUsd;
-    const legacyDenominator = totalMonthlyEstimate ?? data.breakdown?.reduce((sum, item) => sum + item.costUsd, 0) ?? 0;
-    const services = data.breakdown_by_service ?? (data.breakdown ?? []).map((item) => ({
-      service: item.serviceName,
-      monthly_cost: item.costUsd,
-      percentage: legacyDenominator > 0 ? (item.costUsd / legacyDenominator) * 100 : 0,
-    }));
+    const services = data.breakdown_by_service?.map((item) => ({ ...item, unit: undefined })) ?? (data.breakdown ?? []).map((item) => {
+      const isMonthly = !item.unit || /^(month|mo)$/i.test(item.unit.trim());
+      return {
+        service: item.serviceName,
+        monthly_cost: item.costUsd,
+        unit: item.unit,
+        percentage: isMonthly && totalMonthlyEstimate !== undefined
+          ? totalMonthlyEstimate > 0 ? (item.costUsd / totalMonthlyEstimate) * 100 : 0
+          : undefined,
+      };
+    });
     return {
       ...data,
       totalMonthlyEstimate,

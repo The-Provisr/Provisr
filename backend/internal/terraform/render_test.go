@@ -137,3 +137,12 @@ func TestNormalizedInputsAndDistinctSafeIdentifiers(t *testing.T) {
 		t.Fatal("numeric logical identifier not safely mapped")
 	}
 }
+
+func TestRejectsUnsupportedEncryptionMode(t *testing.T) {
+	m := input("storage.aws.s3", map[string]any{"bucket": "private-bucket"})
+	m.Resources[0].SecuritySettings = &manifest.SecuritySettings{EncryptionEnabled: true, EncryptionType: "aws:kms"}
+	out, err := Render(m)
+	if err == nil || len(out.Files) != 0 {
+		t.Fatal("KMS intent silently rendered as AES256")
+	}
+}

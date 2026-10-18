@@ -1,7 +1,8 @@
-import { NotImplementedException } from "@nestjs/common";
+import { ConflictException, NotImplementedException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunsService, createRunsService } from "../../src/state-machine/runs.service";
 import { AuditService } from "../../src/services/audit.service";
+import { questionSchema } from "../../src/services/planning-contracts";
 import { PlanningClients } from "../../src/services/planning-clients";
 import { makeRun, memoryDb, contextFor, fakeClients, manifest, policy } from "../helpers/planning-fixture";
 
@@ -167,6 +168,20 @@ describe("RunsService durable planning", () => {
     await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
     expect(f.current().state).toBe("FAILED");
     expect(f.events.some(e => e.type === "ComponentPayloadEvent")).toBe(false);
+  });
+
+  it.each([true, false])("handles a committed concurrent clarification replay (same answers: %s)", async (same) => {
+    const question = questionSchema.parse({ question: "Region?", fields: [{ name: "region", type: "string", options: ["us-east-1", "us-west-2"] }] });
+    const stale = makeRun({ state: "CLARIFYING", currentQuestion: question, clarificationExpiresAt: new Date(Date.now() + 60000) });
+    const latest = { ...stale, state: "MANIFEST_CREATING" as const, stateVersion: 1, currentQuestion: null,
+      answersHistory: [{ question, answers: { region: "us-east-1" }, answeredAt: new Date().toISOString(), idempotencyKey: "race" }] };
+    const f = memoryDb(latest);
+    const service = new RunsService(f.db);
+    vi.spyOn(service, "getRun").mockResolvedValueOnce(stale).mockResolvedValue(latest);
+    const result = service.clarifyRun(stale.id, stale.workspaceId, stale.requesterId, { idempotencyKey: "race", answers: { region: same ? "us-east-1" : "us-west-2" } });
+    if (same) await expect(result).resolves.toMatchObject({ stateVersion: 1 });
+    else await expect(result).rejects.toBeInstanceOf(ConflictException);
+    expect(f.events).toHaveLength(0);
   });
 
   it("discards agent output when cancellation wins during the HTTP request", async () => {

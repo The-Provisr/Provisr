@@ -259,26 +259,38 @@ export const executionTimelineSchema = z.object({
   ),
 });
 
+const portSchema = z.number().int().min(1).max(65535);
+
+// Scheme is required with no default: a payload that omits it must fail
+// validation instead of silently rendering as internal (or as public).
 export const loadbalancerCardSchema = z.object({
-  name: z.string(),
-  type: z.enum(["application", "network", "gateway"]).default("application"),
-  scheme: z.enum(["internet-facing", "internal"]).default("internet-facing"),
+  name: z.string().min(1),
+  lbType: z.enum(["ALB", "NLB", "AGW"]),
+  scheme: z.enum(["internet-facing", "internal"]),
   listeners: z.array(
     z.object({
-      port: z.number(),
-      protocol: z.string(),
-      sslCertificate: z.boolean().optional(),
+      port: portSchema,
+      protocol: z.string().min(1),
+      sslPolicy: z.string().optional(),
+      // Name of the target group this listener forwards to (traffic path).
+      targetGroup: z.string().optional(),
     }),
   ),
   targetGroups: z
     .array(
       z.object({
-        name: z.string(),
-        port: z.number(),
-        healthCheckStatus: z.string().optional(),
+        name: z.string().min(1),
+        protocol: z.string().min(1),
+        port: portSchema,
+        healthCheckPath: z.string().optional(),
+        // Health check interval in seconds.
+        interval: z.number().positive().optional(),
       }),
     )
-    .optional(),
+    .default([]),
+  publicExposure: z.boolean().optional(),
+  approvalNote: z.string().optional(),
+  policyNotes: z.array(z.string()).default([]),
 });
 
 export const notificationTargetSchema = z.object({

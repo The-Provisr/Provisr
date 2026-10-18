@@ -76,15 +76,15 @@ export class ComponentPayloadValidationError extends Error {
   }
 }
 
-export function validateComponent(id: string, payload: unknown, version = COMPONENT_SCHEMA_VERSION): Record<string, unknown> {
+export function validateComponent(id: string, payload: unknown, version: string = COMPONENT_SCHEMA_VERSION): Record<string, unknown> {
   const versions = Object.hasOwn(componentSchemasByVersion, id)
     ? componentSchemasByVersion[id as keyof typeof componentSchemasByVersion] : undefined;
   const schema = versions && Object.hasOwn(versions, version)
     ? versions[version as keyof typeof versions] : undefined;
-  if (!schema) throw new ComponentPayloadValidationError(id, version, [{ path: "$", code: "unknown_component_or_version" }]);
+  if (!schema) throw new ComponentPayloadValidationError(versions ? id : "unknown", version === COMPONENT_SCHEMA_VERSION ? version : "unsupported", [{ path: "$", code: "unknown_component_or_version" }]);
   const result = schema.safeParse(payload);
   if (!result.success) throw new ComponentPayloadValidationError(id, version,
-    result.error.issues.map(issue => ({ path: issue.path.map(String).join(".") || "$", code: issue.code })));
+    result.error.issues.map(issue => ({ path: "$", code: issue.code })));
   return result.data as Record<string, unknown>;
 }
 

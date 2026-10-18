@@ -168,11 +168,11 @@ describe("RunsService durable planning", () => {
     expect(f.current()).toMatchObject({ state: "FAILED", errorCode: "COMPONENT_PAYLOAD_INVALID" });
     expect(f.events.some(e => e.type === "ComponentPayloadEvent")).toBe(false);
     expect(f.events.at(-1)).toMatchObject({ type: "ComponentPayloadRejectedEvent", payload: {
-      component_type: "raw_html", component_version: "1.0.0", validation_issues: [{ code: "unknown_component_or_version" }],
+      component_type: "unknown", component_version: "1.0.0", validation_issues: [{ code: "unknown_component_or_version" }],
     } });
     expect(f.audits.at(-1)![1]).toBe("state_transition");
     expect(JSON.parse(f.audits.at(-1)![6] as string)).toMatchObject({ error_code: "COMPONENT_PAYLOAD_INVALID",
-      component_type: "raw_html", validation_issues: [{ code: "unknown_component_or_version" }] });
+      component_type: "unknown", validation_issues: [{ code: "unknown_component_or_version" }] });
     expect(JSON.stringify(f.events)).not.toContain("<script>");
   });
 

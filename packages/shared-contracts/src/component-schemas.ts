@@ -293,17 +293,29 @@ export const policyResultSchema = z.object({
     .optional(),
 });
 
+const regionOptionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  latencyMs: z.number().finite().nonnegative().optional(),
+  complianceCompliant: z.boolean().optional(),
+  available: z.boolean().default(true),
+  restrictedByPolicy: z.boolean().default(false),
+});
+
 export const regionSelectorSchema = z.object({
   provider: z.enum(["aws", "azure", "gcp"]),
   selectedRegion: z.string(),
-  availableRegions: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      latencyMs: z.number().optional(),
-      complianceCompliant: z.boolean().optional(),
-    }),
-  ),
+  availableRegions: z.array(regionOptionSchema),
+  providers: z
+    .array(
+      z.object({
+        provider: z.enum(["aws", "azure", "gcp"]),
+        selectedRegion: z.string().optional(),
+        availableRegions: z.array(regionOptionSchema),
+      }),
+    )
+    .optional(),
+  loading: z.boolean().optional(),
   reasoning: z.string().optional(),
 });
 

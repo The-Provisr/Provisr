@@ -64,6 +64,7 @@ class AccountCapability(BaseModel):
         if self.checked_at is not None and (
             self.checked_at.tzinfo is None
             or self.checked_at > datetime.now(UTC) + timedelta(seconds=30)
+            or datetime.now(UTC) - self.checked_at > timedelta(hours=24)
         ):
             raise ValueError("Invalid discovery timestamp")
         if self.execution_ready and (
@@ -71,7 +72,6 @@ class AccountCapability(BaseModel):
             or not self.available_regions
             or not self.account_identity
             or self.checked_at is None
-            or datetime.now(UTC) - self.checked_at > timedelta(hours=24)
             or self.warning is not None
         ):
             raise ValueError("Unverified execution readiness")

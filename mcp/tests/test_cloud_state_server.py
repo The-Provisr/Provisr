@@ -148,3 +148,16 @@ def test_missing_service_authentication_does_not_call_backend():
     response, requests = call_backend({"context": CONTEXT}, token="")
     assert response.status_code == 503
     assert requests == []
+
+
+def test_stale_regions_are_rejected_even_when_execution_is_not_ready():
+    account={**ACCOUNT,"execution_ready":False,"warning":"execution_permissions_not_verified","checked_at":(datetime.now(UTC)-timedelta(days=2)).isoformat()}
+    response,_=call_backend({"context":CONTEXT},{"workspace_id":WORKSPACE,"accounts":[account]})
+    assert response.status_code==502
+
+
+def test_fresh_regions_remain_usable_when_permissions_are_unverified():
+    account={**ACCOUNT,"execution_ready":False,"warning":"execution_permissions_not_verified"}
+    response,_=call_backend({"context":CONTEXT},{"workspace_id":WORKSPACE,"accounts":[account]})
+    assert response.status_code==200
+    assert response.json()["accounts"][0]["execution_ready"] is False

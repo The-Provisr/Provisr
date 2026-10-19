@@ -14,6 +14,7 @@ from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
 from src.servers.cloud_state_server import router as cloud_router
+from src.servers.iac_generation import router as iac_router
 from src.servers.manifest_creation import router as manifest_creation_router
 from src.servers.manifest_server import router as backend_manifest_router
 from src.servers.manifest_validation import router as manifest_router
@@ -27,6 +28,7 @@ class Resources:
     manifest_backend_url: str
     cloud_backend_url: str
     cloud_service_token: str
+    iac_service_token: str
 
 
 def create_app(
@@ -36,6 +38,7 @@ def create_app(
     manifest_backend_url: str | None = None,
     cloud_backend_url: str | None = None,
     cloud_service_token: str | None = None,
+    iac_service_token: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -72,6 +75,8 @@ def create_app(
             )).rstrip("/"),
             cloud_service_token=(cloud_service_token if cloud_service_token is not None
                                  else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
+            iac_service_token=(iac_service_token if iac_service_token is not None
+                               else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
         )
         try:
             yield
@@ -89,6 +94,7 @@ def create_app(
     application.include_router(manifest_router)
     application.include_router(backend_manifest_router)
     application.include_router(cloud_router)
+    application.include_router(iac_router)
     application.include_router(manifest_creation_router)
 
     @application.get("/health/live")

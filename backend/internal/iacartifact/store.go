@@ -33,7 +33,7 @@ func (run runLock) matches(r Request, version int) bool {
 // Generate serializes authorization, run selection, storage and audit in one
 // transaction. Callers cannot supply manifest content or confirmation claims.
 func (s *DBGenerator) Generate(ctx context.Context, input Request) (*Artifact, error) {
-	if !validRequest(input) {
+	if !validRequest(&input) {
 		return nil, &Failure{Status: 400, Code: "invalid_request", Message: "Invalid generation context"}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)

@@ -70,7 +70,7 @@ func NewHandler(generator Generator, token string) http.Handler {
 		var input Request
 		d := json.NewDecoder(r.Body)
 		d.DisallowUnknownFields()
-		if d.Decode(&input) != nil || d.Decode(new(any)) != io.EOF || !validRequest(input) {
+		if d.Decode(&input) != nil || d.Decode(new(any)) != io.EOF || !validRequest(&input) {
 			write(w, 400, &Failure{Code: "invalid_request", Message: "Valid manifest ID and complete idempotent context required"})
 			return
 		}
@@ -89,13 +89,14 @@ func NewHandler(generator Generator, token string) http.Handler {
 	return mux
 }
 
-func validRequest(r Request) bool {
-	c := r.Context
-	for _, id := range []string{r.ManifestID, c.WorkspaceID, c.UserID, c.RequestID, c.SessionID, c.CorrelationID} {
-		parsed, err := uuid.Parse(id)
+func validRequest(r *Request) bool {
+	c := &r.Context
+	for _, id := range []*string{&r.ManifestID, &c.WorkspaceID, &c.UserID, &c.RequestID, &c.SessionID, &c.CorrelationID} {
+		parsed, err := uuid.Parse(*id)
 		if err != nil || parsed == uuid.Nil {
 			return false
 		}
+		*id = parsed.String()
 	}
 	if strings.TrimSpace(c.IdempotencyKey) == "" || len(c.IdempotencyKey) > 255 {
 		return false

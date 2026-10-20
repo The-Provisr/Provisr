@@ -210,6 +210,40 @@ func TestStoredArtifactIntegrityPostgres(t *testing.T) {
 	}
 }
 
+func TestGenerationCanonicalizesUUIDsPostgres(t *testing.T) {
+	db := database(t)
+	r := seed(t, db)
+	g := &DBGenerator{db: db}
+	ctx := context.Background()
+	a, err := g.Generate(ctx, alternateUUIDs(r, strings.ToUpper))
+	if err != nil {
+		t.Fatal("generation with equivalent UUIDs failed", err)
+	}
+	if a.ManifestID != r.ManifestID || a.WorkspaceID != r.Context.WorkspaceID || a.RunID != r.Context.RequestID || a.SessionID != r.Context.SessionID {
+		t.Fatal("artifact contains noncanonical identifiers")
+	}
+	// Replay both canonical input and another accepted spelling against the same
+	// persisted UUIDs, without creating another artifact or audit event.
+	for _, retry := range []Request{r, alternateUUIDs(r, func(id string) string { return "urn:uuid:" + id })} {
+		replayed, err := g.Generate(ctx, retry)
+		if err != nil || replayed.ID != a.ID {
+			t.Fatal("equivalent UUID replay failed", err)
+		}
+	}
+	var stored Artifact
+	var data []byte
+	if err = db.QueryRow(`SELECT generation FROM provisr_iac.artifacts WHERE id=$1`, a.ID).Scan(&data); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(data, &stored); err != nil || stored.ManifestID != r.ManifestID || stored.RunID != r.Context.RequestID || stored.WorkspaceID != r.Context.WorkspaceID || stored.SessionID != r.Context.SessionID {
+		t.Fatal("persisted artifact contains noncanonical identifiers", err)
+	}
+	var count int
+	if err = db.QueryRow(`SELECT count(*) FROM provisr_audit.audit_events WHERE payload->>'run_id'=$1 AND payload->>'manifest_id'=$2 AND correlation_id=$3 AND event_type='artifact_generated'`, r.Context.RequestID, r.ManifestID, r.Context.CorrelationID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("want one canonical audit event, got %d: %v", count, err)
+	}
+}
+
 func TestGenerationWithApplicationRolePostgres(t *testing.T) {
 	db := database(t)
 	r := seed(t, db)

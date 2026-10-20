@@ -39,6 +39,19 @@ class RunTurnResponse(ApiModel):
     result: AgentOutputEnvelope
 
 
+class PolicyViolationExplanationRequest(ApiModel):
+    rule_key: str = Field(min_length=1, max_length=128)
+    severity: str = Field(min_length=1, max_length=32)
+    evidence: dict[str, object] = Field(default_factory=dict)
+    remediation_hint: str = Field(default="", max_length=2000)
+
+
+class PolicyViolationExplanationResponse(ApiModel):
+    explanation: str
+    manifest_part: str
+    remediation: str
+
+
 class ProblemDetails(ApiModel):
     type: str
     title: str

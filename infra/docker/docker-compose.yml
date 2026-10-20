@@ -282,6 +282,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       AGENT_URL: http://agent:5000
       CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089
+      WORKSPACE_SERVICE_URL: http://workspace-service:8088
       POLICY_SERVICE_URL: http://policy-service:8081
       POLICY_SERVICE_SECRET: ${POLICY_SERVICE_SECRET:-}
       STATE_SERVICE_URL: http://state-service:8082

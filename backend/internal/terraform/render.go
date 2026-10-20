@@ -60,6 +60,10 @@ func SupportedDomains(provider string) []string {
 
 // Render validates typed inputs, then renders stable files without executing or persisting them.
 func Render(m *manifest.Manifest) (Result, error) {
+	return render(m, false)
+}
+
+func render(m *manifest.Manifest, parameterized bool) (Result, error) {
 	out := Result{Files: []File{}, Unsupported: []Unsupported{}}
 	validation, err := manifest.NewValidator().Validate(m)
 	if err != nil || !validation.Valid {
@@ -89,6 +93,15 @@ func Render(m *manifest.Manifest) (Result, error) {
 		p, err := properties(r, s)
 		if err != nil {
 			return out, err
+		}
+		if parameterized {
+			for key, value := range p {
+				// Template branch choices (such as versioning) remain fixed to
+				// the confirmed manifest; scalar/list values use module inputs.
+				if _, boolean := value.(bool); !boolean {
+					p[key] = expression("var.r_" + r.LogicalName + "[" + hcl(key) + "]")
+				}
+			}
 		}
 		tags := map[string]string{}
 		for k, v := range m.Tags {
@@ -125,8 +138,13 @@ func Render(m *manifest.Manifest) (Result, error) {
 	return out, nil
 }
 
+type expression string
+
 // hcl encodes data as HCL-compatible JSON while disabling Terraform interpolation.
 func hcl(value any) string {
+	if expr, ok := value.(expression); ok {
+		return string(expr)
+	}
 	encoded, _ := json.Marshal(value) // all callers use validated JSON-compatible values
 	s := strings.ReplaceAll(string(encoded), "${", "$${")
 	return strings.ReplaceAll(s, "%{", "%%{")

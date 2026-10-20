@@ -1,8 +1,8 @@
 FROM golang:1.23-alpine AS builder
 WORKDIR /app
-COPY backend/go.mod backend/go.sum ./
+COPY go.mod go.sum ./
 RUN go mod download
-COPY backend/ ./
+COPY . ./
 RUN CGO_ENABLED=0 go build -o /services/policy-service ./cmd/policy-service && \
     CGO_ENABLED=0 go build -o /services/state-service ./cmd/state-service && \
     CGO_ENABLED=0 go build -o /services/provisioning-service ./cmd/provisioning-service && \
@@ -12,7 +12,8 @@ RUN CGO_ENABLED=0 go build -o /services/policy-service ./cmd/policy-service && \
     CGO_ENABLED=0 go build -o /services/reconciler ./cmd/reconciler && \
     CGO_ENABLED=0 go build -o /services/workspace-service ./cmd/workspace-service && \
     CGO_ENABLED=0 go build -o /services/cloud-account-service ./cmd/cloud-account-service && \
-    CGO_ENABLED=0 go build -o /services/manifest-service ./cmd/manifest-service
+    CGO_ENABLED=0 go build -o /services/manifest-service ./cmd/manifest-service && \
+    CGO_ENABLED=0 go build -o /services/pricing-service ./cmd/pricing-service
 
 FROM alpine:3.20 AS service
 RUN apk add --no-cache ca-certificates tzdata

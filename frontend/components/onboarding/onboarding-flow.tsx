@@ -1068,7 +1068,9 @@ function FlowExperience({
                 <button
                   className={styles.primaryButton}
                   disabled={!workspaceCreated || isCreating}
-                  onClick={() => router.push("/post-auth")}
+                  onClick={() =>
+                    router.push(state.provider === "aws" ? "/post-auth?connect=aws" : "/post-auth")
+                  }
                   type="button"
                 >
                   Open dashboard

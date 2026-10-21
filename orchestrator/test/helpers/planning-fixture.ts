@@ -14,7 +14,7 @@ export function makeRun(overrides: Partial<ProvisioningRun> = {}): ProvisioningR
   return { id: randomUUID(), sessionId: randomUUID(), workspaceId: randomUUID(), requesterId: randomUUID(),
     state: "RECEIVED", stateVersion: 0, prompt: "Create a bucket", manifestVersion: null, policyDecision: null,
     approvalStatus: "not_required", executionStatus: "pending", idempotencyKey: randomUUID(), correlationId: randomUUID(),
-    errorCode: null, errorMessage: null, createdAt: new Date(), updatedAt: new Date(), completedAt: null,
+    errorCode: null, errorMessage: null, iacArtifactId: null, createdAt: new Date(), updatedAt: new Date(), completedAt: null,
     policyRequirements: null, policyRequirementsLoadedAt: null, cloudContext: null, cloudContextLoadedAt: null,
     agentSessionId: null, agentTurnPending: true, agentInput: null, currentQuestion: null, clarificationExpiresAt: null,
     answersHistory: [], manifestValidationAttempts: 0, manifestValidatedVersion: null, manifestConfirmedVersion: null, manifestConfirmedAt: null, ...overrides };

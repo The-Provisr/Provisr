@@ -48,6 +48,50 @@ function parseSequenceId(raw: string): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+const SERVER_EVENT_NAMES = [
+  "RunCreatedEvent", "StateChangedEvent", "AgentSessionLinkedEvent",
+  "ApprovalDecisionEvent", "AssistantMessageEvent", "ClarificationAnsweredEvent",
+  "ClarificationQuestionEvent", "ComponentPayloadEvent", "ComponentPayloadRejectedEvent",
+  "ManifestConfirmedEvent", "ManifestReadyEvent", "ManifestRevisionRequestedEvent",
+  "ManifestValidationFailedEvent", "PolicyRequirementsLoadedEvent", "CloudContextLoadedEvent",
+  "RunFailedEvent", "RunCompletedEvent", "RunCancelledEvent", "ToolCallSummaryEvent",
+  "ToolSummaryEvent",
+] as const;
+
+function normalizedEvents(rawType: string | null, value: unknown): Array<{ type: SSEEventType; data: unknown }> {
+  if (!rawType) return [];
+  const data = unwrapData(value);
+  const record = data && typeof data === "object" ? data as Record<string, unknown> : {};
+  const aliases: Record<string, SSEEventType> = {
+    assistant_message: "assistant_message", AssistantMessageEvent: "assistant_message",
+    component_payload: "component_payload", ComponentPayloadEvent: "component_payload",
+    run_state_changed: "run_state_changed", StateChangedEvent: "run_state_changed",
+    tool_call_summary: "tool_call_summary", ToolCallSummaryEvent: "tool_call_summary", ToolSummaryEvent: "tool_call_summary",
+    clarification_question: "clarification_question", ClarificationQuestionEvent: "clarification_question",
+    error: "error", ErrorEvent: "error", RunFailedEvent: "error", ComponentPayloadRejectedEvent: "error",
+    run_completed: "run_completed", RunCompletedEvent: "run_completed", RunCancelledEvent: "run_completed",
+    keepalive: "keepalive",
+  };
+  if (rawType === "ManifestReadyEvent") {
+    const events: Array<{ type: SSEEventType; data: unknown }> = [];
+    if (typeof record.message === "string" && record.message) {
+      events.push({ type: "assistant_message", data: { ...record, message: record.message } });
+    }
+    if (Array.isArray(record.components)) {
+      for (const component of record.components) events.push({ type: "component_payload", data: { ...record, component } });
+    }
+    events.push({ type: "run_state_changed", data: record });
+    return events;
+  }
+  const known = aliases[rawType];
+  if (known) return [{ type: known, data }];
+  // The orchestrator emits named state events for workflow steps. Preserve
+  // their payloads as state updates so the UI can show progress without
+  // needing a frontend alias for every backend transition name.
+  if (rawType.endsWith("Event")) return [{ type: "run_state_changed", data }];
+  return [];
+}
+
 export class SSEClient {
   private readonly options: SSEClientOptions;
   private readonly bus: EventBus;
@@ -61,6 +105,7 @@ export class SSEClient {
   private stopped = true;
   private currentStatus: SSEStatus = "disconnected";
   private currentLastEventId: string | null = null;
+  private readonly seenEventIds = new Set<string>();
   private snapshotListeners = new Set<(snapshot: SSESnapshot) => void>();
 
   constructor(options: SSEClientOptions) {
@@ -159,6 +204,15 @@ export class SSEClient {
       this.handleMessage(evt);
     };
 
+    if (typeof es.addEventListener === "function") {
+      for (const eventName of SERVER_EVENT_NAMES) {
+        es.addEventListener(eventName, (event) => {
+          if (this.es !== es || this.stopped) return;
+          this.handleMessage(event as MessageEvent<string>);
+        });
+      }
+    }
+
     es.onerror = () => {
       if (this.es !== es) return;
       this.handleError(es);
@@ -183,9 +237,6 @@ export class SSEClient {
     }
 
     const type = resolveEventType(evt, parsed);
-    if (!isSSEEventType(type)) {
-      return;
-    }
 
     const id =
       typeof evt.lastEventId === "string" && evt.lastEventId.length > 0
@@ -194,14 +245,23 @@ export class SSEClient {
 
     if (type !== "keepalive" && id) {
       if (this.isDuplicateOrOld(id)) return;
+      this.seenEventIds.add(id);
+      if (this.seenEventIds.size > 2_000) {
+        const oldest = this.seenEventIds.values().next().value;
+        if (oldest) this.seenEventIds.delete(oldest);
+      }
       this.setLastEventId(id);
     }
 
-    this.bus.emit({ type, id, data: unwrapData(parsed) });
+    for (const normalized of normalizedEvents(type, parsed)) {
+      if (!isSSEEventType(normalized.type)) continue;
+      this.bus.emit({ type: normalized.type, id, data: normalized.data });
+    }
   }
 
   private isDuplicateOrOld(id: string): boolean {
     const last = this.currentLastEventId;
+    if (this.seenEventIds.has(id)) return true;
     if (!last) return false;
     if (last === id) return true;
     const incoming = parseSequenceId(id);

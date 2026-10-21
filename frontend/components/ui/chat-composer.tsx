@@ -1,53 +1,63 @@
-import {
-  ArrowUpIcon,
-  ChevronDownIcon,
-  LinkIcon,
-  MicIcon,
-  SparklesIcon,
-} from "@/components/ui/icons";
+"use client";
+
+import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { ArrowUpIcon, SparklesIcon } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 
-export function ChatComposer() {
+export function ChatComposer({
+  disabled = false,
+  loading = false,
+  onSubmit,
+}: {
+  disabled?: boolean;
+  loading?: boolean;
+  onSubmit: (prompt: string) => void;
+}) {
+  const [value, setValue] = useState("");
+
+  function submit(event?: FormEvent) {
+    event?.preventDefault();
+    const prompt = value.trim();
+    if (!prompt || disabled || loading) return;
+    onSubmit(prompt);
+    setValue("");
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submit();
+    }
+  }
+
   return (
     <footer className="bg-white p-4 sm:p-6">
-      <div className="mx-auto max-w-[850px]">
-        <div className="rounded-3xl border border-gray-200 bg-gray-50 p-4 shadow-sm transition-all focus-within:ring-2 focus-within:ring-blue-100">
-          <label className="mb-3 ml-2 flex items-center gap-2 text-gray-400">
-            <SparklesIcon className="size-4" />
-            <span className="text-sm">
-              Describe infrastructure or upload an architecture diagram...
-            </span>
-            <input className="sr-only" aria-label="Message" />
+      <form className="mx-auto max-w-[850px]" onSubmit={submit}>
+        <div className="rounded-3xl border border-gray-200 bg-gray-50 p-3 shadow-sm transition-all focus-within:ring-2 focus-within:ring-blue-100 sm:p-4">
+          <label className="mb-2 flex items-center gap-2 px-2 text-gray-400">
+            <SparklesIcon className="size-4 shrink-0" />
+            <span className="sr-only">Provisioning request</span>
           </label>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Button className="bg-white px-3 py-1.5" variant="secondary">
-              Cloud / Environment
-              <ChevronDownIcon className="size-3.5" />
+          <textarea
+            aria-label="Provisioning request"
+            className="min-h-20 w-full resize-y bg-transparent px-2 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 disabled:cursor-not-allowed"
+            placeholder="Describe the infrastructure you need..."
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={onKeyDown}
+            maxLength={20000}
+            disabled={disabled}
+          />
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <p className="text-[10px] text-gray-400">Shift + Enter for a new line</p>
+            <Button className="px-5 py-2" variant="primary" type="submit" disabled={disabled || loading || !value.trim()}>
+              {loading ? <span className="size-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" /> : <ArrowUpIcon className="size-3.5" />}
+              {loading ? "Starting..." : "Send"}
             </Button>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button className="px-3 py-1.5 text-gray-600" variant="ghost">
-                <LinkIcon className="size-3.5" />
-                Attach
-              </Button>
-              <Button className="px-3 py-1.5" variant="ghost">
-                <MicIcon className="size-4 text-gray-500" />
-                Voice
-              </Button>
-              <Button className="px-6 py-2.5" variant="primary">
-                <ArrowUpIcon className="size-3.5" />
-                Send
-              </Button>
-            </div>
           </div>
         </div>
-
-        <div className="mt-4 text-center text-[10px] text-gray-400">
-          Provisr drafts infrastructure plans for review. Execution requires
-          policy checks, confirmation, and approval when required.
-        </div>
-      </div>
+        <p className="mt-3 text-center text-[10px] text-gray-400">Provisr drafts infrastructure plans for review. Execution requires policy checks, confirmation, and approval when required.</p>
+      </form>
     </footer>
   );
 }

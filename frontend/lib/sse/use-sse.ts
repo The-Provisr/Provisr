@@ -31,6 +31,7 @@ function decodeWorkspaceId(token: string): string | null | undefined {
 export interface UseSSEResult {
   status: SSEStatus;
   lastEventId: string | null;
+  workspaceId: string | null;
   subscribe: <K extends SSEEventType>(
     type: K,
     handler: SSEEventHandler<SSEEventPayloads[K]>,
@@ -96,5 +97,5 @@ export function useSSE(workspaceId?: string): UseSSEResult {
     ) => bus.on(type, handler);
   }, [bus]);
 
-  return { status, lastEventId, subscribe };
+  return { status, lastEventId, workspaceId: effectiveWorkspaceId ?? null, subscribe };
 }

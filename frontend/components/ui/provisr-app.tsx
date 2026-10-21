@@ -63,9 +63,7 @@ export const workspaceNavItems = [
 export function AppShell({ children, sidebar }: AppShellProps) {
   // FE-M03: every authenticated screen mounts into the same collapsible,
   // role-aware dashboard shell. `sidebar` remains an optional contextual panel.
-  const clerkEnabled = Boolean(
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
-  );
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
   return (
     <DashboardShell clerkEnabled={clerkEnabled} sidebar={sidebar}>

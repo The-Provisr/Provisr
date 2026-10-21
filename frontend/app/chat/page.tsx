@@ -111,7 +111,7 @@ async function readResponse<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-export default function ChatPage() {
+function AuthenticatedChatPage() {
   const { getToken, userId } = useAuth();
   const { status, subscribe, workspaceId } = useSSE();
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -460,4 +460,22 @@ export default function ChatPage() {
       </AppShell>
     </RegistryProvider>
   );
+}
+
+function ClerkSetupNotice() {
+  return (
+    <AppShell sidebar={<ChatSidebar sessions={[]} activeSessionId={null} onCreate={() => undefined} onSelect={() => undefined} />}>
+      <section className="flex min-h-0 flex-1 items-center justify-center bg-white p-6">
+        <div className="max-w-md rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
+          <h1 className="text-base font-semibold text-amber-950">Sign-in is not configured</h1>
+          <p className="mt-2 text-sm leading-6 text-amber-900">Set <code>NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code> in the frontend environment and restart the app to connect chat sessions and provisioning runs.</p>
+        </div>
+      </section>
+    </AppShell>
+  );
+}
+
+export default function ChatPage() {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return <ClerkSetupNotice />;
+  return <AuthenticatedChatPage />;
 }

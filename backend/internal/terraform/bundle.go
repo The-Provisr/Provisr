@@ -85,7 +85,8 @@ func Bundle(m *manifest.Manifest) (Result, error) {
 }
 
 // ProviderConfig returns credential-free partial backend configuration.
-// BE-D08 supplies the controlled backend settings at init; no local state fallback.
+// statebackend.Manager.Prepare (BE-D08) supplies the controlled backend
+// settings at init; no local state fallback.
 // Multi-cloud resource templates remain subject to the reviewed catalog.
 func ProviderConfig(provider string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {

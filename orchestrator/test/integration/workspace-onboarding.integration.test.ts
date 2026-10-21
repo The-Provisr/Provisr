@@ -46,7 +46,7 @@ describe.skipIf(!process.env.ONBOARDING_DATABASE_URL)("workspace onboarding with
     const memberships = await http(app).get("/v1/workspaces").auth(token, { type: "bearer" }).expect(200);
     expect(memberships.body).toMatchObject([{ id: first.body.id, role: "admin" }]);
     const db = app.get(DbService);
-    const restarted = await new IdentityService(db).getOrCreateUser({ sub: token, email: undefined, sid: undefined,
+    const restarted = await new IdentityService(db, app.get(ClerkAuthService)).getOrCreateUser({ sub: token, email: undefined, sid: undefined,
       exp: Date.now() / 1000 + 3600, orgId: undefined, orgRole: undefined });
     expect(restarted.userId).toBe(before.body.id);
     const audit = await db.query("SELECT count(*)::int AS count FROM provisr_audit.audit_events WHERE workspace_id=$1 AND event_type='workspace_created'", [first.body.id]);

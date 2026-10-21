@@ -119,6 +119,14 @@ describe("WorkspaceBootstrapService", () => {
         [user.userId, null, user.email, null, null]);
     });
 
+    it("clears a stale stored email when Clerk has no verified primary", async () => {
+      const { service, query } = setup();
+      await service.ensure({ ...user, email: undefined }, { email: "victim@example.invalid" }, user.clerkId, "trace-1");
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE provisr_identity.users"),
+        [user.userId, null, "", null, null]);
+      expect(query.mock.calls.find(([sql]) => sql.includes("UPDATE provisr_identity.users"))?.[0]).toContain("email=$3");
+    });
+
     it("keeps a verified current selection without duplicating transition audit", async () => {
       const { service, query, append } = setup({ current: workspaceId });
       expect(await service.ensure(user, {}, user.clerkId, "trace-1")).toEqual({ id: user.userId, workspaceId });

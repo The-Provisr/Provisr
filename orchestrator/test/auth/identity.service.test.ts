@@ -18,8 +18,9 @@ const storedUser = {
   created_at: new Date("2026-10-01T00:00:00.000Z"),
 };
 
-function serviceWith(query: ReturnType<typeof vi.fn>) {
-  return new IdentityService({ query } as unknown as DbService);
+function serviceWith(query: ReturnType<typeof vi.fn>, profile: { email: string | undefined } = { email: claims.email }) {
+  return new IdentityService({ query } as unknown as DbService,
+    { getVerifiedEmail: vi.fn().mockResolvedValue(profile.email) } as unknown as ClerkAuthService);
 }
 
 describe("IdentityService", () => {
@@ -53,7 +54,7 @@ describe("IdentityService", () => {
 
   it("supports a verified identity without an email", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [{ ...storedUser, email: "" }] });
-    const user = await serviceWith(query).getOrCreateUser({ ...claims, email: undefined });
+    const user = await serviceWith(query, { email: undefined }).getOrCreateUser({ ...claims, email: undefined });
     expect(query).toHaveBeenCalledWith(expect.any(String), [claims.sub, ""]);
     expect(user.email).toBeUndefined();
   });
@@ -64,8 +65,10 @@ describe("IdentityService", () => {
     const identity = new IdentityService({ query } as unknown as DbService, { getVerifiedEmail } as unknown as ClerkAuthService);
     expect((await identity.getOrCreateUser(claims)).email).toBe("verified@example.invalid");
     expect(query).toHaveBeenCalledWith(expect.any(String), [claims.sub, "verified@example.invalid"]);
+    expect(query.mock.calls[0]![0]).toContain("DO UPDATE SET email=EXCLUDED.email");
     getVerifiedEmail.mockResolvedValue(undefined);
     expect((await identity.getOrCreateUser(claims)).email).toBeUndefined();
+    expect(query).toHaveBeenLastCalledWith(expect.any(String), [claims.sub, ""]);
   });
 
   it("resolves live Provisr memberships instead of Clerk organization claims", async () => {

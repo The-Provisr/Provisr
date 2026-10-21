@@ -20,13 +20,13 @@ interface WorkspaceContext {
 /** Persist verified Clerk subjects and resolve live Provisr memberships. */
 @Injectable()
 export class IdentityService {
-  constructor(private readonly db: DbService, private readonly clerk?: ClerkAuthService) {}
+  constructor(private readonly db: DbService, private readonly clerk: ClerkAuthService) {}
 
   async getOrCreateUser(claims: ClerkSessionClaims, _correlationId?: string): Promise<ProvisionedUser> {
-    const email = this.clerk ? await this.clerk.getVerifiedEmail(claims.sub, _correlationId) : claims.email;
+    const email = await this.clerk.getVerifiedEmail(claims.sub, _correlationId);
     const result = await this.db.query<{ id: string; clerk_id: string; email: string; created_at: Date }>(
       `INSERT INTO provisr_identity.users (clerk_id,name,email)
-       VALUES ($1,'',$2) ON CONFLICT (clerk_id) DO UPDATE SET clerk_id=EXCLUDED.clerk_id
+       VALUES ($1,'',$2) ON CONFLICT (clerk_id) DO UPDATE SET email=EXCLUDED.email
        RETURNING id,clerk_id,email,created_at`, [claims.sub, email ?? ""],
     );
     const row = result.rows[0]!;

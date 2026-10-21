@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/image", () => ({
@@ -176,12 +176,13 @@ describe("WorkspaceOnboardingWizard", () => {
     });
   });
 
-  it("maps a slug conflict back to a name error on step 1", async () => {
-    mockFetch(async () => ({
-      ok: false,
-      status: 409,
-      json: async () => ({ code: "slug_taken", error: "slug taken" }),
-    }));
+  it("unlocks editing and uses a fresh key after a definitive slug conflict", async () => {
+    let attempts = 0;
+    const fetchMock = mockFetch(async () => ++attempts === 1 ? {
+      ok: false, status: 409, json: async () => ({ code: "slug_taken", error: "slug taken" }),
+    } : {
+      ok: true, status: 201, json: async () => ({ workspaceId: "ws_retry" }),
+    });
 
     render(<WorkspaceOnboardingWizard />);
     fillName("Acme Platform");
@@ -193,6 +194,110 @@ describe("WorkspaceOnboardingWizard", () => {
       expect(screen.getByTestId("workspace-name-error")).toHaveTextContent("already taken"),
     );
     expect(screen.getByTestId("wizard-step-1")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-name-input")).not.toBeDisabled();
+    expect(screen.queryByTestId("wizard-recovery-notice")).not.toBeInTheDocument();
+
+    fillName("Different Platform");
+    clickNext();
+    clickNext();
+    clickNext();
+    await waitFor(() => expect(screen.getByTestId("handoff")).toBeInTheDocument());
+    const first = fetchMock.mock.calls[0]![1];
+    const retry = fetchMock.mock.calls[1]![1];
+    expect(JSON.parse(String(retry.body)).name).toBe("Different Platform");
+    expect(retry.headers).not.toEqual(first.headers);
+  });
+
+  it.each([
+    { status: 502, code: undefined },
+    { status: 409, code: "duplicate_idempotency_key" },
+    { status: 0, code: "network" },
+  ])("retains the submitted choices and key after an uncertain result: %j", async ({ status, code }) => {
+    let attempts = 0;
+    const fetchMock = mockFetch(async () => {
+      if (++attempts === 1) {
+        if (status === 0) throw new Error("connection lost");
+        return { ok: false, status, json: async () => ({ code }) };
+      }
+      return { ok: true, status: 201, json: async () => ({ workspaceId: "ws_recovered" }) };
+    });
+
+    render(<WorkspaceOnboardingWizard />);
+    fillName("Acme Platform");
+    fireEvent.change(screen.getByTestId("workspace-description-input"), { target: { value: "Team home" } });
+    fireEvent.click(screen.getByRole("button", { name: "🚀" }));
+    clickNext();
+    fireEvent.click(screen.getByTestId("environment-card-production"));
+    clickNext();
+    fireEvent.click(screen.getByTestId("provider-card-aws"));
+    clickNext();
+
+    await waitFor(() => expect(screen.getByTestId("wizard-error-banner")).toBeInTheDocument());
+    expect(screen.getByTestId("wizard-recovery-notice")).toHaveTextContent("retry to finish using the same choices");
+    expect(screen.getByTestId("wizard-back")).toBeDisabled();
+    expect(screen.getByTestId("provider-card-aws")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("wizard-back"));
+    fireEvent.click(screen.getByTestId("provider-card-aws"));
+    fireEvent.click(screen.getByTestId("provider-card-gcp"));
+    expect(screen.getByTestId("wizard-step-3")).toBeInTheDocument();
+    expect(screen.getByTestId("provider-card-aws")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("provider-card-gcp")).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByTestId("wizard-skip"));
+    await waitFor(() => expect(screen.getByTestId("handoff")).toBeInTheDocument());
+    const first = fetchMock.mock.calls[0]![1];
+    const retry = fetchMock.mock.calls[1]![1];
+    expect(retry.body).toBe(first.body);
+    expect(retry.headers).toEqual(first.headers);
+    expect(JSON.parse(String(retry.body))).toEqual({
+      name: "Acme Platform", description: "Team home", environment: "production", providers: ["aws"], avatar: "🚀",
+    });
+    expect(screen.getByTestId("handoff")).toHaveAttribute("data-expected-workspace", "ws_recovered");
+  });
+
+  it("locks choices and prevents concurrent submissions while a request is in flight", async () => {
+    let resolveResponse!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { resolveResponse = resolve; });
+    const fetchMock = mockFetch(async () => pending);
+    render(<WorkspaceOnboardingWizard />);
+    fillName("Acme Platform");
+    clickNext();
+    fireEvent.click(screen.getByTestId("wizard-skip"));
+
+    expect(screen.getByTestId("environment-card-production")).toBeDisabled();
+    expect(screen.getByTestId("wizard-back")).toBeDisabled();
+    expect(screen.getByTestId("wizard-next")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("environment-card-production"));
+    fireEvent.click(screen.getByTestId("wizard-skip"));
+    clickNext();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("environment-card-development")).toHaveAttribute("aria-checked", "true");
+
+    await act(async () => resolveResponse({ ok: false, status: 502, json: async () => ({}) }));
+    expect(screen.getByTestId("wizard-next")).not.toBeDisabled();
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ workspaceId: "ws_retry" }) });
+    clickNext();
+    await waitFor(() => expect(screen.getByTestId("handoff")).toBeInTheDocument());
+    expect(fetchMock.mock.calls[1]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
+    expect(fetchMock.mock.calls[1]![1].headers).toEqual(fetchMock.mock.calls[0]![1].headers);
+  });
+
+  it("does not discard an unknown creation outcome after a later validation error", async () => {
+    let attempts = 0;
+    const fetchMock = mockFetch(async () => ++attempts < 3 ? {
+      ok: false, status: attempts === 1 ? 502 : 400, json: async () => ({}),
+    } : { ok: true, status: 201, json: async () => ({ workspaceId: "ws_recovered" }) });
+    render(<WorkspaceOnboardingWizard />);
+    fillName("Acme Platform"); clickNext(); clickNext(); clickNext();
+    await waitFor(() => expect(screen.getByTestId("wizard-error-banner")).toBeInTheDocument());
+    clickNext();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId("wizard-next")).not.toBeDisabled());
+    expect(screen.getByTestId("wizard-back")).toBeDisabled();
+    clickNext();
+    await waitFor(() => expect(screen.getByTestId("handoff")).toBeInTheDocument());
+    expect(fetchMock.mock.calls[2]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
+    expect(fetchMock.mock.calls[2]![1].headers).toEqual(fetchMock.mock.calls[0]![1].headers);
   });
 
   it("shows a retryable error banner when the server fails", async () => {

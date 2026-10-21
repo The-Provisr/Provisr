@@ -243,7 +243,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	slug := generateSlug(req.Name)
 
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
@@ -253,14 +253,14 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Serialize retries before checking the key so a lost response can recover
 	// the same workspace without duplicating its membership or audit event.
-	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('workspace-create'),hashtext($1))`, key); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('workspace-create'),hashtext($1))`, key); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
 		return
 	}
 	var replay workspace
 	var creator sql.NullString
 	var replaySettings []byte
-	err = tx.QueryRow(`SELECT w.id,w.name,w.slug,w.environment,w.description,w.created_at,w.updated_at,m.user_id,w.settings
+	err = tx.QueryRowContext(r.Context(), `SELECT w.id,w.name,w.slug,w.environment,w.description,w.created_at,w.updated_at,m.user_id,w.settings
 	 FROM provisr_identity.workspaces w
 	 LEFT JOIN provisr_identity.memberships m ON m.workspace_id=w.id AND m.user_id=$2 AND m.invited_by=$2 AND m.role='admin'
 	 WHERE w.idempotency_key=$1 AND w.deleted_at IS NULL`, key, req.CreatorID).
@@ -286,7 +286,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var exists bool
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(r.Context(),
 		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE slug = $1 AND deleted_at IS NULL)",
 		slug,
 	).Scan(&exists)
@@ -301,7 +301,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ws workspace
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(r.Context(),
 		`INSERT INTO provisr_identity.workspaces (name, slug, environment, description, settings, idempotency_key)
 		 VALUES ($1, $2, $3, $4, $6::jsonb, $5)
 		 RETURNING id, name, slug, environment, description, created_at, updated_at`,
@@ -318,7 +318,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.Exec(
+	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO provisr_identity.memberships (user_id, workspace_id, role, invited_by)
 		 VALUES ($1, $2, 'admin', $1)`,
 		req.CreatorID, ws.ID,

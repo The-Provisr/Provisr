@@ -1,26 +1,22 @@
 import "server-only";
-
 import { isWorkspaceRole } from "@/components/layout/permissions";
-import type {
-  WorkspaceEnvironment,
-  WorkspaceMembership,
-  WorkspaceRecord,
-} from "./workspace-types";
+import type { WorkspaceEnvironment, WorkspaceMembership, WorkspaceRecord } from "./workspace-types";
+export type { WorkspaceEnvironment, WorkspaceMembership, WorkspaceRecord } from "./workspace-types";
 
-export type {
-  WorkspaceEnvironment,
-  WorkspaceMembership,
-  WorkspaceRecord,
-} from "./workspace-types";
 
 export type CreateWorkspaceInput = {
   name: string;
   description?: string;
+  avatar?: string;
+  providers?: string[];
   environment: WorkspaceEnvironment;
 };
 
+
 export type WorkspaceCreateErrorCode =
   | "slug_taken"
+  | "duplicate_idempotency_key"
+  | "conflict"
   | "validation_error"
   | "unauthorized"
   | "forbidden"
@@ -30,8 +26,8 @@ const CREATE_WORKSPACE_TIMEOUT_MS = 5000;
 
 /**
  * Error surfaced when the orchestrator rejects a workspace creation. Carries the
- * upstream HTTP status so callers can map it (e.g. 409 → "name is taken")
- * without re-parsing the response envelope.
+ * upstream status and specific error code so callers can distinguish name
+ * collisions from other conflicts without re-parsing the response envelope.
  */
 export class WorkspaceCreateError extends Error {
   readonly code: WorkspaceCreateErrorCode;
@@ -45,10 +41,17 @@ export class WorkspaceCreateError extends Error {
   }
 }
 
-function codeForStatus(status: number): WorkspaceCreateErrorCode {
+function codeForStatus(
+  status: number,
+  body: Record<string, unknown> | null,
+): WorkspaceCreateErrorCode {
   switch (status) {
-    case 409:
-      return "slug_taken";
+    case 409: {
+      const code = typeof body?.code === "string" ? body.code : body?.error;
+      return code === "slug_taken" || code === "duplicate_idempotency_key"
+        ? code
+        : "conflict";
+    }
     case 400:
       return "validation_error";
     case 401:
@@ -113,7 +116,7 @@ export async function createWorkspace(
       typeof body?.message === "string"
         ? body.message
         : `createWorkspace failed: ${res.status}`;
-    throw new WorkspaceCreateError(res.status, codeForStatus(res.status), message);
+    throw new WorkspaceCreateError(res.status, codeForStatus(res.status, body), message);
   }
 
   return (await res.json()) as WorkspaceRecord;

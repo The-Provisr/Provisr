@@ -85,8 +85,11 @@ export function WorkspaceOnboardingWizard() {
   const [nameError, setNameError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [payloadLocked, setPayloadLocked] = useState(false);
   const [createdWorkspaceId, setCreatedWorkspaceId] = useState<string | null>(null);
   const idempotencyKey = useRef<string>(createIdempotencyKey());
+  const submittedPayload = useRef<string | null>(null);
+  const submitInFlight = useRef(false);
 
   const trimmedName = name.trim();
   const slug = deriveSlug(name);
@@ -109,6 +112,7 @@ export function WorkspaceOnboardingWizard() {
   }
 
   function toggleProvider(provider: Provider) {
+    if (submittedPayload.current !== null) return;
     setSelectedProviders((current) =>
       current.includes(provider)
         ? current.filter((item) => item !== provider)
@@ -117,11 +121,22 @@ export function WorkspaceOnboardingWizard() {
   }
 
   async function submit() {
-    if (!validateName()) {
+    if (submitInFlight.current) return;
+    if (submittedPayload.current === null && !validateName()) {
       setStepIndex(0);
       return;
     }
 
+    const retryingUnknownOutcome = submittedPayload.current !== null;
+    submitInFlight.current = true;
+    submittedPayload.current ??= JSON.stringify({
+      name: trimmedName,
+      ...(description.trim() ? { description: description.trim() } : {}),
+      environment,
+      providers: selectedProviders,
+      ...(avatar ? { avatar } : {}),
+    });
+    setPayloadLocked(true);
     setSubmitting(true);
     setSubmitError(null);
 
@@ -132,12 +147,7 @@ export function WorkspaceOnboardingWizard() {
           "Content-Type": "application/json",
           "Idempotency-Key": idempotencyKey.current,
         },
-        body: JSON.stringify({
-          name: trimmedName,
-          ...(description.trim() ? { description: description.trim() } : {}),
-          environment,
-          providers: selectedProviders,
-        }),
+        body: submittedPayload.current,
       });
 
       const body = (await res.json().catch(() => null)) as
@@ -145,33 +155,43 @@ export function WorkspaceOnboardingWizard() {
         | null;
 
       if (!res.ok) {
-        if (res.status === 409 || body?.code === "slug_taken") {
+        const definitiveFailure = body?.code !== "duplicate_idempotency_key" &&
+          ([400, 401, 403, 422].includes(res.status) || body?.code === "slug_taken");
+        if (definitiveFailure && !retryingUnknownOutcome) {
+          submittedPayload.current = null;
+          setPayloadLocked(false);
+          idempotencyKey.current = createIdempotencyKey();
+        }
+        if (body?.code === "slug_taken" && !retryingUnknownOutcome) {
           setNameError("That workspace name is already taken. Try a different one.");
           setStepIndex(0);
-          setSubmitting(false);
           return;
         }
         setSubmitError(
-          "We couldn't create your workspace. Please try again in a moment.",
+          "We couldn't finish workspace setup. Please try again in a moment.",
         );
-        setSubmitting(false);
         return;
       }
 
       if (!body?.workspaceId) {
-        setSubmitError("We couldn't create your workspace. Please try again.");
-        setSubmitting(false);
+        setSubmitError("We couldn't finish workspace setup. Please try again.");
         return;
       }
 
       setCreatedWorkspaceId(body.workspaceId);
     } catch {
       setSubmitError("We couldn't reach Provisr. Check your connection and try again.");
+    } finally {
+      submitInFlight.current = false;
       setSubmitting(false);
     }
   }
 
   function goNext() {
+    if (submittedPayload.current !== null) {
+      void submit();
+      return;
+    }
     if (stepIndex === 0 && !validateName()) {
       return;
     }
@@ -184,6 +204,7 @@ export function WorkspaceOnboardingWizard() {
   }
 
   function goBack() {
+    if (submittedPayload.current !== null) return;
     setSubmitError(null);
     setStepIndex((index) => Math.max(index - 1, 0));
   }
@@ -246,6 +267,12 @@ export function WorkspaceOnboardingWizard() {
         </ol>
 
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          {payloadLocked ? (
+            <p className="mb-3 text-xs text-gray-700" data-testid="wizard-recovery-notice" role="status">
+              Your choices are locked while Provisr confirms this workspace. If setup is interrupted,
+              retry to finish using the same choices.
+            </p>
+          ) : null}
           {submitError ? (
             <div
               className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-900"
@@ -273,7 +300,10 @@ export function WorkspaceOnboardingWizard() {
                             : "flex size-8 items-center justify-center rounded-full border border-gray-200 text-sm"
                         }
                         key={option}
-                        onClick={() => setAvatar(avatar === option ? null : option)}
+                        disabled={payloadLocked}
+                        onClick={() => {
+                          if (submittedPayload.current === null) setAvatar(avatar === option ? null : option);
+                        }}
                         type="button"
                       >
                         {option}
@@ -289,9 +319,11 @@ export function WorkspaceOnboardingWizard() {
                     autoComplete="organization"
                     className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
                     data-testid="workspace-name-input"
+                    disabled={payloadLocked}
                     maxLength={NAME_MAX + 8}
                     onBlur={validateName}
                     onChange={(event) => {
+                      if (submittedPayload.current !== null) return;
                       setName(event.target.value);
                       if (nameError) setNameError(null);
                     }}
@@ -316,8 +348,11 @@ export function WorkspaceOnboardingWizard() {
                   <textarea
                     className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
                     data-testid="workspace-description-input"
+                    disabled={payloadLocked}
                     maxLength={500}
-                    onChange={(event) => setDescription(event.target.value)}
+                    onChange={(event) => {
+                      if (submittedPayload.current === null) setDescription(event.target.value);
+                    }}
                     placeholder="What will this workspace be used for?"
                     rows={2}
                     value={description}
@@ -339,8 +374,11 @@ export function WorkspaceOnboardingWizard() {
                           : "flex w-full items-start gap-3 rounded-lg border border-gray-200 p-3 text-left"
                       }
                       data-testid={`environment-card-${option.id}`}
+                      disabled={payloadLocked}
                       key={option.id}
-                      onClick={() => setEnvironment(option.id)}
+                      onClick={() => {
+                        if (submittedPayload.current === null) setEnvironment(option.id);
+                      }}
                       role="radio"
                       type="button"
                     >
@@ -368,6 +406,7 @@ export function WorkspaceOnboardingWizard() {
                           : "flex w-full items-center gap-3 rounded-lg border border-gray-200 p-3 text-left"
                       }
                       data-testid={`provider-card-${option.id}`}
+                      disabled={payloadLocked}
                       key={option.id}
                       onClick={() => toggleProvider(option.id)}
                       type="button"
@@ -391,7 +430,7 @@ export function WorkspaceOnboardingWizard() {
               <button
                 className="rounded-full border border-gray-200 px-4 py-2 text-xs font-medium text-gray-700"
                 data-testid="wizard-back"
-                disabled={submitting}
+                disabled={submitting || payloadLocked}
                 onClick={goBack}
                 type="button"
               >

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 import { WorkspaceOnboardingWizard } from "@/components/onboarding/workspace-onboarding-wizard";
 
 export const metadata: Metadata = {
@@ -8,5 +9,8 @@ export const metadata: Metadata = {
 };
 
 export default function OnboardingPage() {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || !process.env.CLERK_SECRET_KEY) {
+    return <OnboardingFlow clerkEnabled={false} />;
+  }
   return <WorkspaceOnboardingWizard />;
 }

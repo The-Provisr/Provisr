@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-"github.com/google/uuid"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/provisr/backend/pkg/health"
 	"github.com/provisr/backend/pkg/middleware"
@@ -39,10 +39,12 @@ type member struct {
 }
 
 type createRequest struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description,omitempty"`
-	Environment string  `json:"environment"`
-	CreatorID   string  `json:"creator_id"`
+	Name        string   `json:"name"`
+	Description *string  `json:"description,omitempty"`
+	Environment string   `json:"environment"`
+	CreatorID   string   `json:"creator_id"`
+	Avatar      string   `json:"avatar,omitempty"`
+	Providers   []string `json:"providers,omitempty"`
 }
 
 type updateRequest struct {
@@ -139,7 +141,7 @@ func main() {
 	mux := s.routes()
 	mux.Handle("/health/", health.Handler())
 
-srv := &http.Server{
+	srv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      middleware.RequestLogger(logger, middleware.Recover(logger, mux)),
 		ReadTimeout:  10 * time.Second,
@@ -209,16 +211,39 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", "creator_id is required")
 		return
 	}
+	if !map[string]bool{"": true, "🚀": true, "🏗️": true, "☁️": true, "⚡": true, "🔒": true, "🧭": true}[req.Avatar] {
+		writeError(w, http.StatusBadRequest, "validation_error", "unsupported workspace avatar")
+		return
+	}
+	seenProviders := map[string]bool{}
+	for _, provider := range req.Providers {
+		if (provider != "aws" && provider != "azure" && provider != "gcp") || seenProviders[provider] {
+			writeError(w, http.StatusBadRequest, "validation_error", "invalid workspace providers")
+			return
+		}
+		seenProviders[provider] = true
+	}
+	// Fixed provider order makes retry payloads independent of selection order.
+	providers := []string{}
+	for _, provider := range []string{"aws", "azure", "gcp"} {
+		if seenProviders[provider] {
+			providers = append(providers, provider)
+		}
+	}
+	settings, _ := json.Marshal(struct {
+		Avatar    string   `json:"avatar,omitempty"`
+		Providers []string `json:"providers"`
+	}{req.Avatar, providers})
 
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" {
+	if key == "" || len(key) > 128 {
 		writeError(w, http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required for mutations")
 		return
 	}
 
 	slug := generateSlug(req.Name)
 
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		s.reqLog(r).Error().Err(err).Msg("failed to begin transaction")
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
@@ -226,8 +251,42 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	// Serialize retries before checking the key so a lost response can recover
+	// the same workspace without duplicating its membership or audit event.
+	if _, err := tx.ExecContext(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('workspace-create'),hashtext($1))`, key); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create workspace")
+		return
+	}
+	var replay workspace
+	var creator sql.NullString
+	var replaySettings []byte
+	err = tx.QueryRowContext(r.Context(), `SELECT w.id,w.name,w.slug,w.environment,w.description,w.created_at,w.updated_at,m.user_id,w.settings
+	 FROM provisr_identity.workspaces w
+	 LEFT JOIN provisr_identity.memberships m ON m.workspace_id=w.id AND m.user_id=$2 AND m.invited_by=$2 AND m.role='admin'
+	 WHERE w.idempotency_key=$1 AND w.deleted_at IS NULL`, key, req.CreatorID).
+		Scan(&replay.ID, &replay.Name, &replay.Slug, &replay.Environment, &replay.Description, &replay.CreatedAt, &replay.UpdatedAt, &creator, &replaySettings)
+	if err == nil {
+		var stored, wanted any
+		_ = json.Unmarshal(replaySettings, &stored)
+		_ = json.Unmarshal(settings, &wanted)
+		storedJSON, _ := json.Marshal(stored)
+		wantedJSON, _ := json.Marshal(wanted)
+		sameDescription := (replay.Description == nil && req.Description == nil) ||
+			(replay.Description != nil && req.Description != nil && *replay.Description == *req.Description)
+		if creator.String != req.CreatorID || replay.Name != req.Name || replay.Environment != req.Environment || !sameDescription || string(storedJSON) != string(wantedJSON) {
+			writeError(w, http.StatusConflict, "duplicate_idempotency_key", "Idempotency-Key was already used for another request")
+			return
+		}
+		writeJSON(w, http.StatusCreated, replay)
+		return
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to recover workspace")
+		return
+	}
+
 	var exists bool
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(r.Context(),
 		"SELECT EXISTS(SELECT 1 FROM provisr_identity.workspaces WHERE slug = $1 AND deleted_at IS NULL)",
 		slug,
 	).Scan(&exists)
@@ -242,11 +301,11 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ws workspace
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(r.Context(),
 		`INSERT INTO provisr_identity.workspaces (name, slug, environment, description, settings, idempotency_key)
-		 VALUES ($1, $2, $3, $4, '{}', $5)
+		 VALUES ($1, $2, $3, $4, $6::jsonb, $5)
 		 RETURNING id, name, slug, environment, description, created_at, updated_at`,
-		req.Name, slug, req.Environment, req.Description, key,
+		req.Name, slug, req.Environment, req.Description, key, string(settings),
 	).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Environment, &ws.Description, &ws.CreatedAt, &ws.UpdatedAt)
 	if err != nil {
 		var pqErr *pq.Error
@@ -259,7 +318,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.Exec(
+	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO provisr_identity.memberships (user_id, workspace_id, role, invited_by)
 		 VALUES ($1, $2, 'admin', $1)`,
 		req.CreatorID, ws.ID,

@@ -54,6 +54,13 @@ describe("dev orchestration POST /v1/workspaces", () => {
     expect(res.status).toBe(401);
   });
 
+  it.each([undefined, null, "", " ", 42])("rejects verified claims without a valid subject: %j", async (sub) => {
+    vi.mocked(verifyToken).mockResolvedValue({ sub } as never);
+    const request = makeRequest({ name: UNIQUE(), environment: "development" });
+    expect((await POST(request)).status).toBe(401);
+    expect((await GET(new Request(request.url, { headers: request.headers }))).status).toBe(401);
+  });
+
   it("requires an Idempotency-Key", async () => {
     const res = await POST(
       makeRequest({ name: UNIQUE(), environment: "development" }, { "Idempotency-Key": "" }),
@@ -85,7 +92,50 @@ describe("dev orchestration POST /v1/workspaces", () => {
 
     const firstRecord = await first.json();
     const secondRecord = await second.json();
-    expect(secondRecord.id).toBe(firstRecord.id);
+    expect(second.status).toBe(201);
+    expect(secondRecord).toEqual(firstRecord);
+    expect(Object.keys(secondRecord).sort()).toEqual([
+      "created_at", "description", "environment", "id", "name", "slug", "updated_at",
+    ]);
+  });
+
+  it.each([
+    { field: "name", value: UNIQUE() },
+    { field: "environment", value: "production" },
+    { field: "description", value: "Different description" },
+  ])("rejects a changed $field for the same subject and idempotency key", async ({ field, value }) => {
+    const key = UNIQUE();
+    const payload = { name: UNIQUE(), environment: "development", description: "Team home" };
+    await POST(makeRequest(payload, { "Idempotency-Key": key }));
+    const res = await POST(makeRequest({ ...payload, [field]: value }, { "Idempotency-Key": key }));
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: "duplicate_idempotency_key", message: "Idempotency-Key was already used for another request", status: 409,
+    });
+  });
+
+  it("scopes replay keys to the verified subject without exposing another user's workspace", async () => {
+    const key = UNIQUE();
+    const first = await POST(makeRequest({ name: UNIQUE(), environment: "development" }, { "Idempotency-Key": key }));
+    const firstRecord = await first.json();
+
+    vi.mocked(verifyToken).mockResolvedValue({ sub: "other_replay_user" } as never);
+    const foreignReplay = await POST(makeRequest(
+      { name: firstRecord.name, environment: "development" },
+      { "Idempotency-Key": key },
+    ));
+    expect(foreignReplay.status).toBe(409);
+    await expect(foreignReplay.json()).resolves.toMatchObject({ error: "slug_taken" });
+
+    const otherPayload = { name: UNIQUE(), environment: "staging" };
+    const other = await POST(makeRequest(otherPayload, { "Idempotency-Key": key }));
+    const otherRecord = await other.json();
+    expect(other.status).toBe(201);
+    expect(otherRecord.id).not.toBe(firstRecord.id);
+    expect(otherRecord).toMatchObject(otherPayload);
+
+    const replay = await POST(makeRequest(otherPayload, { "Idempotency-Key": key }));
+    await expect(replay.json()).resolves.toEqual(otherRecord);
   });
 
   it("returns 409 when a workspace with the same base slug already exists", async () => {
@@ -159,5 +209,24 @@ describe("dev orchestration GET /v1/workspaces", () => {
     expect(list).toContainEqual(
       expect.objectContaining({ id: record.id, name, slug: record.slug, role: "admin" }),
     );
+  });
+
+  it("lists only the verified caller's workspaces without internal ownership or replay fields", async () => {
+    const firstUser = UNIQUE();
+    const secondUser = UNIQUE();
+    vi.mocked(verifyToken).mockResolvedValue({ sub: firstUser } as never);
+    const owned = await (await POST(makeRequest({ name: UNIQUE(), environment: "development" }))).json();
+
+    vi.mocked(verifyToken).mockResolvedValue({ sub: secondUser } as never);
+    const other = await (await POST(makeRequest({ name: UNIQUE(), environment: "staging" }))).json();
+    const secondList = await (await GET(getRequest())).json();
+    expect(secondList).toEqual([{ ...other, role: "admin" }]);
+
+    vi.mocked(verifyToken).mockResolvedValue({ sub: firstUser } as never);
+    const firstList = await (await GET(getRequest())).json();
+    expect(firstList).toEqual([{ ...owned, role: "admin" }]);
+    expect(Object.keys(firstList[0]).sort()).toEqual([
+      "created_at", "description", "environment", "id", "name", "role", "slug", "updated_at",
+    ]);
   });
 });

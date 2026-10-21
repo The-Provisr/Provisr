@@ -8,12 +8,7 @@ type Theme = "dark" | "light";
 
 const STORAGE_KEY = "provisr-theme";
 
-/**
- * FE-M03 theme toggle. Provisr ships dark-only (see `app/globals.css`); this
- * persists the user's preference and sets `data-theme` on <html> so a light
- * theme can be layered on later without changing this control. Until a light
- * palette lands it is a persisted, accessible preference — not a repaint.
- */
+/** Persists theme preference and selects the shared CSS palette. */
 export function ThemeToggle({ collapsed = false }: { collapsed?: boolean }) {
   const [theme, setTheme] = useState<Theme>("dark");
 

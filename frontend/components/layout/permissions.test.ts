@@ -47,9 +47,10 @@ describe("canAccessScreen", () => {
     expect(visibleScreens("viewer")).toEqual(["chat", "dashboard"]);
   });
 
-  it("fails open for an unknown role so the shell stays usable", () => {
-    expect(canAccessScreen(null, "billing")).toBe(true);
-    expect(canAccessScreen(undefined, "team")).toBe(true);
+  it("keeps restricted screens hidden for an unknown role", () => {
+    expect(canAccessScreen(null, "dashboard")).toBe(true);
+    expect(canAccessScreen(null, "billing")).toBe(false);
+    expect(canAccessScreen(undefined, "team")).toBe(false);
   });
 
   it("exposes all five BE-A03 roles", () => {

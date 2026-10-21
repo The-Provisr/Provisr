@@ -152,27 +152,10 @@ export function StatusBadge({ children, tone = "neutral" }: { children: ReactNod
   return <Badge className={classes[tone]}>{children}</Badge>;
 }
 
-export function WorkspaceSidebar({ active }: { active: string }) {
-  return (
-    <aside className="hidden w-[260px] shrink-0 flex-col border-r border-gray-100 bg-white p-4 lg:flex">
-      <nav className="space-y-1">
-        {workspaceNavItems.map((item) => (
-          <Link
-            className={cn(
-              "block rounded-lg px-3 py-2 text-sm font-medium",
-              active === item.label
-                ? "bg-slate-900 text-white"
-                : "text-gray-600 hover:bg-gray-50",
-            )}
-            href={item.href}
-            key={item.label}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
-    </aside>
-  );
+// Legacy callers keep this export while DashboardShell owns all workspace navigation.
+// Rendering another menu here would bypass its membership-aware filtering.
+export function WorkspaceSidebar(_props: { active: string }) {
+  return null;
 }
 
 export function MiniBarChart({ data }: BarChartProps) {

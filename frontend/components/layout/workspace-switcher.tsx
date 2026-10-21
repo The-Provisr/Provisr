@@ -35,6 +35,7 @@ type WorkspaceSwitcherProps = {
   workspaces: WorkspaceMembership[];
   activeWorkspaceId: string | null;
   collapsed?: boolean;
+  disabled?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (workspaceId: string) => void;
@@ -44,18 +45,20 @@ export function WorkspaceSwitcher({
   workspaces,
   activeWorkspaceId,
   collapsed = false,
+  disabled = false,
   open,
   onOpenChange,
   onSelect,
 }: WorkspaceSwitcherProps) {
   const active =
-    workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0] ?? null;
+    workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null;
 
   const activeName = active?.name ?? "No workspace";
 
   return (
     <div className="relative">
       <button
+        disabled={disabled}
         aria-expanded={open}
         aria-haspopup="menu"
         className={cn(
@@ -90,9 +93,9 @@ export function WorkspaceSwitcher({
         )}
       </button>
 
-      {open && !collapsed ? (
+      {open ? (
         <div
-          className="absolute left-0 right-0 z-20 mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-md"
+          className="absolute left-0 z-20 mt-1 w-60 max-h-80 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1 shadow-md"
           data-testid="workspace-switcher-menu"
           role="menu"
         >
@@ -110,6 +113,7 @@ export function WorkspaceSwitcher({
                     onSelect(workspace.id);
                     onOpenChange(false);
                   }}
+                  disabled={disabled}
                   role="menuitem"
                   type="button"
                 >

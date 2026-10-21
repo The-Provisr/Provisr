@@ -69,6 +69,12 @@ describe("GET /api/workspace/list", () => {
     });
   });
 
+  it("clears a claimed workspace absent from authenticated memberships", async () => {
+    mocks.listWorkspaces.mockResolvedValue([]);
+    const res = await GET();
+    await expect(res.json()).resolves.toMatchObject({ activeWorkspaceId: null, degraded: false });
+  });
+
   it("degrades when no token can be minted", async () => {
     mocks.authProtect.mockResolvedValue({
       userId: "user_1",

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   canAccessScreen,
   type WorkspaceRole,
@@ -36,11 +36,18 @@ type DashboardShellProps = {
 
 export function DashboardShell({ children, sidebar, clerkEnabled }: DashboardShellProps) {
   const pathname = usePathname() ?? "";
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceMembership[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+
+  const [listAttempt, setListAttempt] = useState(0);
+  const [listStatus, setListStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const [switching, setSwitching] = useState(false);
+  const switchingRef = useRef(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true") {
@@ -55,25 +62,60 @@ export function DashboardShell({ children, sidebar, clerkEnabled }: DashboardShe
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      setListStatus("loading");
       try {
         const res = await fetch("/api/workspace/list", { cache: "no-store" });
-        if (!res.ok) return;
+        if (!res.ok) throw new Error("Workspace listing failed");
         const body = (await res.json()) as {
           workspaces?: WorkspaceMembership[];
           activeWorkspaceId?: string | null;
+          degraded?: boolean;
         };
+        if (body.degraded || !Array.isArray(body.workspaces)) {
+          throw new Error("Workspace listing unavailable");
+        }
         if (cancelled) return;
         if (Array.isArray(body.workspaces)) setWorkspaces(body.workspaces);
         setActiveWorkspaceId(body.activeWorkspaceId ?? null);
+        setListStatus("ready");
       } catch {
-        // Degraded (orchestrator stub / offline): keep the permissive default.
+        if (cancelled) return;
+        setWorkspaces([]);
+        setActiveWorkspaceId(null);
+        setListStatus("failed");
       }
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [listAttempt]);
+
+  async function selectWorkspace(workspaceId: string) {
+    if (switchingRef.current || workspaceId === activeWorkspaceId) return;
+    if (!workspaces.some((workspace) => workspace.id === workspaceId)) return;
+    switchingRef.current = true;
+    setSwitching(true);
+    setSwitchError(null);
+    try {
+      const res = await fetch("/api/workspace/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error("Workspace selection failed");
+      const body = await res.json();
+      if (body.workspaceId !== workspaceId) throw new Error("Workspace selection mismatch");
+      // Existing handoff refreshes Clerk's token and verifies the saved claim
+      // before mounting fresh dashboard/page streams for the new workspace.
+      router.push("/post-auth");
+    } catch {
+      setSwitchError("Could not switch workspace. Please retry.");
+      switchingRef.current = false;
+      setSwitching(false);
+    }
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -157,10 +199,20 @@ export function DashboardShell({ children, sidebar, clerkEnabled }: DashboardShe
             activeWorkspaceId={activeWorkspaceId}
             collapsed={collapsed}
             onOpenChange={setSwitcherOpen}
-            onSelect={setActiveWorkspaceId}
+            onSelect={(workspaceId) => void selectWorkspace(workspaceId)}
+            disabled={switching}
             open={switcherOpen}
             workspaces={workspaces}
           />
+          {listStatus === "loading" ? <p role="status" className="text-xs text-gray-500">Loading workspaces…</p> : null}
+          {listStatus === "failed" ? (
+            <div role="alert" className="text-xs text-gray-500">
+              Workspaces unavailable.
+              <button type="button" onClick={() => setListAttempt((value) => value + 1)}>Retry</button>
+            </div>
+          ) : null}
+          {switching ? <p role="status" className="text-xs text-gray-500">Switching workspace…</p> : null}
+          {switchError ? <p role="alert" className="text-xs text-gray-500">{switchError}</p> : null}
         </div>
 
         <button

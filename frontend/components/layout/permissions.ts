@@ -62,16 +62,12 @@ export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
   return typeof value === "string" && (WORKSPACE_ROLES as readonly string[]).includes(value);
 }
 
-/**
- * Whether a role may see/reach a screen. An unknown role (`null`) is treated
- * permissively so the shell stays usable while workspace membership is still
- * loading or the listing call is degraded; the server remains the real gate.
- */
+/** Unknown membership exposes only the unrestricted dashboard until validated. */
 export function canAccessScreen(
   role: WorkspaceRole | null | undefined,
   screen: NavScreen,
 ): boolean {
-  if (!role) return true;
+  if (!role) return screen === "dashboard";
   if (role === "admin") return true;
   const allowed = SCREEN_ACCESS[screen];
   if (allowed === "all") return true;

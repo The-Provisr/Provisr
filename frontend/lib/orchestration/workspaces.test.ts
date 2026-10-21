@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { createWorkspace, WorkspaceCreateError } from "./workspaces";
+import { createWorkspace, listWorkspaces, WorkspaceCreateError } from "./workspaces";
 
 const originalFetch = global.fetch;
 
@@ -136,5 +136,85 @@ describe("createWorkspace", () => {
     await expect(
       createWorkspace("t", { name: "Acme", environment: "development" }, "idem"),
     ).rejects.toMatchObject({ code: "workspace_create_failed", status: 504 });
+  });
+});
+
+describe("listWorkspaces", () => {
+  beforeEach(() => {
+    process.env.ORCHESTRATION_API_URL = "http://orchestrator.test";
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("gets memberships with a bearer token and normalizes the role", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([
+        {
+          id: "ws_1",
+          name: "Acme Platform",
+          slug: "acme-platform",
+          environment: "production",
+          role: "admin",
+        },
+      ]),
+    );
+    global.fetch = fetchMock;
+
+    const result = await listWorkspaces("token-123");
+
+    expect(result).toEqual([
+      {
+        id: "ws_1",
+        name: "Acme Platform",
+        slug: "acme-platform",
+        environment: "production",
+        description: null,
+        created_at: undefined,
+        updated_at: undefined,
+        role: "admin",
+      },
+    ]);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://orchestrator.test/v1/workspaces");
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer token-123");
+  });
+
+  it("downgrades an unknown role to viewer instead of trusting it", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse([{ id: "ws_1", name: "Acme", slug: "acme", environment: "dev", role: "owner" }]),
+    );
+
+    const [workspace] = await listWorkspaces("token-123");
+    expect(workspace?.role).toBe("viewer");
+  });
+
+  it("downgrades a missing role to viewer", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse([{ id: "ws_1", name: "Acme", slug: "acme", environment: "dev" }]),
+    );
+
+    const [workspace] = await listWorkspaces("token-123");
+    expect(workspace?.role).toBe("viewer");
+  });
+
+  it("throws when the upstream status is not ok", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ code: "NOT_IMPLEMENTED" }, 501));
+
+    await expect(listWorkspaces("token-123")).rejects.toThrow("listWorkspaces failed: 501");
+  });
+
+  it("throws when the payload is not an array", async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ workspaces: [] }));
+
+    await expect(listWorkspaces("token-123")).rejects.toThrow(
+      "listWorkspaces returned an unexpected payload",
+    );
   });
 });

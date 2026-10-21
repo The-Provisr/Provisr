@@ -11,6 +11,7 @@
   --provisr-ink: #ffffff;
   --provisr-ink-muted: #999999;
   --provisr-primary: #ffffff;
+  --provisr-primary-hover: #e8e8e8;
   --provisr-on-primary: #050505;
   --provisr-accent-blue: #0099ff;
   --provisr-danger: #ef4444;
@@ -25,6 +26,24 @@
   --provisr-success-ink: #86efac;
   --provisr-success-surface: rgba(34, 197, 94, 0.12);
   --provisr-success-hairline: rgba(34, 197, 94, 0.32);
+}
+
+/* FE-M03: existing utility colors consume these shared palette variables. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --provisr-canvas: #f8fafc;
+  --provisr-surface-1: #ffffff;
+  --provisr-surface-2: #f1f5f9;
+  --provisr-hairline: rgba(15, 23, 42, 0.16);
+  --provisr-hairline-soft: rgba(15, 23, 42, 0.10);
+  --provisr-ink: #0f172a;
+  --provisr-ink-muted: #475569;
+  --provisr-primary: #0f172a;
+  --provisr-primary-hover: #334155;
+  --provisr-on-primary: #ffffff;
+  --provisr-danger-ink: #b91c1c;
+  --provisr-warning-ink: #92400e;
+  --provisr-success-ink: #166534;
 }
 
 * {
@@ -327,7 +346,7 @@ body {
   color: var(--provisr-on-primary);
   box-shadow: none;
 }
-.provisr-button-primary:hover { background: #e8e8e8; }
+.provisr-button-primary:hover { background: var(--provisr-primary-hover); }
 .provisr-button-secondary {
   background: var(--provisr-surface-1);
   border: 1px solid var(--provisr-hairline);

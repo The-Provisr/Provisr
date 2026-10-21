@@ -19,7 +19,11 @@ type WorkspaceRecord = {
 
 const ENVIRONMENTS = ["development", "staging", "production"];
 
-const workspaces = new Map<string, WorkspaceRecord & { baseSlug: string }>();
+const workspaces = new Map<string, {
+  record: WorkspaceRecord;
+  ownerId: string;
+  canonicalPayload: string;
+}>();
 const usedBaseSlugs = new Set<string>();
 const byIdempotencyKey = new Map<string, string>();
 
@@ -30,22 +34,47 @@ function slugify(name: string): string {
   return slug === "" ? "workspace" : slug;
 }
 
-export async function POST(req: Request) {
-  if (process.env.NODE_ENV === "production") {
-    return new Response(null, { status: 404 });
-  }
-
+async function authenticate(req: Request): Promise<Response | string> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
-    await verifyToken(authHeader.slice("Bearer ".length), {
+    const claims = await verifyToken(authHeader.slice("Bearer ".length), {
       secretKey: process.env.CLERK_SECRET_KEY,
     });
+    if (typeof claims.sub !== "string" || !claims.sub.trim()) {
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    }
+    return claims.sub;
   } catch {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
+}
+
+export async function GET(req: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return new Response(null, { status: 404 });
+  }
+
+  const subject = await authenticate(req);
+  if (typeof subject !== "string") return subject;
+
+  // Only workspaces created by this verified caller imply admin membership.
+  const list = Array.from(workspaces.values())
+    .filter((workspace) => workspace.ownerId === subject)
+    .map(({ record }) => ({ ...record, role: "admin" }));
+
+  return Response.json(list, { status: 200 });
+}
+
+export async function POST(req: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return new Response(null, { status: 404 });
+  }
+
+  const subject = await authenticate(req);
+  if (typeof subject !== "string") return subject;
 
   const idempotencyKey = req.headers.get("Idempotency-Key")?.trim();
   if (!idempotencyKey) {
@@ -53,11 +82,6 @@ export async function POST(req: Request) {
       { error: "idempotency_key_required", message: "Idempotency-Key header is required for mutations", status: 400 },
       { status: 400 },
     );
-  }
-
-  const replayId = byIdempotencyKey.get(idempotencyKey);
-  if (replayId) {
-    return Response.json(workspaces.get(replayId), { status: 201 });
   }
 
   let body: unknown;
@@ -95,6 +119,20 @@ export async function POST(req: Request) {
     );
   }
 
+  const canonicalPayload = JSON.stringify({ name, environment, description: description ?? null });
+  const scopedKey = JSON.stringify([subject, idempotencyKey]);
+  const replayId = byIdempotencyKey.get(scopedKey);
+  const replay = replayId ? workspaces.get(replayId) : undefined;
+  if (replay) {
+    if (replay.canonicalPayload !== canonicalPayload) {
+      return Response.json(
+        { error: "duplicate_idempotency_key", message: "Idempotency-Key was already used for another request", status: 409 },
+        { status: 409 },
+      );
+    }
+    return Response.json(replay.record, { status: 201 });
+  }
+
   const baseSlug = slugify(name);
   if (usedBaseSlugs.has(baseSlug)) {
     return Response.json(
@@ -114,9 +152,9 @@ export async function POST(req: Request) {
     updated_at: now,
   };
 
-  workspaces.set(record.id, { ...record, baseSlug });
+  workspaces.set(record.id, { record, ownerId: subject, canonicalPayload });
   usedBaseSlugs.add(baseSlug);
-  byIdempotencyKey.set(idempotencyKey, record.id);
+  byIdempotencyKey.set(scopedKey, record.id);
 
   return Response.json(record, { status: 201 });
 }

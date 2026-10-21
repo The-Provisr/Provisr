@@ -77,8 +77,8 @@ import { PlanningClients, loadPlanningConfig } from "./services/planning-clients
     },
     {
       provide: IdentityService,
-      useFactory: (db: DbService) => new IdentityService(db),
-      inject: [DbService],
+      useFactory: (db: DbService, clerk: ClerkAuthService) => new IdentityService(db, clerk),
+      inject: [DbService, ClerkAuthService],
     },
     {
       provide: ChatEventsService,

@@ -103,13 +103,20 @@ describe("WorkspaceBootstrapService", () => {
       const { service, query, client, append } = setup({ current: oldWorkspaceId });
       expect(await service.ensure(user, { workspaceId, name: "Ada" }, user.clerkId, "trace-1")).toEqual({ id: user.userId, workspaceId });
       expect(query).toHaveBeenCalledWith(expect.stringContaining("m.user_id=$1 AND m.workspace_id=$2"), [user.userId, workspaceId]);
-      expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE provisr_identity.users"), [user.userId, "Ada", null, null, workspaceId]);
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE provisr_identity.users"), [user.userId, "Ada", user.email, null, workspaceId]);
       expect(append).toHaveBeenCalledWith(expect.objectContaining({
         workspaceId, actorId: user.userId, correlationId: "trace-1",
         payload: { action: "active_workspace_selected", workspace_id: workspaceId },
       }), client);
       expect(query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
       expect(client.release).toHaveBeenCalledOnce();
+    });
+
+    it("ignores a caller-supplied email and retains the authenticated identity email", async () => {
+      const { service, query } = setup();
+      await service.ensure(user, { email: "victim@example.invalid" }, user.clerkId, "trace-1");
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE provisr_identity.users"),
+        [user.userId, null, user.email, null, null]);
     });
 
     it("keeps a verified current selection without duplicating transition audit", async () => {
@@ -144,7 +151,7 @@ describe("WorkspaceBootstrapService", () => {
     it("clears a stale current workspace when membership was revoked", async () => {
       const { service, query, client, append } = setup({ current: oldWorkspaceId, membership: false });
       expect(await service.ensure(user, {}, user.clerkId, "trace-1")).toEqual({ id: user.userId, workspaceId: null });
-      expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE provisr_identity.users"), [user.userId, null, null, null, null]);
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE provisr_identity.users"), [user.userId, null, user.email, null, null]);
       expect(append).toHaveBeenCalledWith(expect.objectContaining({
         workspaceId: oldWorkspaceId, actorId: user.userId,
         payload: { action: "active_workspace_selected", workspace_id: null },

@@ -46,7 +46,7 @@ Body:
 
 | Field | Type | Notes |
 |---|---|---|
-| `email` | string \| null | Primary email, may be absent. |
+| `email` | string \| null | Compatibility field; gateway derives identity email from Clerk verified primary address. |
 | `name` | string \| null | First + last name joined, may be absent. |
 | `avatarUrl` | string \| null | User image URL, may be absent. |
 | `workspaceId` | string \| null | Optional. Claim target, sent after workspace creation (onboarding claim flow). Absent/null/empty = no claim; a non-empty value on a repeat call updates the stored record. |

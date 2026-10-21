@@ -6,7 +6,7 @@ import { ClerkAuthService } from "../../src/auth/clerk-auth.service";
 import { IdentityService } from "../../src/auth/identity.service";
 import { DbService } from "../../src/db/db.service";
 
-// Live boundary proof: only Clerk signature verification is stubbed. Identity,
+// Live boundary proof: only external Clerk identity verification is stubbed. Identity,
 // membership, workspace-service creation/replay, selection and audit use PostgreSQL.
 describe.skipIf(!process.env.ONBOARDING_DATABASE_URL)("workspace onboarding with real services", () => {
   let app: INestApplication;
@@ -16,6 +16,7 @@ describe.skipIf(!process.env.ONBOARDING_DATABASE_URL)("workspace onboarding with
     vi.stubEnv("DATABASE_URL", process.env.ONBOARDING_DATABASE_URL!);
     vi.stubEnv("AUTH_DEV_BYPASS", "false");
     app = await createTestApp();
+    vi.spyOn(app.get(ClerkAuthService), "getVerifiedEmail").mockResolvedValue("onboarding@example.invalid");
     vi.spyOn(app.get(ClerkAuthService), "verifyToken").mockImplementation(async value => ({
       sub: value, sid: undefined, email: "onboarding@example.invalid", exp: Date.now() / 1000 + 3600,
       orgId: undefined, orgRole: undefined,
@@ -27,6 +28,8 @@ describe.skipIf(!process.env.ONBOARDING_DATABASE_URL)("workspace onboarding with
     const before = await http(app).post("/v1/users/ensure").auth(token, { type: "bearer" })
       .set("Idempotency-Key", token).send({ name: "Team owner", email: "owner@example.invalid" }).expect(200);
     expect(before.body.workspaceId).toBeNull();
+    const profile = await app.get(DbService).query("SELECT email FROM provisr_identity.users WHERE id=$1", [before.body.id]);
+    expect(profile.rows[0].email).toBe("onboarding@example.invalid");
     const key = randomUUID();
     const body = { name: "Live onboarding", environment: "production", avatar: "🚀", providers: ["aws"] };
     const first = await http(app).post("/v1/workspaces").auth(token, { type: "bearer" })

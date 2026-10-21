@@ -58,7 +58,7 @@ export class WorkspaceBootstrapService {
       }
       await client.query(`UPDATE provisr_identity.users SET name=COALESCE($2,name),email=COALESCE($3,email),
         avatar_url=COALESCE($4,avatar_url),active_workspace_id=$5,updated_at=now() WHERE id=$1`,
-      [user.userId, input.name ?? null, input.email ?? null, input.avatarUrl ?? null, workspaceId]);
+      [user.userId, input.name ?? null, user.email ?? null, input.avatarUrl ?? null, workspaceId]);
       const auditWorkspaceId = workspaceId ?? current.rows[0]?.active_workspace_id;
       if (auditWorkspaceId && workspaceId !== current.rows[0]?.active_workspace_id) {
         await this.audit.append({ workspaceId: auditWorkspaceId, eventType: "state_transition", actorId: user.userId, actorType: "user",

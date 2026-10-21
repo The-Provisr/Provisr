@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { ClerkSessionClaims } from "./clerk-auth.service";
+import { ClerkAuthService, type ClerkSessionClaims } from "./clerk-auth.service";
 import { DbService } from "../db/db.service";
 
 /** Internal Provisr user record created from a verified Clerk identity. */
@@ -20,16 +20,17 @@ interface WorkspaceContext {
 /** Persist verified Clerk subjects and resolve live Provisr memberships. */
 @Injectable()
 export class IdentityService {
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService, private readonly clerk?: ClerkAuthService) {}
 
   async getOrCreateUser(claims: ClerkSessionClaims, _correlationId?: string): Promise<ProvisionedUser> {
+    const email = this.clerk ? await this.clerk.getVerifiedEmail(claims.sub, _correlationId) : claims.email;
     const result = await this.db.query<{ id: string; clerk_id: string; email: string; created_at: Date }>(
       `INSERT INTO provisr_identity.users (clerk_id,name,email)
        VALUES ($1,'',$2) ON CONFLICT (clerk_id) DO UPDATE SET clerk_id=EXCLUDED.clerk_id
-       RETURNING id,clerk_id,email,created_at`, [claims.sub, claims.email ?? ""],
+       RETURNING id,clerk_id,email,created_at`, [claims.sub, email ?? ""],
     );
     const row = result.rows[0]!;
-    return { userId: row.id, clerkId: row.clerk_id, email: row.email || undefined, createdAt: new Date(row.created_at).toISOString() };
+    return { userId: row.id, clerkId: row.clerk_id, email, createdAt: new Date(row.created_at).toISOString() };
   }
 
   async resolveMemberships(clerkId: string, _correlationId?: string): Promise<WorkspaceContext[]> {

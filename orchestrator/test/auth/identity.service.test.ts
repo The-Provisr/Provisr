@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ClerkAuthService } from "../../src/auth/clerk-auth.service";
 import { IdentityService } from "../../src/auth/identity.service";
 import type { DbService } from "../../src/db/db.service";
 
@@ -55,6 +56,16 @@ describe("IdentityService", () => {
     const user = await serviceWith(query).getOrCreateUser({ ...claims, email: undefined });
     expect(query).toHaveBeenCalledWith(expect.any(String), [claims.sub, ""]);
     expect(user.email).toBeUndefined();
+  });
+
+  it("uses only Clerk-verified primary email, not stale database or session values", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [storedUser] });
+    const getVerifiedEmail = vi.fn().mockResolvedValue("verified@example.invalid");
+    const identity = new IdentityService({ query } as unknown as DbService, { getVerifiedEmail } as unknown as ClerkAuthService);
+    expect((await identity.getOrCreateUser(claims)).email).toBe("verified@example.invalid");
+    expect(query).toHaveBeenCalledWith(expect.any(String), [claims.sub, "verified@example.invalid"]);
+    getVerifiedEmail.mockResolvedValue(undefined);
+    expect((await identity.getOrCreateUser(claims)).email).toBeUndefined();
   });
 
   it("resolves live Provisr memberships instead of Clerk organization claims", async () => {

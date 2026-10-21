@@ -1,110 +1,86 @@
 import { describe, expect, it, vi } from "vitest";
-import { Logger } from "@nestjs/common";
 import { IdentityService } from "../../src/auth/identity.service";
-import { ClerkAuthService } from "../../src/auth/clerk-auth.service";
-import type { AuthConfig } from "../../src/auth/auth.config";
-
-const config: AuthConfig = {
-  secretKey: "sk_test_fake",
-  authorizedParties: undefined,
-  tokenCacheTtlMs: 60_000,
-  membershipCacheTtlMs: 60_000,
-};
+import type { DbService } from "../../src/db/db.service";
 
 const claims = {
   sub: "clerk_user_1",
   sid: "sess_1",
   email: "user@provisr.io",
   exp: Math.floor(Date.now() / 1000) + 3600,
-  orgId: undefined,
-  orgRole: undefined,
+  orgId: "clerk_org_not_a_workspace",
+  orgRole: "org:admin",
+};
+const storedUser = {
+  id: "a3b8f0f2-2c4a-4d6e-8f0a-1b2c3d4e5f6a",
+  clerk_id: claims.sub,
+  email: claims.email,
+  created_at: new Date("2026-10-01T00:00:00.000Z"),
 };
 
-function serviceWith(memberships: { workspaceId: string; role: string }[]): {
-  identity: IdentityService;
-  clerk: ClerkAuthService;
-} {
-  const clerk = new ClerkAuthService(config, undefined, {
-    users: {
-      getOrganizationMembershipList: vi.fn(async () => ({
-        data: memberships.map((membership) => ({
-          organization: { id: membership.workspaceId },
-          role: membership.role,
-        })),
-        totalCount: memberships.length,
-      })),
-    },
-  });
-  return { identity: new IdentityService(clerk), clerk };
+function serviceWith(query: ReturnType<typeof vi.fn>) {
+  return new IdentityService({ query } as unknown as DbService);
 }
 
 describe("IdentityService", () => {
-  it("creates an internal user record on first sight of a Clerk identity", async () => {
-    const { identity } = serviceWith([]);
+  it("returns the persisted user id and creation time", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [storedUser] });
 
-    const user = await identity.getOrCreateUser(claims);
+    const user = await serviceWith(query).getOrCreateUser(claims);
 
-    expect(user.clerkId).toBe("clerk_user_1");
-    expect(user.email).toBe("user@provisr.io");
-    expect(user.userId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(user.createdAt).toBeTruthy();
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("ON CONFLICT (clerk_id)"), [claims.sub, claims.email]);
+    expect(user).toEqual({
+      userId: storedUser.id,
+      clerkId: claims.sub,
+      email: claims.email,
+      createdAt: "2026-10-01T00:00:00.000Z",
+    });
   });
 
-  it("reuses the existing record for a returning Clerk identity", async () => {
-    const { identity } = serviceWith([]);
+  it("keeps the same database identity across service instances and returning sessions", async () => {
+    let persisted: typeof storedUser | undefined;
+    const query = vi.fn().mockImplementation(async (_sql: string, values: unknown[]) => {
+      persisted ??= { ...storedUser, clerk_id: values[0] as string, email: values[1] as string };
+      return { rows: [persisted] };
+    });
 
-    const first = await identity.getOrCreateUser(claims);
-    const second = await identity.getOrCreateUser(claims);
+    const first = await serviceWith(query).getOrCreateUser(claims);
+    const returning = await serviceWith(query).getOrCreateUser({ ...claims, sid: "new_session" });
 
-    expect(second.userId).toBe(first.userId);
+    expect(returning).toEqual(first);
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
-  it("includes the correlation id in the provisioning log", async () => {
-    const { identity } = serviceWith([]);
-    const debug = vi.spyOn(Logger.prototype, "debug").mockImplementation(() => undefined);
-
-    const user = await identity.getOrCreateUser(claims, "trace-abc-123");
-
-    expect(debug).toHaveBeenCalledWith(
-      { correlation_id: "trace-abc-123", userId: user.userId, clerkId: "clerk_user_1" },
-      "Provisioned Provisr user",
-    );
-    debug.mockRestore();
+  it("supports a verified identity without an email", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ ...storedUser, email: "" }] });
+    const user = await serviceWith(query).getOrCreateUser({ ...claims, email: undefined });
+    expect(query).toHaveBeenCalledWith(expect.any(String), [claims.sub, ""]);
+    expect(user.email).toBeUndefined();
   });
 
-  it("resolves workspace memberships with roles", async () => {
-    const { identity } = serviceWith([
-      { workspaceId: "org_1", role: "org:admin" },
-      { workspaceId: "org_2", role: "org:member" },
-    ]);
+  it("resolves live Provisr memberships instead of Clerk organization claims", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [
+      { workspace_id: "workspace_1", role: "viewer" },
+      { workspace_id: "workspace_2", role: "engineer" },
+    ] });
 
-    const memberships = await identity.resolveMemberships("clerk_user_1");
+    const memberships = await serviceWith(query).resolveMemberships(claims.sub);
 
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("provisr_identity.memberships"), [claims.sub]);
+    expect(query.mock.calls[0]![0]).toContain("w.deleted_at IS NULL");
     expect(memberships).toEqual([
-      { workspaceId: "org_1", role: "org:admin" },
-      { workspaceId: "org_2", role: "org:member" },
+      { workspaceId: "workspace_1", role: "viewer" },
+      { workspaceId: "workspace_2", role: "engineer" },
     ]);
   });
 
-  it("returns [] for a user with no memberships", async () => {
-    const { identity } = serviceWith([]);
-
-    expect(await identity.resolveMemberships("clerk_user_1")).toEqual([]);
+  it("returns no memberships when database contains none", async () => {
+    expect(await serviceWith(vi.fn().mockResolvedValue({ rows: [] })).resolveMemberships(claims.sub)).toEqual([]);
   });
 
-  it("propagates a Clerk outage as a typed dependency error", async () => {
-    const clerk = new ClerkAuthService(config, undefined, {
-      users: {
-        getOrganizationMembershipList: vi.fn(async () => {
-          throw new Error("rate limited");
-        }),
-      },
-    });
-    const identity = new IdentityService(clerk);
-
-    await expect(identity.resolveMemberships("clerk_user_1")).rejects.toMatchObject({
-      code: "DEPENDENCY_UNAVAILABLE",
-      status: 502,
-    });
+  it("fails rather than inventing an identity or membership during a database outage", async () => {
+    const query = vi.fn().mockRejectedValue(new Error("database unavailable"));
+    const identity = serviceWith(query);
+    await expect(identity.getOrCreateUser(claims)).rejects.toThrow("database unavailable");
+    await expect(identity.resolveMemberships(claims.sub)).rejects.toThrow("database unavailable");
   });
 });

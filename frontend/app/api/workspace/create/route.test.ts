@@ -121,6 +121,7 @@ describe("POST /api/workspace/create", () => {
       name: "Acme Platform",
       description: "Team home",
       environment: "development",
+      providers: ["aws", "azure"],
     });
     expect(idem).toBe("idem-1");
 
@@ -138,15 +139,52 @@ describe("POST /api/workspace/create", () => {
     );
   });
 
-  it("still succeeds when ensureUser fails, keeping the created workspace", async () => {
+  it.each([null, "ws_other"])("fails closed when user links to %s", async (workspaceId) => {
+    mocks.ensureUser.mockResolvedValue({ id: "user_1", workspaceId });
+
+    const res = await POST(makeRequest(validBody));
+
+    expect(res.status).toBe(502);
+    await expect(res.json()).resolves.toEqual({ error: "workspace_create_failed" });
+    expect(mocks.reconcileWorkspaceMetadata).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when ensureUser fails", async () => {
     mocks.ensureUser.mockRejectedValue(new Error("users/ensure down"));
 
     const res = await POST(makeRequest(validBody));
 
-    expect(res.status).toBe(201);
-    expect(mocks.reconcileWorkspaceMetadata).toHaveBeenCalledWith(
-      expect.objectContaining({ backendWorkspaceId: "ws_1" }),
-    );
+    expect(res.status).toBe(502);
+    await expect(res.json()).resolves.toEqual({ error: "workspace_create_failed" });
+    expect(mocks.reconcileWorkspaceMetadata).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", " ", "x".repeat(129)])("requires a bounded client idempotency key: %j", async (key) => {
+    const req = makeRequest(validBody);
+    if (key === undefined) req.headers.delete("Idempotency-Key");
+    else req.headers.set("Idempotency-Key", key);
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect(mocks.createWorkspace).not.toHaveBeenCalled();
+    expect(mocks.ensureUser).not.toHaveBeenCalled();
+    expect(mocks.reconcileWorkspaceMetadata).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe failure when metadata persistence fails and permits retry with the same key", async () => {
+    mocks.reconcileWorkspaceMetadata.mockRejectedValueOnce(new Error("Clerk secret details"));
+
+    const failed = await POST(makeRequest(validBody));
+
+    expect(failed.status).toBe(502);
+    await expect(failed.json()).resolves.toEqual({ error: "workspace_create_failed" });
+
+    const retried = await POST(makeRequest(validBody));
+
+    expect(retried.status).toBe(201);
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(2);
+    expect(mocks.createWorkspace.mock.calls.map((call) => call[2])).toEqual(["idem-test", "idem-test"]);
   });
 
   it("maps upstream 501 (OR-004 not wired) to a 501 pass-through", async () => {

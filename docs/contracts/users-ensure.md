@@ -1,8 +1,10 @@
 # Contract — `POST /v1/users/ensure`
 
-Handoff contract for the backend task (coordinate with FE-B01; the backend
-endpoint does not exist yet). The frontend calls this from the post-auth route
-to synchronously materialize a user record before the dashboard renders.
+Implemented by the authenticated orchestration gateway. The frontend calls this
+from post-auth and workspace selection. Identity and membership live in PostgreSQL;
+apply migration 000023_user_active_workspace before deploying. A requested workspace
+is accepted only when the caller has live membership. Selection and its audit event
+commit together; retries do not duplicate selection events.
 
 ## Method & path
 
@@ -79,7 +81,7 @@ Semantics:
 
 ## Frontend consumer
 
-`frontend/lib/orchestration/users.ts` — `ensureUser(token, input)`.
+`frontend/lib/orchestration/users.ts` — `ensureUser(token, input, idempotencyKey)`.
 Server-only module (`import 'server-only'`). Base URL from
 `process.env.ORCHESTRATION_API_URL`.
 
@@ -115,9 +117,10 @@ to onboarding for all users.
 **Claiming a workspace:** `ensureUser()`'s request body accepts an optional
 `workspaceId`. `POST /api/workspace/claim` (`auth.protect()`-guarded) calls
 `ensureUser` with the caller's newly created workspace id and then runs the
-same reconcile as `/post-auth`. Onboarding calls this route right after
-`createOrganization`/`setActive` so `publicMetadata.workspaceId` is set in the
-same request cycle, instead of waiting for a later `/post-auth` visit.
+same reconcile as `/post-auth`. Onboarding creates a Provisr workspace through `/v1/workspaces`, then verifies
+the exact returned workspace through `ensureUser` before reconciling metadata.
+The browser must refresh its session claim before rendering workspace content.
+Clerk Organizations are not the source of Provisr workspace membership.
 
 ## Dev stub
 

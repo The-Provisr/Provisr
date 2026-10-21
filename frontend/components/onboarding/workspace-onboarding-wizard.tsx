@@ -137,6 +137,7 @@ export function WorkspaceOnboardingWizard() {
           ...(description.trim() ? { description: description.trim() } : {}),
           environment,
           providers: selectedProviders,
+          ...(avatar ? { avatar } : {}),
         }),
       });
 
@@ -145,7 +146,8 @@ export function WorkspaceOnboardingWizard() {
         | null;
 
       if (!res.ok) {
-        if (res.status === 409 || body?.code === "slug_taken") {
+        if (body?.code === "slug_taken") {
+          idempotencyKey.current = createIdempotencyKey();
           setNameError("That workspace name is already taken. Try a different one.");
           setStepIndex(0);
           setSubmitting(false);

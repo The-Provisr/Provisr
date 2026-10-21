@@ -53,7 +53,7 @@ describe("createWorkspace", () => {
     });
   });
 
-  it("maps a 409 to a slug_taken WorkspaceCreateError", async () => {
+  it("preserves an explicit slug_taken conflict", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       jsonResponse({ error: "slug_taken", message: 'slug "acme" is already taken', status: 409 }, 409),
     );
@@ -61,6 +61,46 @@ describe("createWorkspace", () => {
     await expect(
       createWorkspace("t", { name: "Acme", environment: "development" }, "idem"),
     ).rejects.toMatchObject({ code: "slug_taken", status: 409 });
+  });
+
+  it.each(["code", "error"])("preserves duplicate idempotency codes from %s", async (field) => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse({ [field]: "duplicate_idempotency_key", message: "key already used" }, 409),
+    );
+
+    await expect(
+      createWorkspace("t", { name: "Acme", environment: "development" }, "idem"),
+    ).rejects.toMatchObject({ code: "duplicate_idempotency_key", status: 409 });
+  });
+
+  it("preserves an explicit slug_taken code", async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ code: "slug_taken" }, 409));
+
+    await expect(
+      createWorkspace("t", { name: "Acme", environment: "development" }, "idem"),
+    ).rejects.toMatchObject({ code: "slug_taken", status: 409 });
+  });
+
+  it.each([
+    {},
+    { code: "unknown_conflict" },
+    { code: { nested: "slug_taken" }, error: ["slug_taken"] },
+    null,
+    ["slug_taken"],
+  ])("does not label an unrecognized 409 as a name collision: %j", async (body) => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse(body, 409));
+
+    await expect(
+      createWorkspace("t", { name: "Acme", environment: "development" }, "idem"),
+    ).rejects.toMatchObject({ code: "conflict", status: 409 });
+  });
+
+  it("handles a non-JSON 409 as a generic conflict", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response("Conflict", { status: 409 }));
+
+    await expect(
+      createWorkspace("t", { name: "Acme", environment: "development" }, "idem"),
+    ).rejects.toMatchObject({ code: "conflict", status: 409 });
   });
 
   it("maps a 400 to a validation_error", async () => {

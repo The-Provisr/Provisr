@@ -1,7 +1,6 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
-import type { ClerkAuthService, ClerkSessionClaims } from "./clerk-auth.service";
-import type { WorkspaceMembership } from "./clerk-auth.service";
+import { Injectable } from "@nestjs/common";
+import type { ClerkSessionClaims } from "./clerk-auth.service";
+import { DbService } from "../db/db.service";
 
 /** Internal Provisr user record created from a verified Clerk identity. */
 export interface ProvisionedUser {
@@ -18,52 +17,28 @@ interface WorkspaceContext {
   role: string;
 }
 
-/**
- * Maps verified Clerk identities to internal Provisr user records and
- * resolves workspace memberships. Records are created on-the-fly when a
- * Clerk user appears for the first time, and are reused afterwards.
- *
- * Storage is an in-memory repository keyed by Clerk user id; it is a
- * stand-in until the workspace/user data layer (BE-A03/BE-A04) exposes a
- * real store, at which point only this class changes.
- */
+/** Persist verified Clerk subjects and resolve live Provisr memberships. */
 @Injectable()
 export class IdentityService {
-  private readonly logger = new Logger(IdentityService.name);
-  private readonly usersByClerkId = new Map<string, ProvisionedUser>();
+  constructor(private readonly db: DbService) {}
 
-  constructor(private readonly clerk: ClerkAuthService) {}
-
-  /** Returns the internal user for a Clerk identity, creating it if new. */
-  async getOrCreateUser(claims: ClerkSessionClaims, correlationId?: string): Promise<ProvisionedUser> {
-    const existing = this.usersByClerkId.get(claims.sub);
-    if (existing) {
-      return existing;
-    }
-
-    const user: ProvisionedUser = {
-      userId: randomUUID(),
-      clerkId: claims.sub,
-      email: claims.email,
-      createdAt: new Date().toISOString(),
-    };
-    this.usersByClerkId.set(user.clerkId, user);
-    this.logger.debug(
-      { correlation_id: correlationId ?? "unknown", userId: user.userId, clerkId: user.clerkId },
-      "Provisioned Provisr user",
+  async getOrCreateUser(claims: ClerkSessionClaims, _correlationId?: string): Promise<ProvisionedUser> {
+    const result = await this.db.query<{ id: string; clerk_id: string; email: string; created_at: Date }>(
+      `INSERT INTO provisr_identity.users (clerk_id,name,email)
+       VALUES ($1,'',$2) ON CONFLICT (clerk_id) DO UPDATE SET clerk_id=EXCLUDED.clerk_id
+       RETURNING id,clerk_id,email,created_at`, [claims.sub, claims.email ?? ""],
     );
-    return user;
+    const row = result.rows[0]!;
+    return { userId: row.id, clerkId: row.clerk_id, email: row.email || undefined, createdAt: new Date(row.created_at).toISOString() };
   }
 
-  /**
-   * Resolves the workspaces (Clerk organizations) a user belongs to with
-   * their role in each. Returns [] when the user has no memberships.
-   */
-  async resolveMemberships(clerkId: string, correlationId?: string): Promise<WorkspaceContext[]> {
-    const memberships = await this.clerk.getOrganizationMemberships(clerkId, correlationId);
-    return memberships.map((membership: WorkspaceMembership) => ({
-      workspaceId: membership.workspaceId,
-      role: membership.role,
-    }));
+  async resolveMemberships(clerkId: string, _correlationId?: string): Promise<WorkspaceContext[]> {
+    const result = await this.db.query<{ workspace_id: string; role: string }>(
+      `SELECT m.workspace_id,m.role FROM provisr_identity.memberships m
+       JOIN provisr_identity.users u ON u.id=m.user_id
+       JOIN provisr_identity.workspaces w ON w.id=m.workspace_id
+       WHERE u.clerk_id=$1 AND w.deleted_at IS NULL`, [clerkId],
+    );
+    return result.rows.map(row => ({ workspaceId: row.workspace_id, role: row.role }));
   }
 }

@@ -26,6 +26,8 @@ import {
   ChatPersistenceService,
   createChatPersistenceService,
 } from "./services/chat-persistence.service";
+import { UsersController } from "./routes/users.controller";
+import { WorkspaceBootstrapService } from "./services/workspace-bootstrap.service";
 import { WorkspacesController } from "./routes/workspaces.controller";
 import { SessionsController } from "./routes/sessions.controller";
 import { ProvisioningRunsController } from "./routes/provisioning-runs.controller";
@@ -40,6 +42,7 @@ import { PlanningClients, loadPlanningConfig } from "./services/planning-clients
   controllers: [
     AppController,
     WorkspacesController,
+    UsersController,
     SessionsController,
     ProvisioningRunsController,
     ApprovalsController,
@@ -47,6 +50,10 @@ import { PlanningClients, loadPlanningConfig } from "./services/planning-clients
     SseController,
   ],
   providers: [
+    { provide: WorkspaceBootstrapService,
+      useFactory: (db: DbService, audit: AuditService) => new WorkspaceBootstrapService(db, audit,
+        (process.env.WORKSPACE_SERVICE_URL ?? "http://localhost:8088").replace(/\/+$/, "")),
+      inject: [DbService, AuditService] },
     {
       provide: DB_CONFIG,
       useFactory: () => loadDbConfig(),
@@ -70,8 +77,8 @@ import { PlanningClients, loadPlanningConfig } from "./services/planning-clients
     },
     {
       provide: IdentityService,
-      useFactory: (clerk: ClerkAuthService) => new IdentityService(clerk),
-      inject: [ClerkAuthService],
+      useFactory: (db: DbService) => new IdentityService(db),
+      inject: [DbService],
     },
     {
       provide: ChatEventsService,

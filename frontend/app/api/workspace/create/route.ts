@@ -29,11 +29,12 @@ export async function POST(req: Request) {
     return Response.json({ error: "invalid_body" }, { status: 400 });
   }
 
-  const { name, description, environment, providers } = body as {
+  const { name, description, environment, providers, avatar } = body as {
     name?: unknown;
     description?: unknown;
     environment?: unknown;
     providers?: unknown;
+    avatar?: unknown;
   };
 
   if (typeof name !== "string" || name.trim().length < 3 || name.trim().length > 64) {
@@ -63,7 +64,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const idempotencyKey = req.headers.get("Idempotency-Key")?.trim() || crypto.randomUUID();
+  const idempotencyKey = req.headers.get("Idempotency-Key")?.trim();
+  if (!idempotencyKey || idempotencyKey.length > 128) {
+    return Response.json({ error: "invalid_idempotency_key" }, { status: 400 });
+  }
 
   let workspace;
   try {
@@ -73,6 +77,8 @@ export async function POST(req: Request) {
         name: name.trim(),
         ...(trimmedDescription ? { description: trimmedDescription } : {}),
         environment: environment as WorkspaceEnvironment,
+        providers: selectedProviders,
+        ...(typeof avatar === "string" ? { avatar } : {}),
       },
       idempotencyKey,
     );
@@ -84,9 +90,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "workspace_create_failed" }, { status: 502 });
   }
 
-  // Point the caller's user record at the new workspace. The workspace already
-  // exists, so a failure here must not lose it — fall back to the id we have.
-  let backendWorkspaceId = workspace.id;
+  // Refresh session metadata only after the backend confirms the user link.
   try {
     const record = await ensureUser(
       token,
@@ -98,18 +102,24 @@ export async function POST(req: Request) {
       },
       userId,
     );
-    backendWorkspaceId = record.workspaceId ?? workspace.id;
+    if (record.workspaceId !== workspace.id) {
+      return Response.json({ error: "workspace_create_failed" }, { status: 502 });
+    }
   } catch {
-    backendWorkspaceId = workspace.id;
+    return Response.json({ error: "workspace_create_failed" }, { status: 502 });
   }
 
   // Reconcile the Clerk session claim so middleware routes them to /dashboard.
-  await reconcileWorkspaceMetadata({
-    userId,
-    backendWorkspaceId,
-    claimedWorkspaceId: sessionClaims?.metadata?.workspaceId,
-    providers: selectedProviders,
-  });
+  try {
+    await reconcileWorkspaceMetadata({
+      userId,
+      backendWorkspaceId: workspace.id,
+      claimedWorkspaceId: sessionClaims?.metadata?.workspaceId,
+      providers: selectedProviders,
+    });
+  } catch {
+    return Response.json({ error: "workspace_create_failed" }, { status: 502 });
+  }
 
   return Response.json(
     {

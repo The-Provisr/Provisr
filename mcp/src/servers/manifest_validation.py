@@ -7,21 +7,36 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from jsonschema import Draft202012Validator
+from provisr_contracts.manifest import ResourceManifest
+from pydantic import ValidationError
 
 from src.context.fastapi import require_context
 from src.context.models import MCPContext
 
 router = APIRouter()
-# Generated from agent.app.domain.manifest.ResourceManifest; checked for drift in tests.
+# Generated from the shared ResourceManifest (also re-exported by the agent).
+# The existing drift test checks the agent import path against this snapshot.
 _schema = json.loads(Path(__file__).with_name("manifest.schema.json").read_text())
 _validator = Draft202012Validator(_schema)
 
 
 def validate_schema(manifest: object) -> list[str]:
-    return [
+    errors = [
         f"{'.'.join(str(p) for p in error.path) or 'manifest'}: {error.validator} validation failed"
         for error in _validator.iter_errors(manifest)
     ]
+    if errors:
+        return errors
+    # JSON Schema cannot express cross-resource/provider integrity or all native
+    # alarm constraints. Apply the same canonical semantic validators as the agent.
+    try:
+        ResourceManifest.model_validate(manifest)
+    except ValidationError as exc:
+        return [
+            f"{'.'.join(map(str, error['loc'])) or 'manifest'}: {error['msg']}"
+            for error in exc.errors(include_input=False, include_url=False)
+        ]
+    return []
 
 
 def validate_contextual_manifest(

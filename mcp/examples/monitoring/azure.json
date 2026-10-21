@@ -1,0 +1,33 @@
+{
+  "provider": "azure",
+  "region": "eastus",
+  "resources": [
+    {
+      "type": "azure_log_analytics_workspace",
+      "name": "api-logs",
+      "retention_days": 30,
+      "sku": "PerGB2018",
+      "resource_refs": ["/subscriptions/12345678-1234-1234-1234-123456789abc/resourceGroups/platform/providers/Microsoft.Compute/virtualMachines/api"]
+    },
+    {
+      "type": "azure_monitor_metric",
+      "name": "api_cpu",
+      "resource_ref": "/subscriptions/12345678-1234-1234-1234-123456789abc/resourceGroups/platform/providers/Microsoft.Compute/virtualMachines/api",
+      "namespace": "Microsoft.Compute/virtualMachines",
+      "metric_name": "Percentage CPU",
+      "aggregation": "Average"
+    },
+    {
+      "type": "azure_monitor_alarm",
+      "name": "api-high-cpu",
+      "metric_ref": "api_cpu",
+      "threshold": 80,
+      "comparison": "greater_than",
+      "missing_data": "ignore",
+      "window_seconds": 300,
+      "evaluation_frequency_seconds": 60,
+      "severity": 2,
+      "notification_target_refs": ["/subscriptions/12345678-1234-1234-1234-123456789abc/resourceGroups/platform/providers/Microsoft.Insights/actionGroups/platform-alerts"]
+    }
+  ]
+}

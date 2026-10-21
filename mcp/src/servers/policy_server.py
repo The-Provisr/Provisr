@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
+from src.servers.domain_server import router as domain_router
 from src.servers.manifest_validation import router as manifest_router
 
 
@@ -70,6 +71,7 @@ def create_app(
     )
     install_context_error_handler(application)
     application.include_router(manifest_router)
+    application.include_router(domain_router)
 
     @application.get("/health/live")
     async def live() -> dict[str, str]:

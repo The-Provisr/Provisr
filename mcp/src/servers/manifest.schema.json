@@ -1,5 +1,432 @@
 {
   "$defs": {
+    "AwsAlarm": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[^\\x00-\\x1f]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "metric_ref": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+          "title": "Metric Ref",
+          "type": "string"
+        },
+        "threshold": {
+          "title": "Threshold",
+          "type": "number"
+        },
+        "comparison": {
+          "enum": [
+            "greater_than",
+            "greater_than_or_equal",
+            "less_than",
+            "less_than_or_equal"
+          ],
+          "title": "Comparison",
+          "type": "string"
+        },
+        "missing_data": {
+          "enum": [
+            "breaching",
+            "not_breaching",
+            "ignore",
+            "missing"
+          ],
+          "title": "Missing Data",
+          "type": "string"
+        },
+        "type": {
+          "const": "aws_cloudwatch_alarm",
+          "title": "Type",
+          "type": "string"
+        },
+        "period_seconds": {
+          "maximum": 86400,
+          "minimum": 10,
+          "title": "Period Seconds",
+          "type": "integer"
+        },
+        "evaluation_periods": {
+          "minimum": 1,
+          "title": "Evaluation Periods",
+          "type": "integer"
+        },
+        "datapoints_to_alarm": {
+          "minimum": 1,
+          "title": "Datapoints To Alarm",
+          "type": "integer"
+        },
+        "notification_target_refs": {
+          "items": {
+            "pattern": "^arn:aws(-us-gov|-cn)?:sns:[a-z0-9-]+:[0-9]{12}:[a-zA-Z0-9_-]{1,256}(\\.fifo)?$",
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Notification Target Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "metric_ref",
+        "threshold",
+        "comparison",
+        "missing_data",
+        "type",
+        "period_seconds",
+        "evaluation_periods",
+        "datapoints_to_alarm",
+        "notification_target_refs"
+      ],
+      "title": "AwsAlarm",
+      "type": "object"
+    },
+    "AwsLogGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 512,
+          "minLength": 1,
+          "pattern": "^[.\\-_/#a-zA-Z0-9]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "resource_refs": {
+          "items": {
+            "pattern": "^(manifest:[a-zA-Z0-9_.-]{1,512}|arn:aws(-us-gov|-cn)?:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:[^\\s]+|arn:aws(-us-gov|-cn)?:s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9])$",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Resource Refs",
+          "type": "array"
+        },
+        "type": {
+          "const": "aws_cloudwatch_log_group",
+          "title": "Type",
+          "type": "string"
+        },
+        "retention_days": {
+          "anyOf": [
+            {
+              "enum": [
+                1,
+                3,
+                5,
+                7,
+                14,
+                30,
+                60,
+                90,
+                120,
+                150,
+                180,
+                365,
+                400,
+                545,
+                731,
+                1096,
+                1827,
+                2192,
+                2557,
+                2922,
+                3288,
+                3653
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Retention Days"
+        }
+      },
+      "required": [
+        "name",
+        "resource_refs",
+        "type",
+        "retention_days"
+      ],
+      "title": "AwsLogGroup",
+      "type": "object"
+    },
+    "AwsMetric": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "resource_ref": {
+          "pattern": "^(manifest:[a-zA-Z0-9_.-]{1,512}|arn:aws(-us-gov|-cn)?:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:[^\\s]+|arn:aws(-us-gov|-cn)?:s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9])$",
+          "title": "Resource Ref",
+          "type": "string"
+        },
+        "metric_name": {
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[^\\x00-\\x1f]+$",
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "type": {
+          "const": "aws_cloudwatch_metric",
+          "title": "Type",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[^:\\x00-\\x1f]+$",
+          "title": "Namespace",
+          "type": "string"
+        },
+        "dimensions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "maxProperties": 30,
+          "minProperties": 1,
+          "title": "Dimensions",
+          "type": "object"
+        },
+        "statistic": {
+          "enum": [
+            "Average",
+            "Sum",
+            "Minimum",
+            "Maximum",
+            "SampleCount"
+          ],
+          "title": "Statistic",
+          "type": "string"
+        },
+        "storage_resolution_seconds": {
+          "enum": [
+            1,
+            60
+          ],
+          "title": "Storage Resolution Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "resource_ref",
+        "metric_name",
+        "type",
+        "namespace",
+        "dimensions",
+        "statistic",
+        "storage_resolution_seconds"
+      ],
+      "title": "AwsMetric",
+      "type": "object"
+    },
+    "AzureAlarm": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 260,
+          "minLength": 1,
+          "pattern": "^[^\\s*#&+:<>?%{}\\\\/]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "metric_ref": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+          "title": "Metric Ref",
+          "type": "string"
+        },
+        "threshold": {
+          "title": "Threshold",
+          "type": "number"
+        },
+        "comparison": {
+          "enum": [
+            "greater_than",
+            "greater_than_or_equal",
+            "less_than",
+            "less_than_or_equal"
+          ],
+          "title": "Comparison",
+          "type": "string"
+        },
+        "missing_data": {
+          "const": "ignore",
+          "title": "Missing Data",
+          "type": "string"
+        },
+        "type": {
+          "const": "azure_monitor_alarm",
+          "title": "Type",
+          "type": "string"
+        },
+        "window_seconds": {
+          "enum": [
+            60,
+            300,
+            900,
+            1800,
+            3600,
+            21600,
+            43200,
+            86400
+          ],
+          "title": "Window Seconds",
+          "type": "integer"
+        },
+        "evaluation_frequency_seconds": {
+          "enum": [
+            60,
+            300,
+            900,
+            1800,
+            3600
+          ],
+          "title": "Evaluation Frequency Seconds",
+          "type": "integer"
+        },
+        "severity": {
+          "maximum": 4,
+          "minimum": 0,
+          "title": "Severity",
+          "type": "integer"
+        },
+        "notification_target_refs": {
+          "items": {
+            "pattern": "^/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resourceGroups/[^/\\s]+/providers/Microsoft\\.Insights/actionGroups/[^/\\s]+$",
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Notification Target Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "metric_ref",
+        "threshold",
+        "comparison",
+        "missing_data",
+        "type",
+        "window_seconds",
+        "evaluation_frequency_seconds",
+        "severity",
+        "notification_target_refs"
+      ],
+      "title": "AzureAlarm",
+      "type": "object"
+    },
+    "AzureLogWorkspace": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 63,
+          "minLength": 4,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$",
+          "title": "Name",
+          "type": "string"
+        },
+        "resource_refs": {
+          "items": {
+            "pattern": "^(manifest:[a-zA-Z0-9_.-]{1,512}|/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resourceGroups/[^/\\s]+/providers/[a-zA-Z0-9.]+(/[^/\\s]+/[^/\\s]+)+)$",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Resource Refs",
+          "type": "array"
+        },
+        "type": {
+          "const": "azure_log_analytics_workspace",
+          "title": "Type",
+          "type": "string"
+        },
+        "retention_days": {
+          "maximum": 730,
+          "minimum": 30,
+          "title": "Retention Days",
+          "type": "integer"
+        },
+        "sku": {
+          "const": "PerGB2018",
+          "title": "Sku",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "resource_refs",
+        "type",
+        "retention_days",
+        "sku"
+      ],
+      "title": "AzureLogWorkspace",
+      "type": "object"
+    },
+    "AzureMetric": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "resource_ref": {
+          "pattern": "^(manifest:[a-zA-Z0-9_.-]{1,512}|/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resourceGroups/[^/\\s]+/providers/[a-zA-Z0-9.]+(/[^/\\s]+/[^/\\s]+)+)$",
+          "title": "Resource Ref",
+          "type": "string"
+        },
+        "metric_name": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "type": {
+          "const": "azure_monitor_metric",
+          "title": "Type",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9.]+/[a-zA-Z0-9/]+$",
+          "title": "Namespace",
+          "type": "string"
+        },
+        "aggregation": {
+          "enum": [
+            "Average",
+            "Count",
+            "Minimum",
+            "Maximum",
+            "Total"
+          ],
+          "title": "Aggregation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "resource_ref",
+        "metric_name",
+        "type",
+        "namespace",
+        "aggregation"
+      ],
+      "title": "AzureMetric",
+      "type": "object"
+    },
     "BackupConfiguration": {
       "additionalProperties": false,
       "properties": {
@@ -56,6 +483,219 @@
         "image"
       ],
       "title": "Ec2Resource",
+      "type": "object"
+    },
+    "GcpAlarm": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 512,
+          "minLength": 1,
+          "pattern": "^[^\\x00-\\x1f]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "metric_ref": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+          "title": "Metric Ref",
+          "type": "string"
+        },
+        "threshold": {
+          "title": "Threshold",
+          "type": "number"
+        },
+        "comparison": {
+          "enum": [
+            "greater_than",
+            "less_than"
+          ],
+          "title": "Comparison",
+          "type": "string"
+        },
+        "missing_data": {
+          "enum": [
+            "breaching",
+            "not_breaching",
+            "ignore"
+          ],
+          "title": "Missing Data",
+          "type": "string"
+        },
+        "type": {
+          "const": "gcp_monitoring_alarm",
+          "title": "Type",
+          "type": "string"
+        },
+        "project_id": {
+          "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "duration_seconds": {
+          "maximum": 86400,
+          "minimum": 60,
+          "multipleOf": 60,
+          "title": "Duration Seconds",
+          "type": "integer"
+        },
+        "trigger_count": {
+          "minimum": 1,
+          "title": "Trigger Count",
+          "type": "integer"
+        },
+        "notification_target_refs": {
+          "items": {
+            "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/notificationChannels/[0-9]+$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Notification Target Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "metric_ref",
+        "threshold",
+        "comparison",
+        "missing_data",
+        "type",
+        "project_id",
+        "duration_seconds",
+        "trigger_count",
+        "notification_target_refs"
+      ],
+      "title": "GcpAlarm",
+      "type": "object"
+    },
+    "GcpLogBucket": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "resource_refs": {
+          "items": {
+            "pattern": "^(manifest:[a-zA-Z0-9_.-]{1,512}|//[a-z][a-z0-9.]+\\.googleapis\\.com/projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/[^\\s]+)$",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Resource Refs",
+          "type": "array"
+        },
+        "type": {
+          "const": "gcp_logging_bucket",
+          "title": "Type",
+          "type": "string"
+        },
+        "project_id": {
+          "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "location": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9-]+$",
+          "title": "Location",
+          "type": "string"
+        },
+        "retention_days": {
+          "maximum": 3650,
+          "minimum": 1,
+          "title": "Retention Days",
+          "type": "integer"
+        },
+        "filter": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Filter",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "resource_refs",
+        "type",
+        "project_id",
+        "location",
+        "retention_days",
+        "filter"
+      ],
+      "title": "GcpLogBucket",
+      "type": "object"
+    },
+    "GcpMetric": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "resource_ref": {
+          "pattern": "^(manifest:[a-zA-Z0-9_.-]{1,512}|//[a-z][a-z0-9.]+\\.googleapis\\.com/projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/[^\\s]+)$",
+          "title": "Resource Ref",
+          "type": "string"
+        },
+        "metric_name": {
+          "pattern": "^[a-z][a-z0-9.]+\\.googleapis\\.com/[a-zA-Z0-9_/]+$",
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "type": {
+          "const": "gcp_monitoring_metric",
+          "title": "Type",
+          "type": "string"
+        },
+        "monitored_resource_type": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z0-9_]+$",
+          "title": "Monitored Resource Type",
+          "type": "string"
+        },
+        "filter": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Filter",
+          "type": "string"
+        },
+        "alignment_period_seconds": {
+          "maximum": 90000,
+          "minimum": 60,
+          "title": "Alignment Period Seconds",
+          "type": "integer"
+        },
+        "per_series_aligner": {
+          "enum": [
+            "ALIGN_MEAN",
+            "ALIGN_MAX",
+            "ALIGN_MIN",
+            "ALIGN_SUM",
+            "ALIGN_RATE"
+          ],
+          "title": "Per Series Aligner",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "resource_ref",
+        "metric_name",
+        "type",
+        "monitored_resource_type",
+        "filter",
+        "alignment_period_seconds",
+        "per_series_aligner"
+      ],
+      "title": "GcpMetric",
       "type": "object"
     },
     "PolicyApplication": {
@@ -190,8 +830,12 @@
       "type": "string"
     },
     "provider": {
-      "const": "aws",
       "default": "aws",
+      "enum": [
+        "aws",
+        "azure",
+        "gcp"
+      ],
       "title": "Provider",
       "type": "string"
     },
@@ -244,9 +888,18 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "aws_cloudwatch_alarm": "#/$defs/AwsAlarm",
+            "aws_cloudwatch_log_group": "#/$defs/AwsLogGroup",
+            "aws_cloudwatch_metric": "#/$defs/AwsMetric",
             "aws_ec2": "#/$defs/Ec2Resource",
             "aws_rds": "#/$defs/RdsResource",
-            "aws_s3": "#/$defs/S3Resource"
+            "aws_s3": "#/$defs/S3Resource",
+            "azure_log_analytics_workspace": "#/$defs/AzureLogWorkspace",
+            "azure_monitor_alarm": "#/$defs/AzureAlarm",
+            "azure_monitor_metric": "#/$defs/AzureMetric",
+            "gcp_logging_bucket": "#/$defs/GcpLogBucket",
+            "gcp_monitoring_alarm": "#/$defs/GcpAlarm",
+            "gcp_monitoring_metric": "#/$defs/GcpMetric"
           },
           "propertyName": "type"
         },
@@ -259,6 +912,33 @@
           },
           {
             "$ref": "#/$defs/S3Resource"
+          },
+          {
+            "$ref": "#/$defs/AwsLogGroup"
+          },
+          {
+            "$ref": "#/$defs/AwsMetric"
+          },
+          {
+            "$ref": "#/$defs/AwsAlarm"
+          },
+          {
+            "$ref": "#/$defs/AzureLogWorkspace"
+          },
+          {
+            "$ref": "#/$defs/AzureMetric"
+          },
+          {
+            "$ref": "#/$defs/AzureAlarm"
+          },
+          {
+            "$ref": "#/$defs/GcpLogBucket"
+          },
+          {
+            "$ref": "#/$defs/GcpMetric"
+          },
+          {
+            "$ref": "#/$defs/GcpAlarm"
           }
         ]
       },

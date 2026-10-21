@@ -3,8 +3,10 @@ RUN pip install uv
 
 FROM base AS runner
 WORKDIR /app
-COPY mcp/pyproject.toml mcp/uv.lock ./
-RUN uv sync --frozen --no-dev
-COPY mcp/ ./
+COPY pyproject.toml uv.lock ./
+COPY mcp/ ./mcp/
+COPY agent/pyproject.toml ./agent/pyproject.toml
+COPY packages/manifest-contracts/ ./packages/manifest-contracts/
+RUN uv sync --frozen --no-dev --package provisr-mcp
 EXPOSE 5100
-CMD ["uv", "run", "uvicorn", "src.servers.policy_server:app", "--host", "0.0.0.0", "--port", "5100"]
+CMD ["uv", "run", "--frozen", "--no-dev", "--package", "provisr-mcp", "uvicorn", "src.servers.policy_server:app", "--host", "0.0.0.0", "--port", "5100"]

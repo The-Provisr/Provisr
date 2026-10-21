@@ -1,0 +1,34 @@
+{
+  "provider": "aws",
+  "region": "us-east-1",
+  "resources": [
+    {
+      "type": "aws_cloudwatch_log_group",
+      "name": "/provisr/api",
+      "retention_days": 30,
+      "resource_refs": ["arn:aws:ec2:us-east-1:123456789012:instance/i-0123456789abcdef0"]
+    },
+    {
+      "type": "aws_cloudwatch_metric",
+      "name": "api_cpu",
+      "resource_ref": "arn:aws:ec2:us-east-1:123456789012:instance/i-0123456789abcdef0",
+      "namespace": "AWS/EC2",
+      "metric_name": "CPUUtilization",
+      "dimensions": {"InstanceId": "i-0123456789abcdef0"},
+      "statistic": "Average",
+      "storage_resolution_seconds": 60
+    },
+    {
+      "type": "aws_cloudwatch_alarm",
+      "name": "api-high-cpu",
+      "metric_ref": "api_cpu",
+      "threshold": 80,
+      "comparison": "greater_than",
+      "missing_data": "missing",
+      "period_seconds": 300,
+      "evaluation_periods": 3,
+      "datapoints_to_alarm": 2,
+      "notification_target_refs": ["arn:aws:sns:us-east-1:123456789012:platform-alerts"]
+    }
+  ]
+}

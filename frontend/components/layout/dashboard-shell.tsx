@@ -204,14 +204,14 @@ export function DashboardShell({ children, sidebar, clerkEnabled }: DashboardShe
             open={switcherOpen}
             workspaces={workspaces}
           />
-          {listStatus === "loading" ? <p role="status" className="text-xs text-gray-500">Loading workspaces…</p> : null}
+          {listStatus === "loading" ? <p role="status" aria-label="Loading workspaces" className="text-xs text-gray-500">{collapsed ? "…" : "Loading workspaces…"}</p> : null}
           {listStatus === "failed" ? (
-            <div role="alert" className="text-xs text-gray-500">
-              Workspaces unavailable.
-              <button type="button" onClick={() => setListAttempt((value) => value + 1)}>Retry</button>
+            <div role="alert" className="mt-2 flex flex-wrap gap-1 text-xs text-gray-500">
+              {collapsed ? null : <span>Workspaces unavailable.</span>}
+              <button title="Workspaces unavailable. Retry" type="button" onClick={() => setListAttempt((value) => value + 1)}>Retry</button>
             </div>
           ) : null}
-          {switching ? <p role="status" className="text-xs text-gray-500">Switching workspace…</p> : null}
+          {switching ? <p role="status" aria-label="Switching workspace" className="text-xs text-gray-500">{collapsed ? "…" : "Switching workspace…"}</p> : null}
           {switchError ? <p role="alert" className="text-xs text-gray-500">{switchError}</p> : null}
         </div>
 

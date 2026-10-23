@@ -32,41 +32,10 @@ var discoveryRegion = regexp.MustCompile(`^[a-z]{2}(?:-[a-z]+)+-[0-9]+$`)
 var readinessActions = []string{"ec2:RunInstances", "ec2:CreateVpc", "ec2:CreateSubnet", "ec2:CreateSecurityGroup", "s3:CreateBucket", "rds:CreateDBInstance"}
 
 func (d AWSDiscovery) Discover(ctx context.Context, a CapabilityAccount) (Discovery, error) {
-	if !roleARNRegex.MatchString(a.RoleARN) || a.ExternalID == "" {
-		return Discovery{}, errors.New("delegated identity unavailable")
-	}
-	region := a.DefaultRegion
-	if region == "" {
-		region = "us-east-1"
-		if strings.HasPrefix(a.RoleARN, "arn:aws-cn:") {
-			region = "cn-north-1"
-		}
-		if strings.HasPrefix(a.RoleARN, "arn:aws-us-gov:") {
-			region = "us-gov-west-1"
-		}
-	}
-	if !discoveryRegion.MatchString(region) {
-		return Discovery{}, errors.New("invalid discovery region")
-	}
-	load := d.LoadConfig
-	if load == nil {
-		load = func(ctx context.Context, region string) (aws.Config, error) {
-			return config.LoadDefaultConfig(ctx, config.WithRegion(region), config.WithRetryMaxAttempts(1))
-		}
-	}
-	cfg, err := load(ctx, region)
+	cfg, err := AssumeAWS(ctx, a, "provisr-capabilities", d.LoadConfig)
 	if err != nil {
-		return Discovery{}, errors.New("provider configuration unavailable")
+		return Discovery{}, err
 	}
-	assumed, err := sts.NewFromConfig(cfg).AssumeRole(ctx, &sts.AssumeRoleInput{RoleArn: aws.String(a.RoleARN), ExternalId: aws.String(a.ExternalID), RoleSessionName: aws.String("provisr-capabilities"), DurationSeconds: aws.Int32(900)})
-	if err != nil || assumed.Credentials == nil {
-		return Discovery{}, errors.New("delegated access unavailable")
-	}
-	c := assumed.Credentials
-	if c.AccessKeyId == nil || c.SecretAccessKey == nil || c.SessionToken == nil || c.Expiration == nil || !c.Expiration.After(time.Now()) {
-		return Discovery{}, errors.New("delegated credentials unavailable")
-	}
-	cfg.Credentials = credentials.NewStaticCredentialsProvider(*c.AccessKeyId, *c.SecretAccessKey, *c.SessionToken)
 	regions, err := describeAWSRegions(ctx, cfg)
 	if err != nil {
 		return Discovery{}, errors.New("region discovery unavailable")
@@ -141,4 +110,53 @@ func describeAWSRegions(ctx context.Context, cfg aws.Config) ([]string, error) {
 		return nil, errors.New("no available regions")
 	}
 	return regions, nil
+}
+
+// AssumeAWS returns a config holding fresh 15-minute delegated credentials.
+// Callers must never persist or log them. A nil load uses the runtime identity chain.
+func AssumeAWS(ctx context.Context, a CapabilityAccount, sessionName string, load func(context.Context, string) (aws.Config, error)) (aws.Config, error) {
+	if !roleARNRegex.MatchString(a.RoleARN) || a.ExternalID == "" {
+		return aws.Config{}, errors.New("delegated identity unavailable")
+	}
+	region := a.DefaultRegion
+	if region == "" {
+		region = "us-east-1"
+		if strings.HasPrefix(a.RoleARN, "arn:aws-cn:") {
+			region = "cn-north-1"
+		}
+		if strings.HasPrefix(a.RoleARN, "arn:aws-us-gov:") {
+			region = "us-gov-west-1"
+		}
+	}
+	if !discoveryRegion.MatchString(region) {
+		return aws.Config{}, errors.New("invalid discovery region")
+	}
+	if load == nil {
+		load = func(ctx context.Context, region string) (aws.Config, error) {
+			return config.LoadDefaultConfig(ctx, config.WithRegion(region), config.WithRetryMaxAttempts(1))
+		}
+	}
+	cfg, err := load(ctx, region)
+	if err != nil {
+		return aws.Config{}, errors.New("provider configuration unavailable")
+	}
+	assumed, err := sts.NewFromConfig(cfg).AssumeRole(ctx, &sts.AssumeRoleInput{RoleArn: aws.String(a.RoleARN), ExternalId: aws.String(a.ExternalID), RoleSessionName: aws.String(sessionName), DurationSeconds: aws.Int32(900)})
+	if err != nil || assumed.Credentials == nil {
+		return aws.Config{}, errors.New("delegated access unavailable")
+	}
+	c := assumed.Credentials
+	if c.AccessKeyId == nil || c.SecretAccessKey == nil || c.SessionToken == nil || c.Expiration == nil || !c.Expiration.After(time.Now()) {
+		return aws.Config{}, errors.New("delegated credentials unavailable")
+	}
+	cfg.Credentials = credentials.NewStaticCredentialsProvider(*c.AccessKeyId, *c.SecretAccessKey, *c.SessionToken)
+	return cfg, nil
+}
+
+// AWSAccountID extracts the 12-digit account from a validated role ARN.
+func AWSAccountID(roleARN string) (string, bool) {
+	m := roleARNRegex.FindStringSubmatch(roleARN)
+	if len(m) < 2 {
+		return "", false
+	}
+	return m[1], true
 }

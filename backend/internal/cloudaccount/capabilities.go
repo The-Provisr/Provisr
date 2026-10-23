@@ -176,24 +176,33 @@ func (s sqlCapabilityStore) Accounts(ctx context.Context, workspace string) ([]C
 			a.VerifiedAt = verified.Time
 		}
 		if a.Status == "active" && encrypted.Valid {
-			key, err := cloudcrypto.DeriveWorkspaceKey(s.master, workspace)
-			if err != nil {
+			if err := DecryptIdentity(s.master, encrypted.String, &a); err != nil {
 				return nil, err
 			}
-			var metadata map[string]any
-			if err := cloudcrypto.DecryptJSON(key, encrypted.String, &metadata); err != nil {
-				return nil, fmt.Errorf("account metadata unavailable")
-			}
-			a.RoleARN, _ = metadata["role_arn"].(string)
-			if a.RoleARN == "" {
-				a.RoleARN, _ = metadata["roleArn"].(string)
-			}
-			a.ExternalID, _ = metadata["external_id"].(string)
-			a.DefaultRegion, _ = metadata["default_region"].(string)
 		}
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// DecryptIdentity fills delegated identity fields from a.WorkspaceID's encrypted
+// metadata. The result is internal-only and must never be serialized or logged.
+func DecryptIdentity(master cloudcrypto.MasterKey, encrypted string, a *CapabilityAccount) error {
+	key, err := cloudcrypto.DeriveWorkspaceKey(master, a.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	var metadata map[string]any
+	if err := cloudcrypto.DecryptJSON(key, encrypted, &metadata); err != nil {
+		return fmt.Errorf("account metadata unavailable")
+	}
+	a.RoleARN, _ = metadata["role_arn"].(string)
+	if a.RoleARN == "" {
+		a.RoleARN, _ = metadata["roleArn"].(string)
+	}
+	a.ExternalID, _ = metadata["external_id"].(string)
+	a.DefaultRegion, _ = metadata["default_region"].(string)
+	return nil
 }
 
 // redactDiscoverySecrets keeps delegated identity metadata off the existing detail surface.

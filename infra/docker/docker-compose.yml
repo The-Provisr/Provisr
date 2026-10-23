@@ -131,6 +131,7 @@ services:
     environment:
       PORT: "8084"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
     depends_on:
       postgres:
         condition: service_healthy
@@ -254,6 +255,7 @@ services:
       BACKEND_URL: http://provisioning-service:8083
       MANIFEST_SERVICE_URL: http://manifest-service:8090
       CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089
+      APPROVAL_SERVICE_URL: http://approval-service:8084
       ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
@@ -266,6 +268,9 @@ services:
         condition: service_started
         required: false
       cloud-account-service:
+        condition: service_started
+        required: false
+      approval-service:
         condition: service_started
         required: false
 

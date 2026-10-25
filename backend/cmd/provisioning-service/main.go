@@ -12,6 +12,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/provisr/backend/internal/statebackend"
+	"github.com/provisr/backend/internal/terraformplan"
 	"github.com/provisr/backend/pkg/cloudcrypto"
 	"github.com/provisr/backend/pkg/health"
 	"github.com/provisr/backend/pkg/middleware"
@@ -58,6 +59,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/health/", health.Handler())
 	mux.Handle("/v1/state-backends/", statebackend.New(db, master, os.Getenv("ORCHESTRATOR_SERVICE_TOKEN")))
+	mux.Handle("/v1/iac/plans", terraformplan.New(db, master, os.Getenv("ORCHESTRATOR_SERVICE_TOKEN")))
 
 	srv := &http.Server{
 		Addr:        ":" + port,

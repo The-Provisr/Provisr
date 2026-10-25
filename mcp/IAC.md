@@ -54,3 +54,52 @@ S3 Terraform, and proves retry produces one artifact and one audit event. Withou
 those test variables, CI skips only this real-service integration test; mounted
 adapter tests still run. OR-013 orchestration, BE-D05 planning and BE-D08 remote
 state initialization remain their scheduled tasks.
+
+
+## MCP-015 — create_plan
+
+Design: [discussion #172](https://github.com/The-Provisr/Provisr/discussions/172).
+Depends on BE-D05's provisioning-service plan endpoint. This task is logbook
+Week 15 / sprint-plan Week 14; OR-014 wires it into the run flow next sprint.
+
+`POST /tools/create_plan` accepts `iac_artifact_id` (nonzero UUID) and the same
+complete MCP context as `generate_iac`, with `iac:write` and an idempotency key.
+Trusted service bearer authentication runs before membership lookup. Membership
+and permission validation precede backend dispatch. No Terraform, credentials,
+confirmation claims or commands are accepted in the request.
+
+The adapter calls `POST /v1/iac/plans` at `PROVISIONING_SERVICE_URL` (native
+fallback `http://localhost:8083`), forwarding service authorization and request,
+correlation and idempotency headers. Docker explicitly sets this URL. Reuse
+`ORCHESTRATOR_SERVICE_TOKEN`; the tool does not authorize execution.
+
+Returns `plan_artifact_id`, `iac_artifact_id`, `manifest_id`, `manifest_version`,
+`run_id`, `workspace_id`, `session_id`, `hash`, `raw_plan_json_reference` and
+`summary`. Summary includes `create_count`, `update_count`, `delete_count`,
+`unchanged_count` and `resource_changes` (address, resource_type, change_type,
+risk_tags). Replacements count as both create and delete; data reads do not
+increment managed-resource counts. Result provenance, private reference,
+resource addresses/types, unique risk tags and counts are checked before return.
+Raw JSON, binary plans, credentials and arbitrary extra fields are never returned.
+The JSON reference is an opaque private storage reference, not a download URL.
+
+A 110-second total deadline bounds streaming as well as idle response time;
+BE-D05's request deadline is 100 seconds. Maximum response is 2 MiB. Known
+403/404/409/422 backend errors map to fixed safe messages. Other backend/network
+or malformed-response errors become 502; total deadline becomes 504. Backend
+bodies and exception details are never echoed. Retry with the same key after
+an ambiguous timeout. Backend remains responsible for immutable audited storage,
+confirmed-manifest selection, delegated identity and remote state configuration.
+
+Validation:
+
+```sh
+PYTHONPATH=packages/manifest-contracts:mcp uv run --package provisr-mcp pytest mcp/tests/test_iac_planning.py -q
+uv run --package provisr-mcp ruff check mcp/src
+```
+
+Mounted-route tests exercise authentication order, membership/permission and
+idempotency rejection, input injection, forwarding, result provenance/counts,
+error sanitization, oversized responses and slow-stream cancellation/closure.
+No AWS calls, Terraform execution, FSM transitions or approval bypass occur in
+this adapter.

@@ -17,6 +17,7 @@ from src.servers.approval_server import router as approval_router
 from src.servers.cloud_state_server import router as cloud_router
 from src.servers.domain_server import router as domain_router
 from src.servers.iac_generation import router as iac_router
+from src.servers.iac_planning import router as plan_router
 from src.servers.manifest_creation import router as manifest_creation_router
 from src.servers.manifest_server import router as backend_manifest_router
 from src.servers.manifest_validation import router as manifest_router
@@ -33,6 +34,7 @@ class Resources:
     approval_backend_url: str
     approval_service_token: str
     iac_service_token: str
+    provisioning_backend_url: str
 
 
 def create_app(
@@ -45,6 +47,7 @@ def create_app(
     approval_backend_url: str | None = None,
     approval_service_token: str | None = None,
     iac_service_token: str | None = None,
+    provisioning_backend_url: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -86,6 +89,9 @@ def create_app(
             )).rstrip("/"),
             approval_service_token=(approval_service_token if approval_service_token is not None
                                     else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
+            provisioning_backend_url=(provisioning_backend_url or os.getenv(
+                "PROVISIONING_SERVICE_URL", "http://localhost:8083",
+            )).rstrip("/"),
             iac_service_token=(iac_service_token if iac_service_token is not None
                                else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
         )
@@ -108,6 +114,7 @@ def create_app(
     application.include_router(cloud_router)
     application.include_router(approval_router)
     application.include_router(iac_router)
+    application.include_router(plan_router)
     application.include_router(manifest_creation_router)
 
     @application.get("/health/live")

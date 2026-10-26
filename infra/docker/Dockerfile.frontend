@@ -9,6 +9,8 @@ COPY frontend/package.json ./frontend/
 RUN pnpm install --frozen-lockfile
 
 FROM base AS runner
+ARG NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID
+ENV NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID=$NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/shared-contracts ./packages/shared-contracts

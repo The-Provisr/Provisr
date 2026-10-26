@@ -60,6 +60,11 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
+    const allowNoWorkspaceMembership = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_NO_WORKSPACE_MEMBERSHIP_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
     const http = context.switchToHttp();
     const req = http.getRequest<Request & { user?: RequestUser }>();
     const res = typeof http.getResponse === "function" ? http.getResponse() : undefined;
@@ -93,7 +98,7 @@ export class AuthGuard implements CanActivate {
     const user = await this.identity.getOrCreateUser(claims, correlationId);
     const memberships = await this.identity.resolveMemberships(user.clerkId, correlationId);
 
-    if (memberships.length === 0 && !this.reflector.getAllAndOverride<boolean>(ALLOW_NO_WORKSPACE_MEMBERSHIP_KEY, [context.getHandler(), context.getClass()])) {
+    if (memberships.length === 0 && !allowNoWorkspaceMembership) {
       throw new ForbiddenError("No workspace membership");
     }
 

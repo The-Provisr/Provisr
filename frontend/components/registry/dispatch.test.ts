@@ -184,6 +184,13 @@ describe("resolvePayload", () => {
     });
   });
 
+  it("renders patch-zero wire versions against legacy minor-only registrations", () => {
+    const registry = createRegistry();
+    registry.register({ type: "test_type", version: "1.0", schema: z.object({ text: z.string() }), component: StubComponent });
+    expect(resolvePayload(registry, payload({ version: "1.0.0", data: { text: "safe" } })).kind).toBe("render");
+    expect(resolvePayload(registry, payload({ version: "1.0.1", data: { text: "safe" } })).kind).toBe("invalid");
+  });
+
   describe("envelope validation", () => {
     it("returns invalid/schema when payload is null or not an object", () => {
       const registry = createRegistry();

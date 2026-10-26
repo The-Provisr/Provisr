@@ -1,7 +1,8 @@
-import { NotImplementedException } from "@nestjs/common";
+import { ConflictException, NotImplementedException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunsService, createRunsService } from "../../src/state-machine/runs.service";
 import { AuditService } from "../../src/services/audit.service";
+import { questionSchema } from "../../src/services/planning-contracts";
 import { PlanningClients } from "../../src/services/planning-clients";
 import { makeRun, memoryDb, contextFor, fakeClients, manifest, policy } from "../helpers/planning-fixture";
 
@@ -132,7 +133,7 @@ describe("RunsService durable planning", () => {
     const service = new RunsService(f.db, new AuditService(f.db), c.clients);
     await service.processRun(run.id, run.workspaceId);
     expect(f.current()).toMatchObject({ state: "MANIFEST_VALIDATING", manifestVersion: 1, manifestValidatedVersion: 1, manifestConfirmedVersion: null });
-    expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/v1/manifests"))).toHaveLength(1);
+    expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/tools/create_manifest"))).toHaveLength(3);
     expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/turns"))).toHaveLength(3);
     expect(f.events.at(-1)).toMatchObject({ type: "ManifestReadyEvent", payload: { manifest_version: 1, components: [{ type: "architecture_summary" }, { type: "storage_card" }] } });
     await expect(service.transitionState(run.id, run.workspaceId, f.current().stateVersion, "IAC_GENERATING", run.requesterId)).rejects.toThrow("manifestConfirmed");
@@ -161,12 +162,69 @@ describe("RunsService durable planning", () => {
     expect(f.current()).toMatchObject({ manifestVersion: 2, agentSessionId: session, manifestConfirmedVersion: null });
   });
 
-  it("rejects unknown component payloads and never publishes them", async () => {
+  it("rejects unknown component payloads, audits the failure, and publishes only the safe fallback", async () => {
     const run = makeRun(); const f = memoryDb(run);
     const c = fakeClients(run, [{ type: "component_payload", data: { component_id: "raw_html", payload: { html: "<script>" } } }]);
     await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
-    expect(f.current().state).toBe("FAILED");
+    expect(f.current()).toMatchObject({ state: "FAILED", errorCode: "COMPONENT_PAYLOAD_INVALID" });
     expect(f.events.some(e => e.type === "ComponentPayloadEvent")).toBe(false);
+    expect(f.events.at(-1)).toMatchObject({ type: "ComponentPayloadRejectedEvent", payload: {
+      component_type: "unknown", component_version: "1.0.0", validation_issues: [{ code: "unknown_component_or_version" }],
+    } });
+    expect(f.audits.at(-1)![1]).toBe("state_transition");
+    expect(JSON.parse(f.audits.at(-1)![6] as string)).toMatchObject({ error_code: "COMPONENT_PAYLOAD_INVALID",
+      component_type: "unknown", validation_issues: [{ code: "unknown_component_or_version" }] });
+    expect(JSON.stringify(f.events)).not.toContain("<script>");
+  });
+
+  it("rejects producer-valid unsupported prerelease component versions through the safe fallback", async () => {
+    const run=makeRun();const f=memoryDb(run);
+    const c=fakeClients(run,[{type:"component_payload",data:{component_id:"chat_message",component_version:"1.0.0-beta",payload:{}}}]);
+    await new RunsService(f.db,new AuditService(f.db),c.clients).processRun(run.id,run.workspaceId);
+    expect(f.current().errorCode).toBe("COMPONENT_PAYLOAD_INVALID");
+    expect(f.events.at(-1)).toMatchObject({type:"ComponentPayloadRejectedEvent",payload:{component_type:"chat_message",component_version:"unsupported"}});
+  });
+
+  it.each([true, false])("handles a committed concurrent clarification replay (same answers: %s)", async (same) => {
+    const question = questionSchema.parse({ question: "Region?", fields: [{ name: "region", type: "string", options: ["us-east-1", "us-west-2"] }] });
+    const stale = makeRun({ state: "CLARIFYING", currentQuestion: question, clarificationExpiresAt: new Date(Date.now() + 60000) });
+    const latest = { ...stale, state: "MANIFEST_CREATING" as const, stateVersion: 1, currentQuestion: null,
+      answersHistory: [{ question, answers: { region: "us-east-1" }, answeredAt: new Date().toISOString(), idempotencyKey: "race" }] };
+    const f = memoryDb(latest);
+    const service = new RunsService(f.db);
+    vi.spyOn(service, "getRun").mockResolvedValueOnce(stale).mockResolvedValue(latest);
+    const result = service.clarifyRun(stale.id, stale.workspaceId, stale.requesterId, { idempotencyKey: "race", answers: { region: same ? "us-east-1" : "us-west-2" } });
+    if (same) await expect(result).resolves.toMatchObject({ stateVersion: 1 });
+    else await expect(result).rejects.toBeInstanceOf(ConflictException);
+    expect(f.events).toHaveLength(0);
+  });
+
+  it.each([true, false])("handles a committed concurrent clarification replay (same answers: %s)", async (same) => {
+    const question = questionSchema.parse({ question: "Region?", fields: [{ name: "region", type: "string", options: ["us-east-1", "us-west-2"] }] });
+    const stale = makeRun({ state: "CLARIFYING", currentQuestion: question, clarificationExpiresAt: new Date(Date.now() + 60000) });
+    const latest = { ...stale, state: "MANIFEST_CREATING" as const, stateVersion: 1, currentQuestion: null,
+      answersHistory: [{ question, answers: { region: "us-east-1" }, answeredAt: new Date().toISOString(), idempotencyKey: "race" }] };
+    const f = memoryDb(latest);
+    const service = new RunsService(f.db);
+    vi.spyOn(service, "getRun").mockResolvedValueOnce(stale).mockResolvedValue(latest);
+    const result = service.clarifyRun(stale.id, stale.workspaceId, stale.requesterId, { idempotencyKey: "race", answers: { region: same ? "us-east-1" : "us-west-2" } });
+    if (same) await expect(result).resolves.toMatchObject({ stateVersion: 1 });
+    else await expect(result).rejects.toBeInstanceOf(ConflictException);
+    expect(f.events).toHaveLength(0);
+  });
+
+  it.each([true, false])("handles a committed concurrent clarification replay (same answers: %s)", async (same) => {
+    const question = questionSchema.parse({ question: "Region?", fields: [{ name: "region", type: "string", options: ["us-east-1", "us-west-2"] }] });
+    const stale = makeRun({ state: "CLARIFYING", currentQuestion: question, clarificationExpiresAt: new Date(Date.now() + 60000) });
+    const latest = { ...stale, state: "MANIFEST_CREATING" as const, stateVersion: 1, currentQuestion: null,
+      answersHistory: [{ question, answers: { region: "us-east-1" }, answeredAt: new Date().toISOString(), idempotencyKey: "race" }] };
+    const f = memoryDb(latest);
+    const service = new RunsService(f.db);
+    vi.spyOn(service, "getRun").mockResolvedValueOnce(stale).mockResolvedValue(latest);
+    const result = service.clarifyRun(stale.id, stale.workspaceId, stale.requesterId, { idempotencyKey: "race", answers: { region: same ? "us-east-1" : "us-west-2" } });
+    if (same) await expect(result).resolves.toMatchObject({ stateVersion: 1 });
+    else await expect(result).rejects.toBeInstanceOf(ConflictException);
+    expect(f.events).toHaveLength(0);
   });
 
   it("discards agent output when cancellation wins during the HTTP request", async () => {

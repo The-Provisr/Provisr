@@ -140,7 +140,7 @@ describe("WorkspaceOnboardingWizard", () => {
     await waitFor(() => expect(screen.getByTestId("handoff")).toBeInTheDocument());
 
     const handoff = screen.getByTestId("handoff");
-    expect(handoff).toHaveAttribute("data-target", "/dashboard");
+    expect(handoff).toHaveAttribute("data-target", "/workspace/cloud-accounts?connect=aws");
     expect(handoff).toHaveAttribute("data-expected-workspace", "ws_1");
 
     const [url, init] = fetchMock.mock.calls[0]!;

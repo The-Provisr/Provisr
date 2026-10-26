@@ -14,6 +14,7 @@ export type AwsConnectPanelProps = {
   /** Existing AWS account id when a connection already exists (pending/failed). */
   accountId?: string;
   busy: boolean;
+  onExternalIdChange?: (value: string) => void;
   errorMessage?: string | null;
   onVerify: (params: { externalId: string; roleArn: string; label: string }) => void;
   onCancel: () => void;
@@ -32,6 +33,7 @@ export function AwsConnectPanel({
   externalId,
   accountId,
   busy,
+  onExternalIdChange,
   errorMessage,
   onVerify,
   onCancel,
@@ -41,18 +43,21 @@ export function AwsConnectPanel({
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const principalAccountId = process.env.NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID ?? "";
+  const templateConfigured = /^\d{12}$/.test(principalAccountId);
   const template = useMemo(
-    () =>
+    () => accountId || !templateConfigured || !externalId || !workspaceId ? "" :
       buildCloudFormationTemplate({
         externalId,
         workspaceId,
         accountLabel: label.trim() || undefined,
+        trustPrincipalAccountId: principalAccountId,
       }),
-    [externalId, workspaceId, label],
+    [externalId, workspaceId, label, accountId, templateConfigured, principalAccountId],
   );
 
   const roleArnValid = /^arn:aws(-[a-z]+)?:iam::\d{12}:role\/.+/.test(roleArn.trim());
-  const canVerify = roleArnValid && label.trim().length > 0 && !busy;
+  const canVerify = externalId.trim().length > 0 && (Boolean(accountId) || (templateConfigured && roleArnValid && label.trim().length > 0)) && !busy;
 
   async function copyExternalId() {
     try {
@@ -78,6 +83,14 @@ export function AwsConnectPanel({
         </div>
       </div>
 
+      {accountId ? (
+        <div className="space-y-2 text-xs text-gray-600">
+          <p>Enter the original external ID from your existing CloudFormation stack parameters. To change the role, remove this connection and connect again.</p>
+          <label className="block">Original external ID
+            <input aria-label="Original external ID" className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2" value={externalId} disabled={busy} onChange={(event) => onExternalIdChange?.(event.target.value)} />
+          </label>
+        </div>
+      ) : (<>
       <div>
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
@@ -104,10 +117,10 @@ export function AwsConnectPanel({
         </p>
       </div>
 
-      <TemplateViewer
+      {template ? <TemplateViewer
         fileName={`provisr-aws-role-${workspaceId}.yaml`}
         template={template}
-      />
+      /> : <p role="alert">AWS setup is unavailable: the platform AWS account ID is not configured.</p>}
 
       <ol className="space-y-1.5 text-xs text-gray-600">
         {INSTRUCTIONS.map((step, index) => (
@@ -145,6 +158,8 @@ export function AwsConnectPanel({
           />
         </label>
       </div>
+
+      </>)}
 
       {errorMessage ? (
         <div

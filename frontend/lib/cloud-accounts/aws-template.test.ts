@@ -19,7 +19,7 @@ describe("generateExternalId", () => {
 });
 
 describe("buildCloudFormationTemplate", () => {
-  const input = { externalId: "prv_aws_abc", workspaceId: "ws-123" };
+  const input = { externalId: "prv_aws_abc", workspaceId: "ws-123", trustPrincipalAccountId: "111122223333" };
 
   it("embeds the external id and workspace id", () => {
     const template = buildCloudFormationTemplate(input);
@@ -27,6 +27,13 @@ describe("buildCloudFormationTemplate", () => {
     expect(template).toContain("sts:ExternalId: !Ref ExternalId");
     expect(template).toContain("workspace ws-123");
     expect(template).toContain("ProvisrExecutionRole");
+  });
+
+  it("rejects a missing or malformed platform account instead of trusting a placeholder", () => {
+    for (const trustPrincipalAccountId of [undefined, "", "bad"]) {
+      expect(() => buildCloudFormationTemplate({ ...input, trustPrincipalAccountId })).toThrow(TemplateInputError);
+    }
+    expect(buildCloudFormationTemplate(input)).toContain("arn:aws:iam::111122223333:root");
   });
 
   it("is deterministic for the same input", () => {

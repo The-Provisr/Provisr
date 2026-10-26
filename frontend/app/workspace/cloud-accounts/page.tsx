@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   AppShell,
@@ -42,6 +42,7 @@ export default function CloudAccountsPage() {
   const [busy, setBusy] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const autoConnectHandled = useRef(false);
 
   const accountByProvider = useMemo(() => {
     const map = new Map<string, CloudAccount>();
@@ -67,8 +68,11 @@ export default function CloudAccountsPage() {
     try {
       const [accountList, capabilityList] = await Promise.all([
         listCloudAccounts(),
-        listCapabilities().catch(() => ({ workspace_id: "", accounts: [] })),
+        listCapabilities(),
       ]);
+      if (!capabilityList?.workspace_id?.trim()) {
+        throw new Error("Workspace capabilities are unavailable. Please retry.");
+      }
       setAccounts(accountList);
       setCapabilities(capabilityList);
       setViewState("ready");
@@ -84,21 +88,28 @@ export default function CloudAccountsPage() {
     void load();
   }, [load]);
 
+  const awsAccount = accountByProvider.get("aws");
+
   // Onboarding redirect: /workspace/cloud-accounts?connect=aws opens the panel.
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || viewState !== "ready" || autoConnectHandled.current) {
       return;
     }
     const connect = new URLSearchParams(window.location.search).get("connect");
     if (connect === "aws") {
+      autoConnectHandled.current = true;
       openConnect("aws");
     }
     // openConnect is stable for this one-shot effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [viewState, awsAccount]);
 
   function openConnect(provider: CloudProviderId) {
-    if (provider !== "aws") {
+    if (provider !== "aws" || viewState !== "ready" || !capabilities?.workspace_id) {
+      return;
+    }
+    if (awsAccount) {
+      openVerify(awsAccount);
       return;
     }
     setPanelExternalId(generateExternalId("aws"));
@@ -106,16 +117,17 @@ export default function CloudAccountsPage() {
     setPanelOpen(true);
   }
 
-  const awsAccount = accountByProvider.get("aws");
   const onOpenAws = awsAccount && awsAccount.status !== "active" ? openConnect : undefined;
 
   function openVerify(account: CloudAccount) {
-    setPanelExternalId(generateExternalId("aws"));
+    if (viewState !== "ready" || !capabilities?.workspace_id || account.provider !== "aws") return;
+    setPanelExternalId("");
     setPanelError(null);
     setPanelOpen(true);
   }
 
   async function handleVerify(params: { externalId: string; roleArn: string; label: string }) {
+    if (busy || viewState !== "ready" || !capabilities?.workspace_id) return;
     setBusy(true);
     setPanelError(null);
     try {
@@ -128,6 +140,7 @@ export default function CloudAccountsPage() {
           metadata: { role_arn: params.roleArn },
         });
         accountId = created.id;
+        setAccounts((current) => [...current, created]);
       }
 
       await verifyCloudAccount(accountId, params.externalId);
@@ -163,7 +176,7 @@ export default function CloudAccountsPage() {
     <AppShell sidebar={<WorkspaceSidebar active="Cloud Accounts" />}>
       <PageHeader
         actions={
-          <Button disabled={busy || viewState === "loading"} onClick={() => openConnect("aws")}>
+          <Button disabled={busy || viewState !== "ready"} onClick={() => openConnect("aws")}>
             Connect AWS
           </Button>
         }
@@ -234,13 +247,14 @@ export default function CloudAccountsPage() {
             </div>
           ) : null}
 
-          {panelOpen && viewState !== "loading" ? (
+          {panelOpen && viewState === "ready" && capabilities?.workspace_id ? (
             <AwsConnectPanel
               accountId={awsAccount?.id}
               busy={busy}
               errorMessage={panelError}
               externalId={panelExternalId}
               onCancel={() => setPanelOpen(false)}
+              onExternalIdChange={setPanelExternalId}
               onVerify={handleVerify}
               workspaceId={capabilities?.workspace_id ?? ""}
             />

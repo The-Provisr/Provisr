@@ -50,8 +50,8 @@ export type CloudFormationTemplateInput = {
   workspaceId: string;
   accountLabel?: string;
   /**
-   * The Provisr AWS account id the role is allowed to be assumed by. Left as a
-   * placeholder until the platform publishes its role-assuming account id.
+   * The configured Provisr AWS account id allowed to assume this role.
+   * Missing or malformed values must never produce a trust policy.
    */
   trustPrincipalAccountId?: string;
 };
@@ -73,8 +73,10 @@ export function buildCloudFormationTemplate(input: CloudFormationTemplateInput):
   }
 
   const accountLabel = (input.accountLabel ?? "Provisr execution").trim() || "Provisr execution";
-  const principalAccount =
-    (input.trustPrincipalAccountId ?? "123456789012").trim() || "123456789012";
+  const principalAccount = input.trustPrincipalAccountId?.trim() ?? "";
+  if (!/^\d{12}$/.test(principalAccount)) {
+    throw new TemplateInputError("A configured 12-digit Provisr AWS account ID is required.");
+  }
 
   return `AWSTemplateFormatVersion: "2010-09-09"
 Description: >-

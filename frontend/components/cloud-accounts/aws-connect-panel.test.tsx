@@ -19,6 +19,7 @@ function renderPanel(overrides: Partial<Parameters<typeof AwsConnectPanel>[0]> =
 
 describe("AwsConnectPanel", () => {
   beforeEach(() => {
+    vi.stubEnv("NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID", "111122223333");
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn(async () => undefined) },
     });
@@ -26,6 +27,7 @@ describe("AwsConnectPanel", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("masks the external id until revealed", () => {
@@ -79,6 +81,23 @@ describe("AwsConnectPanel", () => {
     renderPanel({ errorMessage: "External ID mismatch" });
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("External ID mismatch");
+  });
+
+  it("blocks new setup when platform account is not configured", () => {
+    vi.stubEnv("NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID", "");
+    renderPanel();
+    expect(screen.getByRole("alert")).toHaveTextContent("not configured");
+    expect(screen.queryByLabelText("CloudFormation template")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Verify connection" })).toBeDisabled();
+  });
+
+  it("asks existing connections for the original external ID without ignored role edits", () => {
+    const onExternalIdChange = vi.fn();
+    renderPanel({ accountId: "existing", externalId: "", onExternalIdChange });
+    expect(screen.getByRole("button", { name: "Verify connection" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Original external ID"), { target: { value: "original-id" } });
+    expect(onExternalIdChange).toHaveBeenCalledWith("original-id");
+    expect(screen.queryByLabelText("Role ARN")).not.toBeInTheDocument();
   });
 
   it("copies the external id to the clipboard", async () => {

@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/provisr/backend/internal/iacartifact"
 	"github.com/provisr/backend/internal/manifest"
 	"github.com/provisr/backend/pkg/middleware"
 )
@@ -50,9 +51,13 @@ func main() {
 		logger.Warn().Err(err).Msg("warning: database ping failed at startup, will retry on requests")
 	}
 
+	mux := http.NewServeMux()
+	mux.Handle("/v1/iac/", middleware.RequestLogger(logger, middleware.Recover(logger,
+		iacartifact.New(db, os.Getenv("ORCHESTRATOR_SERVICE_TOKEN")))))
+	mux.Handle("/", manifest.New(db, logger))
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      manifest.New(db, logger),
+		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,

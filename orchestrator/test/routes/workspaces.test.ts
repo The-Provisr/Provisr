@@ -1,11 +1,12 @@
 import { INestApplication } from "@nestjs/common";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { createTestApp, http } from "../helpers/create-test-app";
 
 const UUID = "a3b8f0f2-2c4a-4d6e-8f0a-1b2c3d4e5f6a";
 
 describe("Workspaces routes", () => {
   let app: INestApplication;
+  afterEach(() => vi.unstubAllGlobals());
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -41,24 +42,21 @@ describe("Workspaces routes", () => {
     });
   });
 
-  it("returns 501 for listing until OR-004", async () => {
-    const res = await http(app).get("/v1/workspaces").expect(501);
-
-    expect(res.body).toMatchObject({
-      error: "NotImplementedError",
-      status: 501,
-      code: "NOT_IMPLEMENTED",
-    });
-    expect(res.body.message).toBe("Workspace listing is not implemented yet");
+  it("lists only the authenticated user workspaces", async () => {
+    const fetch = vi.fn(async () => Response.json([]));
+    vi.stubGlobal("fetch", fetch);
+    const res = await http(app).get("/v1/workspaces").expect(200);
+    expect(res.body).toEqual([]);
+    expect(fetch.mock.calls[0]?.[0]).toContain("user_id=test-user");
   });
 
-  it("accepts a valid create body and returns 501", async () => {
-    const res = await http(app)
-      .post("/v1/workspaces")
-      .send({ name: "production", environment: "production" })
-      .expect(501);
-
-    expect(res.body.message).toBe("Workspace creation is not implemented yet");
+  it("creates through backend with creator identity and translated environment", async () => {
+    const fetch = vi.fn(async () => Response.json({ id: UUID, name: "production", slug: "production-1234", environment: "prod" }, { status: 201 }));
+    vi.stubGlobal("fetch", fetch);
+    const res = await http(app).post("/v1/workspaces").set("Idempotency-Key", "create-1")
+      .send({ name: "production", environment: "production" }).expect(201);
+    expect(res.body.environment).toBe("production");
+    expect(JSON.parse(fetch.mock.calls[0]?.[1].body)).toMatchObject({ creator_id: "test-user", environment: "prod" });
   });
 
   it("returns 400 with field details for a too-short name", async () => {

@@ -55,3 +55,45 @@ responses return a sanitized 502 without raw provider text or metadata.
 This task consumes BE-B08 (PR #136, following BE-D03 #135). OR-009 calls the tool
 before agent planning. Discovery facts do not replace execution authorization,
 formal policy checks, quotas, drift checks, confirmation or approval.
+
+## MCP-019 approval requirements
+
+`POST /tools/get_approval_requirements` is mounted in the same port-5100 runtime.
+It requires a validated `approval:read` context with workspace membership. The
+evaluation is read-only, so it takes no idempotency key; a retry produces a new
+audit record with the same `input_digest`.
+
+The body is `context` plus the run context: optional `run_id`, `environment`,
+`provider`, `region`, `public_exposure`, `resource_changes[]` (`address`, `type`,
+`action`, `public`, `properties`), `cost_estimate.estimated_monthly_usd`
+(required) with optional `source`, and `policy` (`decision`, `violations`) from
+check_policy. Unknown fields are rejected with 422, so callers cannot supply
+`workspace_id`, `user_id` or a requester role. Workspace and user come from the
+validated context. BE-E01 resolves the role, the workspace environment and the
+cost threshold on the server.
+
+Set `APPROVAL_SERVICE_URL` (default `http://localhost:8084`) and inject
+`ORCHESTRATOR_SERVICE_TOKEN` into MCP and approval-service. The tool forwards the
+fields the caller set, unchanged, to `POST /v1/approval-requirements/evaluate`
+with trace IDs. BE-E01 is the only place that normalizes and evaluates them (see
+`backend/internal/approval/APPROVAL_RULES.md`), and it appends the audit event
+before it responds.
+
+The result is `{ requires_approval, reason, required_approver_role, risk_level,
+triggered_rules, rule_set_version, input_digest, evaluation_id, evaluated_at }`.
+A decision without an evaluation ID or digest is never returned. A decision is
+also never returned if it contradicts itself, for example when approval does not
+match the triggered rules, or when an approver is set without approval.
+
+Errors:
+- A DENY policy decision returns 409, because approval cannot override a deny.
+- Input that BE-E01 rejects returns a sanitized 422.
+- A membership miss returns 403 `invalid_context`.
+- Unconfigured authentication returns 503.
+- An unavailable or malformed backend returns a sanitized 502.
+
+Logs contain the outcome, the decision and trace IDs. They never contain resource
+properties or backend error text. OR-017 calls this tool after check_policy and
+before the user confirms.
+
+MCP-019 callers must send `Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>` from the trusted server. Credentials are checked before membership/context lookup; never expose this token to browsers or model prompts.

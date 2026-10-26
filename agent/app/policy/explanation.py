@@ -39,7 +39,7 @@ _RULES: dict[str, tuple[str, str]] = {
 }
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9_.$\[\]-]{1,160}$")
 _INTERNAL_MARKERS = re.compile(
-    r"\b(rego|opa|input\.|data\.|package\s+[\w.]+|rule_key|policy\s+id)\b"
+    r"\b(rego|opa|input(?=\s*[.\[])|data(?=\s*[.\[])|package\s+[\w.]+|rule_key|policy\s+id)\b"
     r"|:=|==|!=|<=|>=|[{};]|\bdeny\b|\ballow\b",
     re.IGNORECASE,
 )
@@ -83,8 +83,8 @@ def _generic_explanation() -> tuple[str, str]:
 def _severity_label(value: str) -> str:
     normalized = value.strip().lower()
     if normalized in {"critical", "high", "medium", "low", "warning", "error"}:
-        return f"{normalized.capitalize()} severity."
-    return "Policy check failed."
+        return f"{normalized.capitalize()} severity"
+    return "Policy check failed"
 
 
 def _manifest_path(evidence: Mapping[str, object]) -> str | None:

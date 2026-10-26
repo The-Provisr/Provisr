@@ -61,6 +61,28 @@ services:
       postgres:
         condition: service_healthy
 
+  pricing-service:
+    profiles: [all, backend]
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/Dockerfile.backend
+      target: service
+    command: ["./pricing-service"]
+    ports:
+      - "8091:8091"
+    environment:
+      PORT: "8091"
+      DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      PRICING_BULK_CACHE_TTL: ${PRICING_BULK_CACHE_TTL:-24h}
+      PRICING_ON_DEMAND_CACHE_TTL: ${PRICING_ON_DEMAND_CACHE_TTL:-1h}
+      GCP_PRICING_API_KEY: ${GCP_PRICING_API_KEY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   policy-service:
     profiles: [all, backend]
     build:
@@ -254,6 +276,7 @@ services:
       PORT: "5100"
       BACKEND_URL: http://provisioning-service:8083
       MANIFEST_SERVICE_URL: http://manifest-service:8090
+      PRICING_SERVICE_URL: http://pricing-service:8091
       CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089
       APPROVAL_SERVICE_URL: http://approval-service:8084
       ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
@@ -271,6 +294,9 @@ services:
         condition: service_started
         required: false
       approval-service:
+        condition: service_started
+        required: false
+      pricing-service:
         condition: service_started
         required: false
 

@@ -57,12 +57,15 @@ def evaluated(*rules, risk=None, approver=None):
 class Membership:
     def __init__(self, member=True):
         self.member = member
+        self.calls = 0
 
     async def get_role(self, *, user_id, workspace_id):
+        self.calls += 1
         return "engineer" if self.member else None
 
 
-def call(body, backend_body=None, *, status=200, member=True, token="test-service-token"):
+def call(body, backend_body=None, *, status=200, member=True, token="test-service-token",
+         authorization="Bearer test-service-token", membership=None):
     """Exercise the mounted runtime route and record outgoing backend calls."""
     requests = []
 
@@ -75,13 +78,16 @@ def call(body, backend_body=None, *, status=200, member=True, token="test-servic
         return httpx.Response(status, json=backend_body or evaluated())
 
     runtime = create_app(
-        membership_store=Membership(member),
+        membership_store=membership if membership is not None else Membership(member),
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
         approval_backend_url="http://approval:8084",
         approval_service_token=token,
     )
     with TestClient(runtime) as client:
-        response = client.post("/tools/get_approval_requirements", json=body)
+        response = client.post(
+            "/tools/get_approval_requirements", json=body,
+            headers={} if authorization is None else {"Authorization": authorization},
+        )
     return response, requests
 
 
@@ -104,6 +110,18 @@ def test_forwards_run_context_with_identity_from_envelope_and_service_auth():
     assert forwarded["run_id"] == RUN
     assert "context" not in forwarded
     assert forwarded["resource_changes"][0]["type"] == "aws_instance"
+
+
+@pytest.mark.parametrize("authorization", [
+    None, "", "Basic test-service-token", "Bearer wrong-token", "Bearer ", b"Bearer \xc3\xa9",
+])
+def test_service_auth_rejects_before_membership_or_backend(authorization):
+    membership = Membership()
+    response, requests = call(run_body(), authorization=authorization, membership=membership)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Service authentication required"}
+    assert membership.calls == 0
+    assert requests == []
 
 
 def test_no_rule_matched_returns_low_risk_without_approver():
@@ -313,8 +331,10 @@ def test_missing_cost_estimate_object_is_rejected():
 
 
 def test_unconfigured_service_token_returns_503():
-    response, requests = call(run_body(), token="")
+    membership = Membership()
+    response, requests = call(run_body(), token="", membership=membership)
     assert response.status_code == 503
+    assert membership.calls == 0
     assert requests == []
 
 

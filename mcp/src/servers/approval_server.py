@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Literal
 from uuid import UUID
 
@@ -115,10 +116,25 @@ class EvaluatedRequirement(BaseModel):
         return self
 
 
+_validate_approval_context = require_context("approval:read")
+
+
+async def authenticated_approval_context(request: Request) -> MCPContext:
+    """Authenticate trusted callers before resolving their supplied context."""
+    token = request.app.state.resources.approval_service_token
+    if not token:
+        raise HTTPException(status_code=503, detail="Approval requirements are not configured")
+    scheme, _, supplied_token = request.headers.get("Authorization", "").partition(" ")
+    if (scheme.lower() != "bearer" or not supplied_token
+            or not secrets.compare_digest(supplied_token.encode("utf-8"), token.encode("utf-8"))):
+        raise HTTPException(status_code=401, detail="Service authentication required")
+    return await _validate_approval_context(request)
+
+
 @router.post("/tools/get_approval_requirements")
 async def get_approval_requirements(
     request: Request,
-    context: MCPContext = Depends(require_context("approval:read")),  # noqa: B008
+    context: MCPContext = Depends(authenticated_approval_context),  # noqa: B008
 ) -> dict[str, object]:
     """Return the deterministic approval requirement BE-E01 evaluated and audited."""
     try:

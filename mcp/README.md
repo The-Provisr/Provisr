@@ -95,3 +95,5 @@ Errors:
 Logs contain the outcome, the decision and trace IDs. They never contain resource
 properties or backend error text. OR-017 calls this tool after check_policy and
 before the user confirms.
+
+MCP-019 callers must send `Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>` from the trusted server. Credentials are checked before membership/context lookup; never expose this token to browsers or model prompts.

@@ -35,6 +35,7 @@ type VerifyTokenFn = (
 /** Narrow view of the Clerk client surface this service needs. */
 export interface MembershipClient {
   users: {
+    getUser?(userId: string): Promise<{ primaryEmailAddressId: string | null; emailAddresses: { id: string; emailAddress: string; verification: { status: string } | null }[] }>;
     getOrganizationMembershipList(params: {
       userId: string;
       limit?: number;
@@ -55,6 +56,7 @@ export interface MembershipClient {
 export class ClerkAuthService {
   private readonly logger = new Logger(ClerkAuthService.name);
   private client: MembershipClient | undefined;
+  private readonly emailCache = new Map<string, { email: string | undefined; fetchedAt: number }>();
   private readonly tokenCache = new Map<string, { claims: ClerkSessionClaims; verifiedAt: number }>();
   private readonly membershipCache = new Map<
     string,
@@ -163,6 +165,22 @@ export class ClerkAuthService {
       // the dependency failure as a typed 502 instead.
       throw new DependencyError("Clerk membership service unavailable");
     }
+  }
+
+  /** Resolve current verified primary email without trusting client profile fields. */
+  async getVerifiedEmail(userId: string, _correlationId?: string): Promise<string | undefined> {
+    const cached = this.emailCache.get(userId);
+    if (cached && Date.now() - cached.fetchedAt < this.config.membershipCacheTtlMs) return cached.email;
+    try {
+      const client = this.getClient();
+      if (!client?.users.getUser) throw new Error("Clerk user lookup unavailable");
+      const user = await client.users.getUser(userId);
+      const primary = user.emailAddresses.find(email => email.id === user.primaryEmailAddressId);
+      const email = primary?.verification?.status === "verified" ? primary.emailAddress : undefined;
+      this.emailCache.set(userId, { email, fetchedAt: Date.now() });
+      this.evictIfOversized(this.emailCache);
+      return email;
+    } catch { throw new DependencyError("Verified user profile unavailable"); }
   }
 
   private getClient(): MembershipClient | undefined {

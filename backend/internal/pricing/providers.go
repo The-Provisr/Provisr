@@ -316,6 +316,7 @@ type gcpSKU struct {
 	Regions     []string `json:"serviceRegions"`
 	Category    struct {
 		ResourceFamily string `json:"resourceFamily"`
+		ResourceGroup  string `json:"resourceGroup"`
 		UsageType      string `json:"usageType"`
 	} `json:"category"`
 	GeoTaxonomy struct {

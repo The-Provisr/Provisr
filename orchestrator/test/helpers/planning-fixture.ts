@@ -76,15 +76,23 @@ export function fakeClients(run: ProvisioningRun, outputs: Array<{ type: string;
     const path = new URL(String(url)).pathname;
     let body: unknown;
     if (path.endsWith("/policy-requirements")) body = options.policyResponse ?? policyServiceResponse;
-    else if (path === "/v1/cloud-accounts") body = { accounts: options.noProvider ? [] : cloud.active_accounts };
-    else if (path.startsWith("/v1/cloud-accounts/")) body = { ...cloud.active_accounts[0], metadata: {
-      supported_regions: ["us-east-1"], resource_counts: { aws_s3: 0 }, quota_limits: { aws_s3: 100 }, secret_access_key: "DO_NOT_COPY" } };
+    else if (path === "/tools/get_cloud_account_capabilities") body = { workspace_id: run.workspaceId,
+      accounts: options.noProvider ? [] : cloud.active_accounts.map(a => ({ id: a.id, provider: a.provider,
+        status: a.status, account_alias: a.label, available_regions: a.supported_regions,
+        checked_at: a.verified_at, execution_ready: false })) };
     else if (path === "/v1/sessions") body = { session: { session_id: randomUUID() } };
     else if (path.endsWith("/turns")) {
       const output = outputs.shift();
       if (!output) throw new Error("No test output remaining");
       body = { result: { ...output, version: "1.0.0", request_id: run.id, metadata: { confidence: 1, source: "llm_generated", warnings: [] } } };
-    } else if (path === "/tools/validate_manifest") body = { valid: ++validationCalls > (options.invalidDrafts ?? 0), errors: ["region validation failed"] };
+    } else if (path === "/tools/create_manifest") {
+      const valid = ++validationCalls > (options.invalidDrafts ?? 0);
+      body = valid ? {manifest_id:randomUUID(),version:++manifestVersion,url:"http://manifest/v1/runs/manifests/1",validation:{valid:true}}
+        : {valid:false,errors:["region validation failed"]};
+    } else if (path === "/tools/validate_manifest") {
+      const valid = ++validationCalls > (options.invalidDrafts ?? 0);
+      body = { valid, errors: valid ? [] : ["region validation failed"] };
+    }
     else if (path === "/tools/validate_manifest_schema") body = { valid: true, errors: [] };
     else if (path === "/v1/manifests") body = { version: ++manifestVersion };
     else throw new Error(`Unexpected test URL ${path}`);

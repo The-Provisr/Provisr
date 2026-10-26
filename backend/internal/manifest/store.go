@@ -107,7 +107,7 @@ func (s *DBStore) StoreManifestVersionWithKey(ctx context.Context, runID, key st
 		FROM provisr_manifest.manifests WHERE run_id = $1 AND idempotency_key = $2`, runID, key).Scan(
 		&record.ID, &record.RunID, &record.Version, &record.Content, &record.SourceMetadata, &record.CreatedAt)
 	if err == nil {
-		if string(record.Content) != string(contentBytes) {
+		if !sameManifestContent(record.Content, contentBytes) {
 			return nil, ErrIdempotencyConflict
 		}
 		record.Hash = extractOrComputeHash(record.Content, record.SourceMetadata)
@@ -340,7 +340,7 @@ func (m *MemoryStore) StoreManifestVersionWithKey(ctx context.Context, runID, ke
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if existing, ok := m.keys[mapKey]; ok {
-		if string(existing.Content) != string(contentBytes) {
+		if !sameManifestContent(existing.Content, contentBytes) {
 			return nil, ErrIdempotencyConflict
 		}
 		return &existing, nil
@@ -447,6 +447,22 @@ func (m *MemoryStore) ListManifestVersions(ctx context.Context, runID string) ([
 		}
 	}
 	return metas, nil
+}
+
+// JSONB may reorder keys and add whitespace; retain numeric precision during replay checks.
+func sameManifestContent(left, right []byte) bool {
+	decode := func(data []byte) ([]byte, error) {
+		decoder := json.NewDecoder(strings.NewReader(string(data)))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	}
+	a, errA := decode(left)
+	b, errB := decode(right)
+	return errA == nil && errB == nil && string(a) == string(b)
 }
 
 func normalizeContentBytes(content any) ([]byte, error) {

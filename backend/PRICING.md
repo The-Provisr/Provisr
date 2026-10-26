@@ -36,7 +36,7 @@ the public catalog endpoint.
 Cache TTL defaults are 24 hours for `bulk` requests and one hour for
 `on_demand` requests. Configure them with `PRICING_BULK_CACHE_TTL` and
 `PRICING_ON_DEMAND_CACHE_TTL` (Go duration values such as `24h` or `30m`).
-Apply migration `000022_pricing_cache.up.sql` before starting the service.
+Apply migration `000024_pricing_cache.up.sql` before starting the service.
 
 Provider API references:
 

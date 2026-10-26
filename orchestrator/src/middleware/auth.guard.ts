@@ -5,6 +5,7 @@ import { ForbiddenError, UnauthorizedError } from "../common/errors/typed-errors
 import { ClerkAuthService } from "../auth/clerk-auth.service";
 import { IdentityService } from "../auth/identity.service";
 import { IS_PUBLIC_KEY } from "./public.decorator";
+import { ALLOW_NO_WORKSPACE_MEMBERSHIP_KEY } from "./allow-no-workspace.decorator";
 import type { RequestUser } from "./auth.types";
 
 const SSE_EVENTS_PATH_PATTERN = /\/workspaces\/[^/]+\/events$/;
@@ -59,6 +60,11 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
+    const allowNoWorkspaceMembership = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_NO_WORKSPACE_MEMBERSHIP_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
     const http = context.switchToHttp();
     const req = http.getRequest<Request & { user?: RequestUser }>();
     const res = typeof http.getResponse === "function" ? http.getResponse() : undefined;
@@ -92,7 +98,7 @@ export class AuthGuard implements CanActivate {
     const user = await this.identity.getOrCreateUser(claims, correlationId);
     const memberships = await this.identity.resolveMemberships(user.clerkId, correlationId);
 
-    if (memberships.length === 0) {
+    if (memberships.length === 0 && !allowNoWorkspaceMembership) {
       throw new ForbiddenError("No workspace membership");
     }
 

@@ -12,11 +12,14 @@ export const ErrorCodes = {
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
 export class ProvError extends Error {
-  readonly code: ErrorCode;
+  // Not restricted to ErrorCodes: upstream services return domain slugs
+  // (e.g. "revoked", "last_admin", "email_mismatch") that the frontend needs
+  // to branch on, so the envelope must preserve them verbatim.
+  readonly code: string;
   readonly status: number;
   readonly details: unknown[] | undefined;
 
-  constructor(code: ErrorCode, message: string, status: number, details?: unknown[]) {
+  constructor(code: string, message: string, status: number, details?: unknown[]) {
     super(message);
     this.name = new.target.name;
     this.code = code;
@@ -65,5 +68,17 @@ export class NotImplementedError extends ProvError {
 export class DependencyError extends ProvError {
   constructor(message: string) {
     super(ErrorCodes.DEPENDENCY_UNAVAILABLE, message, 502);
+  }
+}
+
+/**
+ * A non-2xx response from an internal service. The upstream HTTP status and
+ * domain error slug are preserved so callers can distinguish, for example,
+ * a revoked invitation (410 / "revoked") from a duplicate membership
+ * (409 / "already_member").
+ */
+export class UpstreamError extends ProvError {
+  constructor(status: number, code: string, message: string, details?: unknown[]) {
+    super(code, message, status, details);
   }
 }

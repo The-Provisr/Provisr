@@ -176,3 +176,24 @@ def test_disconnected_provider_never_passes_manifest_context_validation() -> Non
 def test_quota_limit_blocks_excess_resource_count() -> None:
     context = _context(quota_limits={"aws_ec2": 1})
     assert "quota" in (_manifest_cloud_context_error(_manifest(), context) or "")
+
+
+def test_quota_counts_all_new_resources_of_the_same_type() -> None:
+    context = _context(quota_limits={"aws_ec2": 2})
+    manifest = _manifest()
+    manifest.resources.append(manifest.resources[0].model_copy(update={"name": "second-server"}))
+    assert "quota" in (_manifest_cloud_context_error(manifest, context) or "")
+
+
+def test_unknown_inventory_counts_do_not_imply_zero_usage() -> None:
+    context = _context(quota_limits={"aws_ec2": 0})
+    context.cloud_context.active_accounts[0].resource_counts = None
+    assert "quota" in (_manifest_cloud_context_error(_manifest(), context) or "")
+    assert context.cloud_context.active_accounts[0].resource_counts is None
+
+
+def test_cloud_context_requires_verified_regions() -> None:
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        CloudContext.model_validate({"providers": ["aws"], "regions": []})

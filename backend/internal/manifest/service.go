@@ -141,6 +141,7 @@ func (s *server) handleStoreVersion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var record *ManifestRecord
+	var err error
 	key := r.Header.Get("Idempotency-Key")
 	if key != "" {
 		idempotent, ok := s.store.(IdempotentStore)

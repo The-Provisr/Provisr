@@ -128,9 +128,7 @@ def detect_gaps(
     provider_ambiguous = len(mentioned_providers) > 1
     if (provider_unavailable or provider_ambiguous) and "provider" not in {
         a.field_mapping for a in answered_questions
-    }:
-        candidates.append(_question_provider(allowed_providers))
-    elif "provider" not in answered_fields and not _message_mentions_provider(normalized):
+    } or "provider" not in answered_fields and not _message_mentions_provider(normalized):
         candidates.append(_question_provider(allowed_providers))
 
     # 2 — Region missing or unrecognisable

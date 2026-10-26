@@ -523,13 +523,16 @@ def _manifest_cloud_context_error(
     if any(resource.name.casefold() in existing_names for resource in manifest.resources):
         return "The proposed manifest reuses a resource name that already exists in this workspace."
 
+    requested_by_type: dict[str, int] = {}
+    for resource in manifest.resources:
+        requested_by_type[resource.type] = requested_by_type.get(resource.type, 0) + getattr(resource, "count", 1)
     for account in cloud.active_accounts:
         if account.provider != provider or account.quota_limits is None:
             continue
-        for resource in manifest.resources:
-            quota = account.quota_limits.get(resource.type)
-            count = account.resource_counts.get(resource.type, 0) if account.resource_counts else 0
-            requested = getattr(resource, "count", 1)
+        for resource_type, requested in requested_by_type.items():
+            quota = account.quota_limits.get(resource_type)
+            # Zero is a lower bound when usage is unknown, not proof of free capacity.
+            count = account.resource_counts.get(resource_type, 0) if account.resource_counts else 0
             if quota is not None and count + requested > quota:
                 return "The proposed resource count exceeds a reported workspace quota."
 

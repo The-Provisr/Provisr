@@ -115,20 +115,71 @@ export const containerCardSchema = z.object({
   healthCheckPath: z.string().optional(),
 });
 
-export const costEstimateSchema = z.object({
-  currency: z.string().default("USD"),
-  monthlyTotalUsd: z.number(),
-  breakdown: z.array(
-    z.object({
-      category: z.string(),
-      serviceName: z.string(),
-      costUsd: z.number(),
-      unit: z.string().optional(),
-    }),
-  ),
-  previousMonthlyCostUsd: z.number().optional(),
-  deltaPercentage: z.number().optional(),
+const costBreakdownByServiceSchema = z.object({
+  service: z.string().min(1),
+  monthly_cost: z.number().finite().nonnegative(),
+  percentage: z.number().finite().min(0).max(100),
 });
+
+const legacyCostBreakdownSchema = z.object({
+  category: z.string(),
+  serviceName: z.string(),
+  costUsd: z.number().finite().nonnegative(),
+  unit: z.string().optional(),
+});
+
+export const costEstimateSchema = z
+  .object({
+    currency: z.string().regex(/^[A-Za-z]{3}$/).default("USD").transform((value) => value.toUpperCase()),
+    total_monthly_estimate: z.number().finite().nonnegative().optional(),
+    monthlyTotalUsd: z.number().finite().nonnegative().optional(),
+    breakdown_by_service: z.array(costBreakdownByServiceSchema).optional(),
+    breakdown: z.array(legacyCostBreakdownSchema).optional(),
+    assumptions: z.array(z.string()).default([]),
+    confidence: z.enum(["low", "medium", "high"]).optional(),
+    pricing_source: z.string().optional(),
+    freshness_note: z.string().optional(),
+    freshness: z.string().optional(),
+    cost_approval_threshold: z.number().finite().nonnegative().optional(),
+    requires_approval: z.boolean().default(false),
+    state: z.enum(["default", "loading", "partial"]).default("default"),
+    partial_reasons: z.array(z.string()).optional(),
+    previousMonthlyCostUsd: z.number().finite().nonnegative().optional(),
+    deltaPercentage: z.number().finite().optional(),
+  })
+  .superRefine((data, context) => {
+    if (
+      data.state === "default" &&
+      data.total_monthly_estimate === undefined &&
+      data.monthlyTotalUsd === undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["total_monthly_estimate"],
+        message: "A total estimate is required for a complete cost estimate.",
+      });
+    }
+  })
+  .transform((data) => {
+    const totalMonthlyEstimate = data.total_monthly_estimate ?? data.monthlyTotalUsd;
+    const services = data.breakdown_by_service?.map((item) => ({ ...item, unit: undefined })) ?? (data.breakdown ?? []).map((item) => {
+      const isMonthly = !item.unit || /^(month|mo)$/i.test(item.unit.trim());
+      return {
+        service: item.serviceName,
+        monthly_cost: item.costUsd,
+        unit: item.unit,
+        percentage: isMonthly && totalMonthlyEstimate !== undefined
+          ? totalMonthlyEstimate > 0 ? (item.costUsd / totalMonthlyEstimate) * 100 : 0
+          : undefined,
+      };
+    });
+    return {
+      ...data,
+      totalMonthlyEstimate,
+      services,
+      freshnessNote: data.freshness_note ?? data.freshness,
+    };
+  });
 
 // Security fields and backup retention are required with no defaults: a payload
 // that omits them must fail validation instead of rendering as if it were safe.
@@ -208,40 +259,52 @@ export const executionTimelineSchema = z.object({
   ),
 });
 
+const portSchema = z.number().int().min(1).max(65535);
+
+// Scheme is required with no default: a payload that omits it must fail
+// validation instead of silently rendering as internal (or as public).
 export const loadbalancerCardSchema = z.object({
-  name: z.string(),
-  type: z.enum(["application", "network", "gateway"]).default("application"),
-  scheme: z.enum(["internet-facing", "internal"]).default("internet-facing"),
+  name: z.string().min(1),
+  lbType: z.enum(["ALB", "NLB", "AGW"]),
+  scheme: z.enum(["internet-facing", "internal"]),
   listeners: z.array(
     z.object({
-      port: z.number(),
-      protocol: z.string(),
-      sslCertificate: z.boolean().optional(),
+      port: portSchema,
+      protocol: z.string().min(1),
+      sslPolicy: z.string().optional(),
+      // Name of the target group this listener forwards to (traffic path).
+      targetGroup: z.string().optional(),
     }),
   ),
   targetGroups: z
     .array(
       z.object({
-        name: z.string(),
-        port: z.number(),
-        healthCheckStatus: z.string().optional(),
+        name: z.string().min(1),
+        protocol: z.string().min(1),
+        port: portSchema,
+        healthCheckPath: z.string().optional(),
+        // Health check interval in seconds.
+        interval: z.number().positive().optional(),
       }),
     )
-    .optional(),
+    .default([]),
+  publicExposure: z.boolean().optional(),
+  approvalNote: z.string().optional(),
+  policyNotes: z.array(z.string()).default([]),
+});
+
+export const notificationTargetSchema = z.object({
+  type: z.enum(["sns", "email", "webhook"]),
+  destination: z.string().min(1),
 });
 
 export const monitoringCardSchema = z.object({
-  service: z.string(),
-  metrics: z.array(
-    z.object({
-      name: z.string(),
-      unit: z.string(),
-      threshold: z.string().optional(),
-    }),
-  ),
-  alertEndpoints: z.array(z.string()).optional(),
-  logRetentionDays: z.number().optional(),
-  dashboardEnabled: z.boolean().default(true),
+  logGroupNames: z.array(z.string().min(1)),
+  metricNamespaces: z.array(z.string().min(1)).default([]),
+  alarmCount: z.number().int().nonnegative(),
+  retentionDays: z.number().int().positive(),
+  notificationTargets: z.array(notificationTargetSchema).default([]),
+  policyNotes: z.array(z.string()).default([]),
 });
 
 export const firewallRuleSchema = z.object({
@@ -293,17 +356,29 @@ export const policyResultSchema = z.object({
     .optional(),
 });
 
+const regionOptionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  latencyMs: z.number().finite().nonnegative().optional(),
+  complianceCompliant: z.boolean().optional(),
+  available: z.boolean().default(true),
+  restrictedByPolicy: z.boolean().default(false),
+});
+
 export const regionSelectorSchema = z.object({
   provider: z.enum(["aws", "azure", "gcp"]),
   selectedRegion: z.string(),
-  availableRegions: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      latencyMs: z.number().optional(),
-      complianceCompliant: z.boolean().optional(),
-    }),
-  ),
+  availableRegions: z.array(regionOptionSchema),
+  providers: z
+    .array(
+      z.object({
+        provider: z.enum(["aws", "azure", "gcp"]),
+        selectedRegion: z.string().optional(),
+        availableRegions: z.array(regionOptionSchema),
+      }),
+    )
+    .optional(),
+  loading: z.boolean().optional(),
   reasoning: z.string().optional(),
 });
 
@@ -312,23 +387,35 @@ export const resourceTableSchema = z.object({
   columns: z.array(z.string()).optional(),
   rows: z.array(
     z.object({
-      id: z.string(),
-      name: z.string(),
-      type: z.string(),
-      provider: z.string(),
-      status: z.string(),
+      id: z.string().min(1),
+      name: z.string().min(1),
+      type: z.string().min(1),
+      provider: z.string().min(1),
+      status: z.string().min(1),
       monthlyCostUsd: z.number().optional(),
+      region: z.string().optional(),
+      dependsOn: z.array(z.string()).default([]),
+      warningCount: z.number().int().nonnegative().default(0),
+      spec: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
 });
 
-export const securityWarningSchema = z.object({
-  title: z.string(),
+export const securityFindingSchema = z.object({
+  title: z.string().trim().min(1).max(256),
   severity: z.enum(["critical", "high", "medium", "low"]),
-  description: z.string(),
-  affectedResource: z.string().optional(),
-  mitigationSteps: z.array(z.string()).optional(),
-});
+  description: z.string().trim().min(1).max(4000),
+  affectedResource: z.string().trim().min(1).max(256).optional(),
+  suggestedFix: z.string().trim().min(1).max(2000).optional(),
+  mitigationSteps: z.array(z.string().trim().min(1).max(2000)).max(30).optional(),
+}).strict();
+
+// Preserve the original single-finding contract. Only explicit findings: []
+// means clear; missing data and mixed legacy/list payloads must fail validation.
+export const securityWarningSchema = z.union([
+  z.object({ findings: z.array(securityFindingSchema).max(200) }).strict(),
+  securityFindingSchema,
+]);
 
 export const storageCardSchema = z.object({
   bucketName: z.string(),
@@ -394,3 +481,13 @@ export const componentSchemas = {
   terraform_plan_diff: terraformPlanDiffSchema,
   terraform_review: terraformReviewSchema,
 } as const;
+
+/** Schema contract version carried by component envelopes. */
+export const COMPONENT_SCHEMA_VERSION = "1.0.0" as const;
+
+/** Keep the current schemas addressable by version so older payloads can retain their validator. */
+export const componentSchemasByVersion = Object.fromEntries(
+  Object.entries(componentSchemas).map(([type, schema]) => [type, { [COMPONENT_SCHEMA_VERSION]: schema }]),
+) as {
+  readonly [Type in keyof typeof componentSchemas]: Readonly<Record<typeof COMPONENT_SCHEMA_VERSION, (typeof componentSchemas)[Type]>>;
+};

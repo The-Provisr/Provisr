@@ -56,6 +56,7 @@ services:
     environment:
       PORT: "8090"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,6 +115,7 @@ services:
     environment:
       PORT: "8082"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
+      WORKSPACE_SERVICE_URL: http://workspace-service:8088
       MCP_URL: http://mcp:5100
       ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
     depends_on:
@@ -234,6 +236,8 @@ services:
       # Local dev only. Production must inject this via Vault/infra config.
       # No fallback: an unset key must fail startup, never ship a known key.
       CLOUD_ACCOUNT_MASTER_KEY: ${CLOUD_ACCOUNT_MASTER_KEY:?CLOUD_ACCOUNT_MASTER_KEY must be set}
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     depends_on:
       postgres:
         condition: service_healthy
@@ -272,11 +276,19 @@ services:
       BACKEND_URL: http://provisioning-service:8083
       MANIFEST_SERVICE_URL: http://manifest-service:8090
       PRICING_SERVICE_URL: http://pricing-service:8091
+      CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
       provisioning-service:
+        condition: service_started
+        required: false
+      manifest-service:
+        condition: service_started
+        required: false
+      cloud-account-service:
         condition: service_started
         required: false
       pricing-service:
@@ -297,6 +309,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       AGENT_URL: http://agent:5000
       CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089
+      WORKSPACE_SERVICE_URL: http://workspace-service:8088
       POLICY_SERVICE_URL: http://policy-service:8081
       POLICY_SERVICE_SECRET: ${POLICY_SERVICE_SECRET:-}
       STATE_SERVICE_URL: http://state-service:8082
@@ -317,6 +330,8 @@ services:
     build:
       context: ../../frontend
       dockerfile: ../infra/docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID: ${NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID:-}
     ports:
       - "3000:3000"
     environment:

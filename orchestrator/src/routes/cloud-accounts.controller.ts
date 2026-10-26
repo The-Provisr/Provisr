@@ -139,6 +139,9 @@ export class CloudAccountsController {
     @Res() res: Response,
     @Headers("idempotency-key") idempotencyKey?: string,
   ): Promise<void> {
+    if (!idempotencyKey?.trim() || idempotencyKey.length > 255) {
+      throw new ValidationError("A nonblank Idempotency-Key of at most 255 characters is required");
+    }
     const ctx = gatewayContext(req, res, user, idempotencyKey);
     await this.access.assertAllowed(user.userId, workspaceId, "cloud_account", "update", ctx);
 

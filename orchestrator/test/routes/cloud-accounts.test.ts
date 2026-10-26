@@ -83,13 +83,22 @@ describe("CloudAccountsController", () => {
 
   it("verifies a UUID account id directly", async () => {
     const res = mockResponse();
-    await h.controller.verify(WS, ACCT, { external_id: "ext" }, user, mockRequest(), res, undefined);
-    expect(h.cloud.verify).toHaveBeenCalledWith(WS, ACCT, "ext", expect.anything());
+    await h.controller.verify(WS, ACCT, { external_id: "ext" }, user, mockRequest(), res, " verify-key ");
+    expect(h.cloud.verify).toHaveBeenCalledWith(WS, ACCT, "ext", expect.objectContaining({ idempotencyKey: " verify-key " }));
+  });
+
+  it.each([undefined, "", " ", "\t", "x".repeat(256)])("rejects an invalid verify key before upstream work: %j", async (key) => {
+    await expect(
+      h.controller.verify(WS, "aws", { external_id: "ext" }, user, mockRequest(), mockResponse(), key),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED", status: 400 });
+    expect(h.access.assertAllowed).not.toHaveBeenCalled();
+    expect(h.cloud.list).not.toHaveBeenCalled();
+    expect(h.cloud.verify).not.toHaveBeenCalled();
   });
 
   it("rejects a non-UUID, non-provider verify segment", async () => {
     await expect(
-      h.controller.verify(WS, "not-a-uuid", { external_id: "ext" }, user, mockRequest(), mockResponse(), undefined),
+      h.controller.verify(WS, "not-a-uuid", { external_id: "ext" }, user, mockRequest(), mockResponse(), "verify-key"),
     ).rejects.toBeInstanceOf(ValidationError);
     expect(h.cloud.verify).not.toHaveBeenCalled();
   });
@@ -97,20 +106,22 @@ describe("CloudAccountsController", () => {
   it("resolves the workspace AWS account for the /aws/verify form", async () => {
     h.cloud.list.mockResolvedValueOnce({ status: 200, body: { accounts: [{ id: ACCT, provider: "aws" }] } });
     const res = mockResponse();
-    await h.controller.verify(WS, "aws", { external_id: "ext" }, user, mockRequest(), res, undefined);
-    expect(h.cloud.verify).toHaveBeenCalledWith(WS, ACCT, "ext", expect.anything());
+    const key = "x".repeat(255);
+    await h.controller.verify(WS, "aws", { external_id: "ext" }, user, mockRequest(), res, key);
+    expect(h.cloud.list).toHaveBeenCalledWith(WS, expect.objectContaining({ idempotencyKey: key }));
+    expect(h.cloud.verify).toHaveBeenCalledWith(WS, ACCT, "ext", expect.objectContaining({ idempotencyKey: key }));
   });
 
   it("returns 404 when the workspace has no AWS account", async () => {
     h.cloud.list.mockResolvedValueOnce({ status: 200, body: { accounts: [] } });
     await expect(
-      h.controller.verify(WS, "aws", { external_id: "ext" }, user, mockRequest(), mockResponse(), undefined),
+      h.controller.verify(WS, "aws", { external_id: "ext" }, user, mockRequest(), mockResponse(), "verify-key"),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("returns 501 for provider verification that the backend does not support yet", async () => {
     await expect(
-      h.controller.verify(WS, "gcp", { external_id: "ext" }, user, mockRequest(), mockResponse(), undefined),
+      h.controller.verify(WS, "gcp", { external_id: "ext" }, user, mockRequest(), mockResponse(), "verify-key"),
     ).rejects.toBeInstanceOf(NotImplementedError);
   });
 

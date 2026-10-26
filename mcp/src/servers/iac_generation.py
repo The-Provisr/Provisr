@@ -5,7 +5,9 @@ by the backend. This tool never runs Terraform or grants execution authority.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import secrets
 from pathlib import PurePosixPath
 from typing import Annotated, Literal, Self
 from uuid import UUID
@@ -19,6 +21,7 @@ from src.context.models import MCPContext
 
 router = APIRouter()
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+IAC_GENERATION_TIMEOUT_SECONDS = 10.0
 
 
 class GenerateInput(BaseModel):
@@ -102,10 +105,25 @@ def unavailable() -> HTTPException:
     return HTTPException(status_code=502, detail="Terraform artifact generation unavailable")
 
 
+_validate_iac_context = require_context("iac:write", require_idempotency_key=True)
+
+
+async def authenticated_iac_context(request: Request) -> MCPContext:
+    """Authenticate trusted callers before reading or resolving their context."""
+    token = request.app.state.resources.iac_service_token
+    if not token:
+        raise unavailable()
+    scheme, _, supplied_token = request.headers.get("Authorization", "").partition(" ")
+    if (scheme.lower() != "bearer" or not supplied_token
+            or not secrets.compare_digest(supplied_token.encode("utf-8"), token.encode("utf-8"))):
+        raise HTTPException(status_code=401, detail="Service authentication required")
+    return await _validate_iac_context(request)
+
+
 @router.post("/tools/generate_iac", response_model=IaCArtifact)
 async def generate_iac(
     request: Request,
-    context: Annotated[MCPContext, Depends(require_context("iac:write", require_idempotency_key=True))],
+    context: Annotated[MCPContext, Depends(authenticated_iac_context)],
 ) -> IaCArtifact:
     try:
         payload = GenerateInput.model_validate(await request.json())
@@ -119,21 +137,22 @@ async def generate_iac(
     if not token:
         raise unavailable()
     try:
-        async with resources.http_client.stream(
-            "POST", f"{resources.manifest_backend_url}/v1/iac/generate",
-            json={"manifest_id": str(payload.manifest_id), "context": context.model_dump(mode="json")},
-            headers={"Authorization": f"Bearer {token}", "X-Request-ID": str(context.request_id),
-                     "X-Correlation-ID": str(context.correlation_id),
-                     "Idempotency-Key": context.idempotency_key or ""},
-            timeout=10.0,
-        ) as response:
-            chunks = bytearray()
-            async for chunk in response.aiter_bytes():
-                chunks.extend(chunk)
-                if len(chunks) > MAX_RESPONSE_BYTES:
-                    raise unavailable()
-            status = response.status_code
-    except httpx.RequestError as exc:
+        async with asyncio.timeout(IAC_GENERATION_TIMEOUT_SECONDS):
+            async with resources.http_client.stream(
+                "POST", f"{resources.manifest_backend_url}/v1/iac/generate",
+                json={"manifest_id": str(payload.manifest_id), "context": context.model_dump(mode="json")},
+                headers={"Authorization": f"Bearer {token}", "X-Request-ID": str(context.request_id),
+                         "X-Correlation-ID": str(context.correlation_id),
+                         "Idempotency-Key": context.idempotency_key or ""},
+                timeout=IAC_GENERATION_TIMEOUT_SECONDS,
+            ) as response:
+                chunks = bytearray()
+                async for chunk in response.aiter_bytes():
+                    chunks.extend(chunk)
+                    if len(chunks) > MAX_RESPONSE_BYTES:
+                        raise unavailable()
+                status = response.status_code
+    except (httpx.RequestError, TimeoutError) as exc:
         raise unavailable() from exc
 
     if status == 422:

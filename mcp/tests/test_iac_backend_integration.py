@@ -52,10 +52,11 @@ def test_generate_iac_real_backend(monkeypatch):
         "correlation_id": str(correlation), "session_id": str(session),
         "permissions": ["iac:write"], "idempotency_key": "iac-integration-1"}}
     with TestClient(runtime) as client:
-        response = client.post("/tools/generate_iac", json=body)
+        assert client.post("/tools/generate_iac", json=body).status_code == 401
+        response = client.post("/tools/generate_iac", json=body, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 200, response.text
         artifact = response.json()
-        replay = client.post("/tools/generate_iac", json=body)
+        replay = client.post("/tools/generate_iac", json=body, headers={"Authorization": f"Bearer {token}"})
         assert replay.status_code == 200 and replay.json() == artifact
         assert artifact["manifest_id"] == str(manifest_id)
         assert artifact["summary"]["resource_count"] == 1

@@ -2,7 +2,7 @@
 
 `POST /tools/generate_iac` is mounted in the existing MCP runtime on port 5100.
 For a standalone runtime, use `uvicorn src.servers.iac_server:app --port 5100`.
-Both use the existing workspace membership/context validator.
+Both require `Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>` from the trusted internal caller before validating workspace membership/context. Keep this service token server-side; never expose it to browsers or model prompts.
 
 ```json
 {
@@ -36,7 +36,7 @@ Digest input is the sorted file sequence of UTF-8 `path + NUL + content + NUL`.
 Unsupported resources return safe structured 422 diagnostics. Access, missing
 manifest, and stale/retry conflicts retain safe 403/404/409 statuses. Other backend
 failures and malformed responses return 502 without copying upstream error bodies.
-Requests have a 10-second timeout and responses are bounded to 8 MiB.
+Backend requests and response streaming share a 10-second total deadline, alongside HTTPX I/O timeouts; responses are bounded to 8 MiB. Deadline cancellation closes the stream and returns a sanitized 502.
 
 Run Python tests and Ruff from the repository root. The optional real integration
 test uses an already started BE-D04 manifest-service and a disposable PostgreSQL

@@ -1,4 +1,5 @@
 """MCP-014's mounted HTTP boundary and the BE-D04 wire contract."""
+import asyncio
 import hashlib
 import json
 from uuid import uuid4
@@ -18,8 +19,10 @@ MANIFEST = str(uuid4())
 class Membership:
     def __init__(self, member=True):
         self.member = member
+        self.calls = 0
 
     async def get_role(self, **kwargs):
+        self.calls += 1
         return "engineer" if self.member else None
 
 
@@ -38,23 +41,27 @@ def artifact():
             "summary": {"resource_count": 1, "file_count": len(files)}}
 
 
-def call(body=None, *, result=None, status=200, member=True, token="test-only-token", raw=None):
+def call(body=None, *, result=None, status=200, member=True, token="test-only-token", raw=None,
+         authorization="Bearer test-only-token", membership=None, stream=None):
     requests = []
 
     def respond(request):
         requests.append(request)
         if isinstance(result, Exception):
             raise result
+        if stream is not None:
+            return httpx.Response(status, stream=stream)
         if raw is not None:
             return httpx.Response(status, content=raw)
         return httpx.Response(status, json=artifact() if result is None else result)
 
-    runtime = create_app(membership_store=Membership(member),
+    runtime = create_app(membership_store=membership if membership is not None else Membership(member),
                          http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
                          manifest_backend_url="http://manifest:8090", iac_service_token=token)
     with TestClient(runtime) as client:
         response = client.post("/tools/generate_iac", json=body if body is not None else
-                               {"context": CONTEXT, "manifest_id": MANIFEST})
+                               {"context": CONTEXT, "manifest_id": MANIFEST},
+                               headers={} if authorization is None else {"Authorization": authorization})
     return response, requests
 
 
@@ -70,6 +77,51 @@ def test_forwards_only_manifest_id_and_trusted_context():
     assert requests[0].headers["Idempotency-Key"] == CONTEXT["idempotency_key"]
     assert requests[0].headers["X-Correlation-ID"] == CONTEXT["correlation_id"]
     assert requests[0].extensions["timeout"]["read"] == 10.0
+
+
+@pytest.mark.parametrize("authorization", [None, "", "Basic test-only-token", "Bearer wrong-token",
+                                           "Bearer ", b"Bearer \xc3\xa9"])
+def test_service_auth_rejects_before_membership_or_backend(authorization):
+    membership = Membership()
+    response, requests = call(authorization=authorization, membership=membership)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Service authentication required"}
+    assert membership.calls == 0
+    assert requests == []
+
+
+def test_missing_service_configuration_fails_before_membership_lookup():
+    membership = Membership()
+    response, requests = call(token="", membership=membership)
+    assert response.status_code == 502
+    assert membership.calls == 0
+    assert requests == []
+
+
+def test_total_deadline_interrupts_slow_response_and_closes_stream(monkeypatch):
+    from src.servers import iac_generation
+
+    class SlowStream(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            # Chunks keep arriving faster than the configured idle timeout.
+            # Their total duration must still be bounded.
+            content = json.dumps(artifact()).encode()
+            for offset in range(0, len(content), 16):
+                yield content[offset:offset + 16]
+                await asyncio.sleep(0.003)
+
+        async def aclose(self):
+            self.closed = True
+
+    monkeypatch.setattr(iac_generation, "IAC_GENERATION_TIMEOUT_SECONDS", 0.01, raising=False)
+    stream = SlowStream()
+    response, requests = call(stream=stream)
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Terraform artifact generation unavailable"}
+    assert len(requests) == 1
+    assert stream.closed
 
 
 @pytest.mark.parametrize("change", [{"permissions": []}, {"idempotency_key": None},

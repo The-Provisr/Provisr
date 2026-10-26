@@ -1,0 +1,37 @@
+{
+  "provider": "gcp",
+  "region": "us-central1",
+  "resources": [
+    {
+      "type": "gcp_logging_bucket",
+      "name": "api-logs",
+      "project_id": "provisr-demo",
+      "location": "us-central1",
+      "retention_days": 30,
+      "filter": "resource.type=\"gce_instance\" AND resource.labels.instance_id=\"123456789\"",
+      "resource_refs": ["//compute.googleapis.com/projects/provisr-demo/zones/us-central1-a/instances/api"]
+    },
+    {
+      "type": "gcp_monitoring_metric",
+      "name": "api_cpu",
+      "resource_ref": "//compute.googleapis.com/projects/provisr-demo/zones/us-central1-a/instances/api",
+      "metric_name": "compute.googleapis.com/instance/cpu/utilization",
+      "monitored_resource_type": "gce_instance",
+      "filter": "metric.type=\"compute.googleapis.com/instance/cpu/utilization\" AND resource.type=\"gce_instance\" AND resource.labels.instance_id=\"123456789\"",
+      "alignment_period_seconds": 300,
+      "per_series_aligner": "ALIGN_MEAN"
+    },
+    {
+      "type": "gcp_monitoring_alarm",
+      "name": "api-high-cpu",
+      "project_id": "provisr-demo",
+      "metric_ref": "api_cpu",
+      "threshold": 0.8,
+      "comparison": "greater_than",
+      "missing_data": "ignore",
+      "duration_seconds": 300,
+      "trigger_count": 1,
+      "notification_target_refs": ["projects/provisr-demo/notificationChannels/123456789"]
+    }
+  ]
+}

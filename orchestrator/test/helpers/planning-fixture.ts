@@ -20,7 +20,7 @@ export function makeRun(overrides: Partial<ProvisioningRun> = {}): ProvisioningR
     errorCode: null, errorMessage: null, createdAt: new Date(), updatedAt: new Date(), completedAt: null,
     policyRequirements: null, policyRequirementsLoadedAt: null, cloudContext: null, cloudContextLoadedAt: null,
     agentSessionId: null, agentTurnPending: true, agentInput: null, currentQuestion: null, clarificationExpiresAt: null,
-    answersHistory: [], manifestValidationAttempts: 0, manifestValidatedVersion: null, manifestConfirmedVersion: null, manifestConfirmedAt: null, ...overrides };
+    answersHistory: [], manifestValidationAttempts: 0, manifestValidatedVersion: null, manifestConfirmedVersion: null, manifestConfirmedAt: null, iacArtifactId: null, ...overrides };
 }
 export function contextFor(run: ProvisioningRun) {
   return { connected_providers: ["aws" as const], active_accounts: [{ id: randomUUID(), workspace_id: run.workspaceId,

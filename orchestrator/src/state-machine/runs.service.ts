@@ -9,6 +9,7 @@ import { PolicyDeniesAllRegionsError } from "../services/policy-service.client";
 import { CloudContext, ClarificationQuestion, ComponentPayloadValidationError, cloudContextSchema, questionSchema, validateAnswers, validateComponent, manifestComponents } from "../services/planning-contracts";
 import { assertTransition, EMPTY_TRANSITION_CONDITIONS } from "./transitions";
 import { WORKFLOW_STATES, WorkflowState, isTerminalWorkflowState } from "./workflow-state";
+import { assertConfirmedManifest, IacGenerationError, iacIdempotencyKey, verifyIacArtifact } from "../services/iac-contracts";
 
 export const ALL_RUN_STATES = WORKFLOW_STATES;
 export type RunState = WorkflowState;
@@ -24,8 +25,10 @@ export interface ProvisioningRun {
   currentQuestion: ClarificationQuestion | null; clarificationExpiresAt: Date | null;
   answersHistory: Array<{ question: ClarificationQuestion; answers: Record<string, unknown>; answeredAt: string; idempotencyKey: string }>;
   manifestValidationAttempts: number; manifestValidatedVersion: number | null; manifestConfirmedVersion: number | null; manifestConfirmedAt: Date | null;
+  iacArtifactId: string | null;
 }
 const columns = {
+  iacArtifactId: "iac_artifact_id",
   approvalStatus: "approval_status", policyDecision: "policy_decision", errorCode: "error_code", errorMessage: "error_message",
   policyRequirements: "policy_requirements", policyRequirementsLoadedAt: "policy_requirements_loaded_at",
   cloudContext: "cloud_context", cloudContextLoadedAt: "cloud_context_loaded_at", agentSessionId: "agent_session_id",
@@ -168,7 +171,26 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
       if (actorId !== "orchestrator") await this.assertMutationPermission(client, workspaceId, actorId,
         run.state === "APPROVING" && change.state !== "CANCELLED");
       if (change.state) {
-        try { assertTransition(run.state, change.state, this.conditions({ ...run, ...change.updates })); }
+        const candidate = { ...run, ...change.updates };
+        const conditions = this.conditions(candidate);
+        if (change.state === "PLAN_CREATING" && candidate.iacArtifactId) {
+          assertConfirmedManifest(candidate);
+          const evidence = await client.query<{ generation: unknown; manifestId: string; hash: string; idempotencyKey: string }>(
+            `SELECT a.generation, m.id AS "manifestId", a.hash, a.idempotency_key AS "idempotencyKey"
+             FROM provisr_iac.artifacts a JOIN provisr_manifest.manifests m ON m.id = a.manifest_id AND m.run_id = a.run_id
+             WHERE a.id = $1 AND a.run_id = $2 AND m.version = $3 AND a.type = 'terraform'`,
+            [candidate.iacArtifactId, id, candidate.manifestVersion]);
+          const row = evidence.rows[0];
+          if (row) {
+            const artifact = verifyIacArtifact(row.generation, candidate, row.manifestId);
+            conditions.iacGenerated = artifact.iac_artifact_id === candidate.iacArtifactId && artifact.hash === row.hash
+              && row.idempotencyKey === iacIdempotencyKey(candidate, row.manifestId);
+          }
+          if (!conditions.iacGenerated || (change.payload?.hash !== undefined && change.payload.hash !== row?.hash)) {
+            throw new IacGenerationError("IAC_INVALID_ARTIFACT", "Generated Terraform could not be verified.");
+          }
+        }
+        try { assertTransition(run.state, change.state, conditions); }
         catch (error) { throw new ConflictException((error as Error).message); }
       } else if (isTerminalWorkflowState(run.state)) throw new ConflictException("Run is terminal");
       const state = change.state ?? run.state;
@@ -308,7 +330,7 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
 
   async processPendingRuns(): Promise<void> {
     const result = await this.db.query<{ id: string; workspace_id: string }>(`SELECT id, workspace_id FROM provisr_state.provisioning_runs
-      WHERE state IN ('RECEIVED','POLICY_LOADED','CLOUD_CONTEXT_LOADED') OR (state = 'MANIFEST_CREATING' AND agent_turn_pending)
+      WHERE state IN ('RECEIVED','POLICY_LOADED','CLOUD_CONTEXT_LOADED','IAC_GENERATING') OR (state = 'MANIFEST_CREATING' AND agent_turn_pending)
       ORDER BY updated_at LIMIT 20`);
     for (const row of result.rows) { if (this.stopping) break; await this.processRun(row.id, row.workspace_id); }
   }
@@ -353,6 +375,7 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
           run = await this.transitionState(id, workspaceId, run.stateVersion, "MANIFEST_CREATING", "orchestrator", { cloudContext: context, cloudContextLoadedAt: new Date() });
         }
         if (run.state === "MANIFEST_CREATING" && run.agentTurnPending) await this.dispatchAgent(run);
+        if (run.state === "IAC_GENERATING") await this.generateIac(run);
       } catch (error) {
         if (this.stopping) return;
         if (error instanceof ConflictException) return;
@@ -369,6 +392,44 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
       try { if (locked) await lock.query("SELECT pg_advisory_unlock(hashtext('provisr_planning'), hashtext($1))", [id]); }
       catch (error) { unlockError = error as Error; throw error; }
       finally { lock.release(unlockError); }
+    }
+  }
+  private async generateIac(initial: ProvisioningRun): Promise<void> {
+    let run = initial;
+    const signal = AbortSignal.any([AbortSignal.timeout(30000), this.shutdown.signal]);
+    try {
+      assertConfirmedManifest(run);
+      const result = await this.db.query<{ id: string }>(`SELECT m.id FROM provisr_manifest.manifests m
+        JOIN provisr_state.provisioning_runs r ON r.id = m.run_id
+        WHERE m.run_id = $1 AND m.version = $2 AND r.workspace_id = $3`, [run.id, run.manifestVersion, run.workspaceId]);
+      const manifestId = result.rows[0]?.id;
+      if (!manifestId) throw new IacGenerationError("IAC_MANIFEST_NOT_FOUND", "The confirmed manifest could not be found for this run.");
+      run = await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({
+        eventType: "IacProgressEvent", payload: { manifest_id: manifestId, manifest_version: run.manifestVersion,
+          stage: "generation", message: "Generating Terraform templates..." },
+      }));
+      const response = await this.clients!.generateIac(run, manifestId, signal);
+      if (signal.aborted) throw new Error("Generation aborted");
+      run = await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({
+        eventType: "IacProgressEvent", payload: { manifest_id: manifestId, manifest_version: run.manifestVersion,
+          stage: "validation", message: "Validating generated output..." },
+      }));
+      const artifact = verifyIacArtifact(response, run, manifestId);
+      await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ state: "PLAN_CREATING",
+        updates: { iacArtifactId: artifact.iac_artifact_id }, payload: { iac_artifact_id: artifact.iac_artifact_id,
+          manifest_id: manifestId, manifest_version: run.manifestVersion, hash: artifact.hash },
+      }));
+    } catch (error) {
+      if (this.stopping || error instanceof ConflictException) return;
+      const current = await this.getRun(run.id, run.workspaceId);
+      if (current.stateVersion !== run.stateVersion || current.state !== "IAC_GENERATING") return;
+      const safe = error instanceof IacGenerationError ? error : new IacGenerationError("IAC_GENERATION_FAILED", "Terraform generation could not be completed. Please try again.");
+      try {
+        await this.transitionState(run.id, run.workspaceId, run.stateVersion, "FAILED", "orchestrator", {
+          errorCode: signal.aborted ? "IAC_TIMEOUT" : safe.code,
+          errorMessage: signal.aborted ? "Terraform generation timed out. Please try again." : safe.message,
+        });
+      } catch (failure) { if (!(failure instanceof ConflictException)) throw failure; }
     }
   }
   private async dispatchAgent(initial: ProvisioningRun): Promise<void> {

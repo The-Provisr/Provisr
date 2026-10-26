@@ -10,6 +10,8 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.35.0
 )
 
+require google.golang.org/protobuf v1.36.11 // indirect
+
 require (
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.10 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.3.33 // indirect

@@ -1,4 +1,4 @@
-# Planning orchestration (OR-M01, OR-009–012)
+# Planning orchestration (OR-M01, OR-009–013)
 
 Apply the existing migrations and `backend/migrations/000021_run_planning_lifecycle.up.sql`
 before starting the updated orchestrator and state service. Migration 20's lease index
@@ -92,3 +92,67 @@ For rollback, stop the planning worker and state service before migration 21's d
 migration; it removes planning snapshots and confirmation/session metadata. Existing
 manifest contents and audit/SSE event rows remain. Reverting the code also requires
 matching the canonical FSM migration version.
+
+## IaC orchestration (OR-013)
+
+After manifest confirmation, the durable worker polls `IAC_GENERATING`, verifies
+that active/validated/confirmed versions match, and resolves the immutable manifest
+ID through the run's workspace. It calls `POST /tools/generate_iac` with only that
+ID and the MCP context (`iac:write`, requester, run/session/workspace/correlation
+IDs). The retry key is `iac:<run_id>:<manifest_id>`; progress state-version changes
+and process restarts preserve it. The existing per-run advisory lock serializes
+workers without holding a transaction during HTTP. Generation has a 30-second
+deadline, including response reading, and an 8 MiB response limit.
+
+The client follows **MCP-014 PR [#157](https://github.com/The-Provisr/Provisr/pull/157)**,
+branch `feat/155-mcp-014-generate-iac`, commit
+`277076b127a926985e5936c03a3886dcb0da7183`. Its backend dependency is **BE-D04 PR
+[#156](https://github.com/The-Provisr/Provisr/pull/156)**, branch
+`feat/154-be-d04-terraform-artifacts`, commit
+`646944515ba81ddb925eaa70eb387746120ebb6f`. These implementations were found in
+remote repository evidence but are absent from this checkout. Deploy both services
+and BE-D04's `000022_terraform_artifact_generation` migration, then apply
+`000027_iac_orchestration` before running this worker. MCP must use the same
+`ORCHESTRATOR_SERVICE_TOKEN` as manifest-service. OR-013 does not copy or replace
+either generator implementation.
+
+`IacProgressEvent` persists “Generating Terraform templates...” before dispatch
+and “Validating generated output...” before local verification. MCP-014 is a
+synchronous JSON endpoint without stage callbacks. **“Mapping resources to
+modules...” is not emitted:** exposing that intermediate progress requires an
+authoritative stage feed from MCP-014. No timers or invented stage completions
+stand in for it. Progress retries may produce additional replayable events.
+
+Verification checks identifiers, exact confirmed version, template source, safe
+unique paths, module files, counts, UTF-8 size, and SHA-256. Before entering
+`PLAN_CREATING`, the same transaction reloads and verifies BE-D04's persisted
+artifact/provenance, retry key, and response digest. It writes `iac_artifact_id`,
+the transition audit, and SSE event atomically. An ID alone never opens the FSM
+guard. Cancellation or a conflicting state version discards a late response;
+polling retries a still-pending run with the original key. Shutdown leaves the
+run recoverable. Failure persists only controlled `error_code`/`error_message`
+fields and enters `FAILED`. Upstream error bodies and Terraform contents never
+enter run errors or SSE. Work stops at `PLAN_CREATING`.
+
+Migration 27 rolls back before artifact links exist; it refuses to discard links
+after generation. Stop the worker before rollback.
+
+Focused proof:
+
+```sh
+pnpm --filter @provisr/orchestrator exec vitest run test/state-machine/iac-generation.test.ts
+```
+
+For PostgreSQL proof, create the infrastructure's `provisr_app` role and a **fresh**
+disposable `provisr_or_planning_test_*` database. Set `TEST_IAC_DATABASE_URL`.
+Until BE-D04 is integrated, also set `TEST_IAC_DEPENDENCY_MIGRATION` to a local
+copy of its actual migration 22 from the commit above. Run:
+
+```sh
+pnpm --filter @provisr/orchestrator exec vitest run test/integration/iac-generation.integration.test.ts
+```
+
+This suite applies migrations, tests up/down/up and rollback refusal, concurrent
+workers, conflict recovery, cancellation, workspace isolation, persisted audit/SSE,
+and transactional rollback. MCP HTTP is mocked; live generator integration remains
+dependent on deploying PRs #156/#157.

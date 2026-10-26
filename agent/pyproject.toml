@@ -3,6 +3,7 @@ name = "provisr-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "provisr-manifest-contracts",
     "anthropic>=0.40.0",
     "fastapi>=0.115.0",
     "google-genai>=0.1.0",
@@ -10,7 +11,11 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.0.0",
     "redis>=5.2.0",
+    "uvicorn>=0.30.0",
 ]
+
+[tool.uv.sources]
+provisr-manifest-contracts = { workspace = true }
 
 [dependency-groups]
 dev = [

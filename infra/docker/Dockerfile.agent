@@ -3,8 +3,10 @@ RUN pip install uv
 
 FROM base AS runner
 WORKDIR /app
-COPY agent/pyproject.toml agent/uv.lock ./
-RUN uv sync --frozen --no-dev
-COPY agent/ ./
+COPY pyproject.toml uv.lock ./
+COPY agent/ ./agent/
+COPY mcp/pyproject.toml ./mcp/pyproject.toml
+COPY packages/manifest-contracts/ ./packages/manifest-contracts/
+RUN uv sync --frozen --no-dev --package provisr-agent
 EXPOSE 5000
-CMD ["uv", "run", "uvicorn", "src.entrypoints.api:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uv", "run", "--frozen", "--no-dev", "--package", "provisr-agent", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]

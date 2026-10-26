@@ -249,8 +249,8 @@ services:
   agent:
     profiles: [all, agent]
     build:
-      context: ../../agent
-      dockerfile: ../infra/docker/Dockerfile.agent
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.agent
     ports:
       - "5000:5000"
     environment:
@@ -270,8 +270,8 @@ services:
   mcp:
     profiles: [all, agent]
     build:
-      context: ../../mcp
-      dockerfile: ../infra/docker/Dockerfile.mcp
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.mcp
     ports:
       - "5100:5100"
     environment:

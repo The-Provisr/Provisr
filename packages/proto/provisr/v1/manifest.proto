@@ -30,6 +30,12 @@ message Resource {
   string name = 3;
   string provider = 4;
   string region = 5;
+  // Runtime monitoring resources map log destinations to LOG_GROUP, metrics to
+  // MONITORING_METRIC, and alerts to MONITORING_ALARM. Preserve the provider-native
+  // runtime type in properties["runtime_type"] and serialize remaining typed
+  // fields as JSON in properties["configuration"]. Runtime JSON is validated by
+  // provisr_contracts.manifest.ResourceManifest; this transport is not a Terraform
+  // capability declaration. No implicit/default alert settings may be added.
   map<string, string> properties = 6;
   map<string, string> tags = 7;
 }
@@ -79,4 +85,5 @@ enum ResourceType {
   LOAD_BALANCER = 6;
   MONITORING_ALARM = 7;
   LOG_GROUP = 8;
+  MONITORING_METRIC = 9;
 }

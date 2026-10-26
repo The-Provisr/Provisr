@@ -2,6 +2,7 @@ import { z } from "zod";
 import { HttpPolicyRequirementsClient } from "./policy-service.client";
 import { agentEnvelopeSchema, agentResponseSchema, cloudContextSchema, CloudContext } from "./planning-contracts";
 import type { ProvisioningRun } from "../state-machine/runs.service";
+import { IacGenerationError, iacIdempotencyKey } from "./iac-contracts";
 
 export interface PlanningConfig {
   agentUrl: string;
@@ -40,6 +41,44 @@ export class PlanningClients {
   readonly policy: HttpPolicyRequirementsClient;
   constructor(private readonly config: PlanningConfig, private readonly fetcher: typeof fetch = fetch) {
     this.policy = new HttpPolicyRequirementsClient(config.policyUrl, fetcher, config.policyServiceToken);
+  }
+
+  async generateIac(run: ProvisioningRun, manifestId: string, signal: AbortSignal): Promise<unknown> {
+    const key = iacIdempotencyKey(run, manifestId);
+    const context = z.object({ workspace_id: z.string().uuid(), user_id: z.string().uuid(),
+      permissions: z.array(z.literal("iac:write")), request_id: z.string().uuid(), correlation_id: z.string().uuid(),
+      session_id: z.string().uuid(), idempotency_key: z.string().min(1).max(255) }).parse({
+      workspace_id: run.workspaceId, user_id: run.requesterId, permissions: ["iac:write"],
+      request_id: run.id, correlation_id: run.correlationId, session_id: run.sessionId, idempotency_key: key,
+    });
+    const unavailable = () => new IacGenerationError("IAC_DEPENDENCY_UNAVAILABLE", "Terraform generation is unavailable. Please try again.");
+    try {
+      const response = await this.fetcher(`${this.config.mcpUrl.replace(/\/$/, "")}/tools/generate_iac`, {
+        method: "POST", signal, headers: { "Content-Type": "application/json", "X-Request-ID": run.id,
+          "X-Correlation-ID": run.correlationId, "Idempotency-Key": key,
+          Authorization: `Bearer ${this.config.serviceToken}` },
+        body: JSON.stringify({ context, manifest_id: z.string().uuid().parse(manifestId) }),
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        // Do not persist upstream messages, including nominally safe error bodies.
+        throw unavailable();
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw unavailable();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > 8 * 1024 * 1024) throw unavailable();
+          chunks.push(value);
+        }
+      } finally { await reader.cancel().catch(() => {}); }
+      return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    } catch { throw unavailable(); }
   }
 
   private async request(base: string, path: string, run: ProvisioningRun, body?: unknown, signal = AbortSignal.timeout(15000)): Promise<unknown> {

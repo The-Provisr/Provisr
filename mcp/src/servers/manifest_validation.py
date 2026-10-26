@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from jsonschema import Draft202012Validator
+from provisr_contracts.manifest import ResourceManifest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.context.fastapi import require_context
@@ -38,10 +39,28 @@ class _PolicyContext(BaseModel):
 
 def validate_schema(manifest: object) -> list[str]:
     """Return safe schema diagnostics without echoing submitted values."""
-    return [
+    errors = [
         f"{'.'.join(str(p) for p in error.path) or 'manifest'}: {error.validator} validation failed"
         for error in _validator.iter_errors(manifest)
     ]
+    if errors:
+        return errors
+    try:
+        ResourceManifest.model_validate(manifest)
+    except ValidationError as exc:
+        diagnostics = []
+        for error in exc.errors(include_input=False, include_url=False):
+            path = ".".join(str(p) for p in error["loc"]) or "manifest"
+            if path == "tags":
+                diagnostics.append("Required policy tags are missing")
+            elif str(error.get("ctx", {}).get("error", "")) == (
+                "Resource names must be unique in the manifest"
+            ):
+                diagnostics.append(f"{path}: duplicate resource name")
+            else:
+                diagnostics.append(f"{path}: invalid manifest value")
+        return diagnostics
+    return []
 
 
 def validate_contextual_manifest(

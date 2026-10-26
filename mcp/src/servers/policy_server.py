@@ -15,6 +15,7 @@ from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
 from src.servers.approval_server import router as approval_router
 from src.servers.cloud_state_server import router as cloud_router
+from src.servers.domain_server import router as domain_router
 from src.servers.iac_generation import router as iac_router
 from src.servers.manifest_creation import router as manifest_creation_router
 from src.servers.manifest_server import router as backend_manifest_router
@@ -101,6 +102,7 @@ def create_app(
         lifespan=lifespan,
     )
     install_context_error_handler(application)
+    application.include_router(domain_router)
     application.include_router(manifest_router)
     application.include_router(backend_manifest_router)
     application.include_router(cloud_router)

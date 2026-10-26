@@ -96,7 +96,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         error: HttpStatus[status] ?? "Error",
         message,
         status,
-        code: STATUS_CODE[status] ?? (status >= 500 ? ErrorCodes.INTERNAL_ERROR : undefined),
+        code: typeof response === "object" && typeof (response as { code?: unknown }).code === "string"
+          ? (response as { code: string }).code
+          : STATUS_CODE[status] ?? (status >= 500 ? ErrorCodes.INTERNAL_ERROR : undefined),
         request_id: requestId,
         details: undefined,
       };

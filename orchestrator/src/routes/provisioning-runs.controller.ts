@@ -104,10 +104,11 @@ export class ProvisioningRunsController {
     @Headers("idempotency-key") headerIdempotencyKey?: string,
   ) {
     const idempotencyKey = headerIdempotencyKey ?? dto.idempotencyKey;
-    return this.runsService.clarifyRun(id, workspaceId, user.userId, {
-      ...dto,
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-    });
+    const validated = new ZodValidationPipe(clarifyRunSchema).transform(
+      { ...dto, ...(idempotencyKey !== undefined ? { idempotencyKey } : {}) },
+      { type: "body" },
+    );
+    return this.runsService.clarifyRun(id, workspaceId, user.userId, validated);
   }
 
   @Post(":id/revise")

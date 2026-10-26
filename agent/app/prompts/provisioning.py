@@ -276,6 +276,11 @@ PROVISIONING_AGENT_PROMPT = PROVISIONING_AGENT_V1_1.content.replace(
     '"allowed_regions",...]}\n',
 )
 
+PROVISIONING_AGENT_PROMPT = PROVISIONING_AGENT_PROMPT.replace(
+    '"component_id":"registered_component","payload":{...}',
+    '"component_id":"registered_component","component_version":"1.0.0","payload":{...}',
+)
+
 PROVISIONING_AGENT_V1_2 = PromptBundle(
     prompt_id=UUID("a35e6c8c-79f8-4a8c-a4b7-6c0ab93e648e"),
     profile="provisioning_agent",

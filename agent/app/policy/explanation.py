@@ -5,16 +5,15 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 
-
 _RULES: dict[str, tuple[str, str]] = {
     "s3_public_access": (
-        "The request would make an S3 bucket publicly accessible, which conflicts with "
-        "your organization's security policy.",
+        ("The request would make an S3 bucket publicly accessible, which conflicts with "
+         "your organization's security policy."),
         "Keep public access blocked, or use an approved private access pattern.",
     ),
     "public_access": (
-        "The request would expose a resource to the public, which conflicts with "
-        "your organization's security policy.",
+        ("The request would expose a resource to the public, which conflicts with "
+         "your organization's security policy."),
         "Restrict access to the intended users or networks.",
     ),
     "encryption_required": (
@@ -42,7 +41,7 @@ _SAFE_PATH = re.compile(r"^[A-Za-z0-9_.$\[\]-]{1,160}$")
 _INTERNAL_MARKERS = re.compile(
     r"\b(rego|opa|input\.|data\.|package\s+[\w.]+|rule_key|policy\s+id)\b"
     r"|:=|==|!=|<=|>=|[{};]|\bdeny\b|\ballow\b",
-    re.I,
+    re.IGNORECASE,
 )
 
 

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
 import { ChatMessage } from "@/components/ui/chat-message";
-import { NavigationRail } from "@/components/ui/navigation-rail";
+import { AppShell } from "@/components/ui/provisr-app";
 import { RegistryProvider } from "@/components/registry/RegistryProvider";
 import { SSEStatusBadge } from "@/components/ui/sse-status-badge";
 import { useSSE } from "@/lib/sse/use-sse";
@@ -46,10 +46,7 @@ export default function ChatPage() {
 
   return (
     <RegistryProvider>
-      <main className="flex h-screen overflow-hidden bg-gray-50 font-sans text-gray-800">
-        <NavigationRail />
-        <ChatSidebar />
-
+      <AppShell sidebar={<ChatSidebar />}>
         <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
           <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-50 px-4 sm:px-6">
             <div className="flex items-center gap-2">
@@ -271,7 +268,7 @@ export default function ChatPage() {
             </aside>
           ) : null}
         </section>
-      </main>
+      </AppShell>
     </RegistryProvider>
   );
 }

@@ -17,13 +17,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config.settings import Settings
+from app.integrations.state import InMemoryStateStore
 from app.main import Resources, create_app
 from app.policy.mcp import MCPPolicyRequirementsTool
-from app.integrations.state import InMemoryStateStore
 from app.profiles.catalog import build_profile_selector
 from app.prompts.catalog import build_prompt_registry
 from tests.fakes import FakeLanguageModel
-
 
 REQUEST_ID = UUID("497c1c82-b4b4-4ae3-ad13-fccbcbf8cda1")
 WORKSPACE_ID = UUID("05a0cb9b-6793-4d47-ac80-c37916dc7b57")
@@ -72,7 +71,9 @@ def _build_client() -> tuple[TestClient, StubBridgeCaller]:
         "manifest": {
             "provider": "aws", "region": "us-east-1", "environment": "development",
             "security": {"encryption_enabled": True}, "backup": {"enabled": True},
-            "policy": {"requirements_loaded": True, "applied_constraints": []},
+            "policy": {"requirements_loaded": True, "applied_constraints": [
+                "allowed_regions", "required_backup", "required_encryption", "required_tags",
+            ]},
             "tags": {"owner": "platform"},
             "resources": [{"type": "aws_ec2", "name": "api-server",
                            "instance_type": "t3.micro", "image": "ubuntu-24.04"}],
@@ -122,51 +123,52 @@ def _build_client() -> tuple[TestClient, StubBridgeCaller]:
 
 def test_agent_integration_self_test_runs_bridge_envelope_chain() -> None:
     client, policy = _build_client()
-    headers = {"Authorization": "Bearer self-test-token"}
-    created = client.post("/v1/sessions", headers=headers, json={
-        "organization_id": str(WORKSPACE_ID), "request_id": str(REQUEST_ID),
-    })
-    assert created.status_code == 201, created.text
-    session_id = created.json()["session"]["session_id"]
+    with client:
+        headers = {"Authorization": "Bearer self-test-token"}
+        created = client.post("/v1/sessions", headers=headers, json={
+            "organization_id": str(WORKSPACE_ID), "request_id": str(REQUEST_ID),
+        })
+        assert created.status_code == 201, created.text
+        session_id = created.json()["session"]["session_id"]
 
-    first = client.post(
-        f"/v1/sessions/{session_id}/turns",
-        headers=headers,
-        json={"message": "Create an AWS web server in us-east-1 for development"},
-    )
-    assert first.status_code == 200, first.text
-    assert first.json()["result"]["type"] == "clarification_question"
+        first = client.post(
+            f"/v1/sessions/{session_id}/turns",
+            headers=headers,
+            json={"message": "Create an AWS web server in us-east-1 for development"},
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["result"]["type"] == "clarification_question"
 
-    second = client.post(
-        f"/v1/sessions/{session_id}/turns",
-        headers=headers,
-        json={
-            "message": "Use api-server",
-            "answers": [
-                {
-                    "question_id": first.json()["result"]["data"]["question_id"],
-                    "field_mapping": "resources[0].name",
-                    "answer": "api-server",
-                }
-            ],
-        },
-    )
-    assert second.status_code == 200, second.text
-    result = second.json()["result"]
-    assert result["type"] == "manifest_draft"
-    assert result["metadata"]["source"] == "llm_generated"
-    assert result["metadata"]["confidence"] >= 0.9
-    assert policy.calls == 1
-    assert result["data"]["manifest"]["region"] == "us-east-1"
-    assert result["data"]["manifest"]["security"]["encryption_enabled"]
-    assert result["data"]["manifest"]["backup"]["enabled"]
-    assert result["data"]["manifest"]["tags"]["owner"] == "platform"
+        second = client.post(
+            f"/v1/sessions/{session_id}/turns",
+            headers=headers,
+            json={
+                "message": "Use api-server",
+                "answers": [
+                    {
+                        "question_id": first.json()["result"]["data"]["question_id"],
+                        "field_mapping": "resources[0].name",
+                        "answer": "api-server",
+                    }
+                ],
+            },
+        )
+        assert second.status_code == 200, second.text
+        result = second.json()["result"]
+        assert result["type"] == "manifest_draft"
+        assert result["metadata"]["source"] == "llm_generated"
+        assert result["metadata"]["confidence"] >= 0.9
+        assert policy.calls == 1
+        assert result["data"]["manifest"]["region"] == "us-east-1"
+        assert result["data"]["manifest"]["security"]["encryption_enabled"]
+        assert result["data"]["manifest"]["backup"]["enabled"]
+        assert result["data"]["manifest"]["tags"]["owner"] == "platform"
 
-    events = client.get(f"/v1/sessions/{session_id}/events", headers=headers)
-    assert events.status_code == 200
-    assert "event: policy.requirements.loaded" in events.text
-    assert "event: manifest.draft" in events.text
-    assert "source_metadata" in events.text
+        events = client.get(f"/v1/sessions/{session_id}/events", headers=headers)
+        assert events.status_code == 200
+        assert "event: policy.requirements.loaded" in events.text
+        assert "event: manifest.draft" in events.text
+        assert "source_metadata" in events.text
 
 
 def test_shared_contracts_typecheck_available_for_ci() -> None:

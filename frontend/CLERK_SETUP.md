@@ -1,7 +1,9 @@
 # Clerk setup
 
-The onboarding flow uses Clerk for authentication and Clerk Organizations for
-workspace creation.
+The onboarding flow uses Clerk for authentication and persisted Provisr workspace memberships.
+Workspace creation goes through the orchestration gateway to workspace-service.
+Apply migration 000023_user_active_workspace before deploying this flow.
+Without Clerk keys, onboarding displays the local preview flow and does not create a real workspace.
 
 1. Create or select a Clerk application.
 2. Enable Organizations in the Clerk Dashboard.

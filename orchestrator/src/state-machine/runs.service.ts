@@ -6,7 +6,7 @@ import { DbService } from "../db/db.service";
 import { AuditService } from "../services/audit.service";
 import { PlanningClients, NoConnectedProviderError } from "../services/planning-clients";
 import { PolicyDeniesAllRegionsError } from "../services/policy-service.client";
-import { CloudContext, ClarificationQuestion, cloudContextSchema, questionSchema, validateAnswers, validateComponent, manifestComponents } from "../services/planning-contracts";
+import { CloudContext, ClarificationQuestion, ComponentPayloadValidationError, cloudContextSchema, questionSchema, validateAnswers, validateComponent, manifestComponents } from "../services/planning-contracts";
 import { assertTransition, EMPTY_TRANSITION_CONDITIONS } from "./transitions";
 import { WORKFLOW_STATES, WorkflowState, isTerminalWorkflowState } from "./workflow-state";
 
@@ -164,6 +164,7 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
       if (!run) throw new NotFoundException("Run not found");
       if (run.stateVersion !== expectedVersion) throw new ConflictException("State version conflict");
       const change = operation(run);
+      this.validateSseComponents(change.eventType, change.payload);
       if (actorId !== "orchestrator") await this.assertMutationPermission(client, workspaceId, actorId,
         run.state === "APPROVING" && change.state !== "CANCELLED");
       if (change.state) {
@@ -200,6 +201,18 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('provisr_sse'), hashtext($1))", [run.workspaceId]);
     await client.query(`INSERT INTO provisr_events.sse_events (workspace_id, event_id, event_type, correlation_id, payload)
       VALUES ($1,$2,$3,$4,$5)`, [run.workspaceId, randomUUID(), type, run.correlationId, JSON.stringify(payload)]);
+  }
+
+  private validateSseComponents(eventType?: string, payload?: Record<string, unknown>): void {
+    const values = eventType === "ManifestReadyEvent" ? payload?.components
+      : ["ComponentPayloadEvent", "ClarificationQuestionEvent"].includes(eventType ?? "") ? [payload?.component] : [];
+    if (!Array.isArray(values)) throw new Error("Malformed component event");
+    for (const value of values) {
+      if (!value || typeof value !== "object") throw new Error("Malformed component event");
+      const component = value as Record<string, unknown>;
+      if (typeof component.type !== "string" || typeof component.version !== "string") throw new Error("Malformed component event");
+      validateComponent(component.type, component.data, component.version);
+    }
   }
 
   async cancelRun(id: string, workspaceId: string, actorId: string): Promise<ProvisioningRun> {
@@ -396,7 +409,7 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
           return;
         }
         const payload = output.type === "component_payload"
-          ? { component: { type: output.data.component_id, version: "1.0.0", requestId: run.id, data: validateComponent(output.data.component_id, output.data.payload) } }
+          ? { component: { type: output.data.component_id, version: output.data.component_version, requestId: run.id, data: validateComponent(output.data.component_id, output.data.payload, output.data.component_version) } }
           : output.data;
         await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ updates: { agentTurnPending: false, agentInput: null },
           eventType: output.type === "component_payload" ? "ComponentPayloadEvent" : "AssistantMessageEvent", payload }));
@@ -407,6 +420,16 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
       if (error instanceof ConflictException) return;
       const current = await this.getRun(run.id, run.workspaceId);
       if (current.stateVersion !== run.stateVersion || isTerminalWorkflowState(current.state)) return;
+      if (error instanceof ComponentPayloadValidationError) {
+        this.logger.error({ message: "Component payload rejected", run_id: run.id, component_type: error.componentType,
+          component_version: error.componentVersion, issues: error.issues });
+        await this.mutate(run.id, run.workspaceId, run.stateVersion, "orchestrator", () => ({ state: "FAILED",
+          updates: { errorCode: "COMPONENT_PAYLOAD_INVALID", errorMessage: "The assistant response could not be safely displayed." },
+          eventType: "ComponentPayloadRejectedEvent", payload: { error_code: "COMPONENT_PAYLOAD_INVALID",
+            error_message: "The assistant response could not be safely displayed.", component_type: error.componentType,
+            component_version: error.componentVersion, validation_issues: error.issues } }));
+        return;
+      }
       await this.transitionState(run.id, run.workspaceId, run.stateVersion, "FAILED", "orchestrator", {
         errorCode: signal.aborted ? "AGENT_TIMEOUT" : "AGENT_FAILED",
         errorMessage: signal.aborted ? "Agent request timed out after 120 seconds." : "The agent could not complete this request. Please try again.",

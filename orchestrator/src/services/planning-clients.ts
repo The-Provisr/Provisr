@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { HttpPolicyRequirementsClient } from "./policy-service.client";
-import { agentEnvelopeSchema, agentResponseSchema, cloudAccountSchema, cloudContextSchema, CloudContext } from "./planning-contracts";
+import { agentEnvelopeSchema, agentResponseSchema, cloudContextSchema, CloudContext } from "./planning-contracts";
 import type { ProvisioningRun } from "../state-machine/runs.service";
 
 export interface PlanningConfig {
@@ -47,7 +47,7 @@ export class PlanningClients {
       method: body === undefined ? "GET" : "POST", signal,
       headers: { "Content-Type": "application/json", "X-Request-ID": run.id,
         "X-Correlation-ID": run.correlationId,
-        ...(base === this.config.manifestUrl || base === this.config.agentUrl ? { Authorization: `Bearer ${this.config.serviceToken}` } : {}) },
+        ...(base === this.config.manifestUrl || base === this.config.agentUrl || base === this.config.cloudAccountUrl ? { Authorization: `Bearer ${this.config.serviceToken}` } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     // Never copy upstream error bodies (which may contain secrets) into run errors.
@@ -56,25 +56,19 @@ export class PlanningClients {
   }
 
   async loadCloudContext(run: ProvisioningRun): Promise<CloudContext> {
-    const query = `?workspace_id=${encodeURIComponent(run.workspaceId)}`;
-    const body = z.object({ accounts: z.array(cloudAccountSchema) }).parse(
-      await this.request(this.config.cloudAccountUrl, `/v1/cloud-accounts${query}`, run));
-    if (body.accounts.some(a => a.workspace_id !== run.workspaceId)) throw new PlanningDependencyError();
-    const active = body.accounts.filter(a => a.status === "active" && a.verified_at);
-    if (!active.length) throw new NoConnectedProviderError();
-    const accounts: CloudContext["active_accounts"] = [];
-    for (const account of active) {
-      const detail = cloudAccountSchema.extend({ metadata: z.object({
-        supported_regions: z.array(z.string().min(1)).min(1),
-        resource_counts: z.record(z.number().int().nonnegative()).nullish(),
-        quota_limits: z.record(z.number().nonnegative()).nullish(),
-      }) }).parse(await this.request(this.config.cloudAccountUrl, `/v1/cloud-accounts/${account.id}${query}`, run));
-      if (detail.id !== account.id || detail.workspace_id !== run.workspaceId || detail.provider !== account.provider
-        || detail.status !== "active" || !detail.verified_at) throw new PlanningDependencyError();
-      // Whitelist capability fields. Account metadata can include cloud credentials.
-      accounts.push({ ...account, supported_regions: detail.metadata.supported_regions,
-        resource_counts: detail.metadata.resource_counts ?? null, quota_limits: detail.metadata.quota_limits ?? null });
-    }
+    const accountSchema = z.object({ id: z.string().uuid(), provider: z.enum(["aws", "azure", "gcp"]),
+      status: z.enum(["pending", "active", "failed", "disconnected"]), account_alias: z.string(),
+      available_regions: z.array(z.string().min(1)), checked_at: z.string().datetime({ offset: true }).nullable(),
+      execution_ready: z.boolean() });
+    const body = z.object({ workspace_id: z.string().uuid(), accounts: z.array(accountSchema) }).parse(
+      await this.request(this.config.mcpUrl, "/tools/get_cloud_account_capabilities", run,
+        { context: { ...this.context(run), permissions: ["cloud:read"] } }));
+    if (body.workspace_id !== run.workspaceId) throw new PlanningDependencyError();
+    const accounts = body.accounts.filter(a => a.status === "active" && a.checked_at && a.available_regions.length > 0)
+      .map(a => ({ id: a.id, workspace_id: run.workspaceId, provider: a.provider, label: a.account_alias,
+        status: "active" as const, verified_at: a.checked_at, supported_regions: a.available_regions,
+        resource_counts: null, quota_limits: null }));
+    if (!accounts.length) throw new NoConnectedProviderError();
     return cloudContextSchema.parse({ connected_providers: [...new Set(accounts.map(a => a.provider))], active_accounts: accounts });
   }
 
@@ -97,13 +91,17 @@ export class PlanningClients {
   }
 
   context(run: ProvisioningRun) {
-    return { workspace_id: run.workspaceId, user_id: run.requesterId, permissions: ["manifest:write"],
+    return { workspace_id: run.workspaceId, user_id: run.requesterId, permissions: ["manifest:read", "manifest:write"],
       request_id: run.id, correlation_id: run.correlationId, session_id: run.sessionId,
       idempotency_key: `manifest:${run.id}:${run.stateVersion}` };
   }
 
   async validateManifest(run: ProvisioningRun, manifest: Record<string, unknown>): Promise<{ valid: boolean; errors: string[] }> {
-    const schema = z.object({ valid: z.boolean(), errors: z.array(z.string()).default([]) });
+    const errorSchema = z.union([z.string(), z.object({
+      field: z.string(), code: z.string(), message: z.string(), allowed_values: z.array(z.unknown()).nullish(),
+    }).transform(error => `${error.field}: ${error.code}: ${error.message}`)]);
+    const schema = z.object({ valid: z.boolean(), errors: z.array(errorSchema).default([]) })
+      .refine(result => result.valid === (result.errors.length === 0), "Contradictory validation result");
     for (const tool of ["validate_manifest", "validate_manifest_schema"]) {
       const result = schema.parse(await this.request(this.config.mcpUrl, `/tools/${tool}`, run,
         { context: this.context(run), manifest, cloud_context: run.cloudContext, policy_context: run.policyRequirements }));
@@ -136,7 +134,7 @@ export class PlanningClients {
       clarifications: run.answersHistory,
       agent_output: output,
     }));
-    if ("valid" in response && response.valid === false) {
+    if ("valid" in response) {
       return { valid: false, errors: response.errors.map(error => typeof error === "string" ? error : `${error.field ?? "manifest"}: ${error.message ?? error.code ?? "validation failed"}`) };
     }
     return { valid: true, version: response.version };

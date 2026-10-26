@@ -53,7 +53,15 @@ def _freeze_payload(value: object) -> object:
 
 class ComponentPayloadData(OutputModel):
     component_id: str = Field(min_length=1, max_length=128)
+    component_version: str = "1.0.0"
     payload: dict[str, object]
+
+    @field_validator("component_version")
+    @classmethod
+    def validate_component_version(cls, value: str) -> str:
+        if not _SEMVER_PATTERN.fullmatch(value):
+            raise ValueError("component_version must be a valid semantic version")
+        return value
 
     @field_validator("component_id")
     @classmethod

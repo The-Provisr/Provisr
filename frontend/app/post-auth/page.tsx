@@ -6,7 +6,11 @@ import { ensureUser } from "@/lib/orchestration/users";
 
 export const dynamic = "force-dynamic";
 
-export default async function PostAuthPage() {
+export default async function PostAuthPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ connect?: string }>;
+}) {
   const { userId, getToken, sessionClaims } = await auth.protect();
   const user = await currentUser();
   if (!user) redirect("/sign-in");
@@ -30,7 +34,14 @@ export default async function PostAuthPage() {
     claimedWorkspaceId: sessionClaims?.metadata?.workspaceId,
   });
 
-  const target = record.workspaceId ? "/dashboard" : "/onboarding";
+  // If the onboarding wizard chose AWS, land directly on the cloud accounts
+  // page with the connect panel open (FE-M05 onboarding redirect).
+  const { connect } = await searchParams;
+  const target = record.workspaceId
+    ? connect === "aws"
+      ? "/workspace/cloud-accounts?connect=aws"
+      : "/dashboard"
+    : "/onboarding";
 
   return <PostAuthHandoff target={target} expectedWorkspaceId={record.workspaceId} />;
 }

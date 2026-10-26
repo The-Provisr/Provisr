@@ -304,6 +304,8 @@ services:
     build:
       context: ../../frontend
       dockerfile: ../infra/docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID: ${NEXT_PUBLIC_PROVISR_AWS_ACCOUNT_ID:-}
     ports:
       - "3000:3000"
     environment:

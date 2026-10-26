@@ -216,7 +216,7 @@ export function WorkspaceOnboardingWizard() {
           className="flex w-full max-w-[480px] flex-col items-center gap-3 rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm"
           data-testid="wizard-handoff"
         >
-          <PostAuthHandoff target="/dashboard" expectedWorkspaceId={createdWorkspaceId} />
+          <PostAuthHandoff target={selectedProviders.includes("aws") ? "/workspace/cloud-accounts?connect=aws" : "/dashboard"} expectedWorkspaceId={createdWorkspaceId} />
         </div>
       </main>
     );

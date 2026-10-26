@@ -42,7 +42,7 @@ address and violations by rule key, so input order never changes the result.
 
 ## Audit
 Every successful evaluation appends an `approval_requirements_evaluated` event
-(migration 000023) to the hash chain before the response is returned; if the
+(migration 000025) to the hash chain before the response is returned; if the
 append fails the request fails. The payload carries the decision, triggered
 rules, `rule_set_version`, `input_digest` (SHA-256 over the normalized input,
 server-resolved role/environment and config), config and cost source. Raw

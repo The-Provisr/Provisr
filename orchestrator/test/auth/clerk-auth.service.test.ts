@@ -235,3 +235,25 @@ describe("ClerkAuthService.getOrganizationMemberships", () => {
     expect(await service.getOrganizationMemberships("clerk_user_1")).toEqual([]);
   });
 });
+
+
+describe("ClerkAuthService.getVerifiedEmail", () => {
+  it.each(["verified", "unverified", "expired"])("trusts only a verified primary address (%s)", async status => {
+    const getUser = vi.fn().mockResolvedValue({ primaryEmailAddressId: "primary",
+      emailAddresses: [{ id: "secondary", emailAddress: "other@example.invalid", verification: { status: "verified" } },
+        { id: "primary", emailAddress: "primary@example.invalid", verification: { status } }] });
+    const client = fakeClient();
+    client.users.getUser = getUser;
+    const service = new ClerkAuthService(config(), fakeVerify(), client);
+    expect(await service.getVerifiedEmail("user_1")).toBe(status === "verified" ? "primary@example.invalid" : undefined);
+    await service.getVerifiedEmail("user_1");
+    expect(getUser).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when verified profile lookup is unavailable", async () => {
+    const client = fakeClient();
+    client.users.getUser = vi.fn().mockRejectedValue(new Error("Clerk unavailable"));
+    const service = new ClerkAuthService(config(), fakeVerify(), client);
+    await expect(service.getVerifiedEmail("user_1")).rejects.toMatchObject({ code: "DEPENDENCY_UNAVAILABLE" });
+  });
+});

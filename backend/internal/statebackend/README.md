@@ -89,7 +89,7 @@ is a one-line change in `InitConfig`.
 
 ## Setup and tests
 
-Apply migration `000024_terraform_state_backends` (it follows BE-E01's `000023`).
+Apply migration `000026_terraform_state_backends` (it follows BE-E01's `000023`).
 provisioning-service requires `DATABASE_URL`, `CLOUD_ACCOUNT_MASTER_KEY` and
 `ORCHESTRATOR_SERVICE_TOKEN`. When `AWS_ENDPOINT_URL` is set (LocalStack), S3 uses
 path-style addressing.

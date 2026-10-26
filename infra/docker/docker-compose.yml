@@ -287,7 +287,6 @@ services:
       POLICY_SERVICE_URL: http://policy-service:8081
       POLICY_SERVICE_SECRET: ${POLICY_SERVICE_SECRET:-}
       STATE_SERVICE_URL: http://state-service:8082
-      WORKSPACE_SERVICE_URL: http://workspace-service:8088
       MCP_URL: http://mcp:5100
       ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
       # Local dev only. Production must inject this via Vault/infra config.

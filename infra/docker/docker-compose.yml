@@ -32,7 +32,7 @@ services:
     ports:
       - "4566:4566"
     environment:
-      SERVICES: sqs,s3,dynamodb,events
+      SERVICES: sqs,s3,dynamodb,events,sts
       AWS_DEFAULT_REGION: us-east-1
     volumes:
       - localstack_data:/var/lib/localstack
@@ -135,6 +135,8 @@ services:
       PORT: "8083"
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
       AWS_ENDPOINT_URL: http://localstack:4566
+      CLOUD_ACCOUNT_MASTER_KEY: ${CLOUD_ACCOUNT_MASTER_KEY:?CLOUD_ACCOUNT_MASTER_KEY must be set}
+      ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
     depends_on:
       postgres:
         condition: service_healthy
@@ -278,6 +280,7 @@ services:
       MANIFEST_SERVICE_URL: http://manifest-service:8090
       PRICING_SERVICE_URL: http://pricing-service:8091
       CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089
+      APPROVAL_SERVICE_URL: http://approval-service:8084
       ORCHESTRATOR_SERVICE_TOKEN: ${ORCHESTRATOR_SERVICE_TOKEN:?ORCHESTRATOR_SERVICE_TOKEN must be set}
       DATABASE_URL: postgres://provisr:provisr-dev@postgres:5432/provisr?sslmode=disable
     depends_on:
@@ -290,6 +293,9 @@ services:
         condition: service_started
         required: false
       cloud-account-service:
+        condition: service_started
+        required: false
+      approval-service:
         condition: service_started
         required: false
       pricing-service:

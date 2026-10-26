@@ -42,7 +42,8 @@ network IDs or engine versions, are never guessed.
 Provider/backend configuration builders cover AWS, Azure and GCP. The reviewed
 BE-D03 resource catalog currently covers AWS only; unsupported resource types
 produce structured 422 diagnostics and no partial artifact. No AI fallback exists.
-Remote backend blocks are partial: BE-D08 must supply the provisioner-controlled
+Remote backend blocks are partial: `statebackend.Manager.Prepare` (BE-D08, see
+`internal/statebackend/README.md`) supplies the provisioner-controlled
 bucket/container and locking configuration before initialization. This service
 does not create remote state, initialize Terraform, plan, apply, acquire cloud
 credentials, or advance orchestration. OR-013 and BE-D05 remain separate tasks.

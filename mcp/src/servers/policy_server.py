@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
+from src.servers.approval_server import router as approval_router
 from src.servers.cloud_state_server import router as cloud_router
 from src.servers.domain_server import router as domain_router
 from src.servers.iac_generation import router as iac_router
@@ -29,6 +30,8 @@ class Resources:
     manifest_backend_url: str
     cloud_backend_url: str
     cloud_service_token: str
+    approval_backend_url: str
+    approval_service_token: str
     iac_service_token: str
 
 
@@ -39,6 +42,8 @@ def create_app(
     manifest_backend_url: str | None = None,
     cloud_backend_url: str | None = None,
     cloud_service_token: str | None = None,
+    approval_backend_url: str | None = None,
+    approval_service_token: str | None = None,
     iac_service_token: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
@@ -76,6 +81,11 @@ def create_app(
             )).rstrip("/"),
             cloud_service_token=(cloud_service_token if cloud_service_token is not None
                                  else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
+            approval_backend_url=(approval_backend_url or os.getenv(
+                "APPROVAL_SERVICE_URL", "http://localhost:8084",
+            )).rstrip("/"),
+            approval_service_token=(approval_service_token if approval_service_token is not None
+                                    else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
             iac_service_token=(iac_service_token if iac_service_token is not None
                                else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
         )
@@ -96,6 +106,7 @@ def create_app(
     application.include_router(manifest_router)
     application.include_router(backend_manifest_router)
     application.include_router(cloud_router)
+    application.include_router(approval_router)
     application.include_router(iac_router)
     application.include_router(manifest_creation_router)
 

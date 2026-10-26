@@ -520,3 +520,39 @@ export function WebhookIcon(props: IconProps) {
     </IconBase>
   );
 }
+
+export function CreditCardIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect height="14" rx="2" width="20" x="2" y="5" />
+      <path d="M2 10h20" />
+    </IconBase>
+  );
+}
+
+export function MoonIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9" />
+    </IconBase>
+  );
+}
+
+export function PanelLeftIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect height="18" rx="2" width="18" x="3" y="3" />
+      <path d="M9 3v18" />
+    </IconBase>
+  );
+}
+
+export function LogOutIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
+    </IconBase>
+  );
+}

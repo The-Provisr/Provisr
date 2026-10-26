@@ -2,10 +2,19 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ResourcesPage from "./page";
 
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/resources",
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 describe("ResourcesPage", () => {
   const originalLocation = window.location;
 
   beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ workspaces: [], activeWorkspaceId: null, degraded: false }),
+    }));
     // Reset window.location.search before each test
     delete (window as any).location;
     window.location = {
@@ -17,6 +26,7 @@ describe("ResourcesPage", () => {
   afterEach(() => {
     window.location = originalLocation;
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("renders default resources inventory successfully", async () => {

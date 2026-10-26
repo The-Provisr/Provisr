@@ -1,8 +1,8 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
+import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { NavigationRail } from "@/components/ui/navigation-rail";
 import { cn } from "@/lib/cn";
 
 type AppShellProps = {
@@ -61,14 +61,14 @@ export const workspaceNavItems = [
 ];
 
 export function AppShell({ children, sidebar }: AppShellProps) {
+  // FE-M03: every authenticated screen mounts into the same collapsible,
+  // role-aware dashboard shell. `sidebar` remains an optional contextual panel.
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
   return (
-    <main className="flex h-screen overflow-hidden bg-gray-50 font-sans text-gray-800">
-      <NavigationRail />
-      {sidebar}
-      <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
-        {children}
-      </section>
-    </main>
+    <DashboardShell clerkEnabled={clerkEnabled} sidebar={sidebar}>
+      {children}
+    </DashboardShell>
   );
 }
 
@@ -152,31 +152,10 @@ export function StatusBadge({ children, tone = "neutral" }: { children: ReactNod
   return <Badge className={classes[tone]}>{children}</Badge>;
 }
 
-export function WorkspaceSidebar({ active }: { active: string }) {
-  return (
-    <aside className="hidden w-[260px] shrink-0 flex-col border-r border-gray-100 bg-white p-4 lg:flex">
-      <div className="mb-6">
-        <div className="text-sm font-semibold text-gray-900">Acme Platform</div>
-        <div className="mt-0.5 text-xs text-gray-500">Production workspace</div>
-      </div>
-      <nav className="space-y-1">
-        {workspaceNavItems.map((item) => (
-          <Link
-            className={cn(
-              "block rounded-lg px-3 py-2 text-sm font-medium",
-              active === item.label
-                ? "bg-slate-900 text-white"
-                : "text-gray-600 hover:bg-gray-50",
-            )}
-            href={item.href}
-            key={item.label}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
-    </aside>
-  );
+// Legacy callers keep this export while DashboardShell owns all workspace navigation.
+// Rendering another menu here would bypass its membership-aware filtering.
+export function WorkspaceSidebar(_props: { active: string }) {
+  return null;
 }
 
 export function MiniBarChart({ data }: BarChartProps) {

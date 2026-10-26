@@ -132,7 +132,10 @@ async def test_loads_policy_before_model_and_stores_it_in_context() -> None:
     )
     session = await create_session(service)
 
-    result = await service.run_turn(session_id=session.session_id, message="Create an orders DB")
+    result = await service.run_turn(
+        session_id=session.session_id,
+        message="Create an orders postgres DB on AWS in ap-southeast-1 for production",
+    )
     stored = await state.get_session(session.session_id)
 
     assert result.type == "manifest_draft"
@@ -150,8 +153,14 @@ async def test_reuses_policy_context_without_calling_tool_again() -> None:
     service, _, model = build_service(manifest_output(COMPLIANT_MANIFEST), policy_tool)
     session = await create_session(service)
 
-    await service.run_turn(session_id=session.session_id, message="Create an orders DB")
-    await service.run_turn(session_id=session.session_id, message="Keep the same requirements")
+    await service.run_turn(
+        session_id=session.session_id,
+        message="Create an orders postgres DB on AWS in ap-southeast-1 for production",
+    )
+    await service.run_turn(
+        session_id=session.session_id,
+        message="Keep the same requirements on AWS in ap-southeast-1 for production",
+    )
 
     assert len(policy_tool.sessions) == 1
     assert len(model.sessions) == 2
@@ -172,7 +181,10 @@ async def test_policy_tool_failure_blocks_model_and_marks_session_failed() -> No
     session = await create_session(service)
 
     with pytest.raises(PolicyRequirementsUnavailableError, match="timed out"):
-        await service.run_turn(session_id=session.session_id, message="Create a database")
+        await service.run_turn(
+            session_id=session.session_id,
+            message="Create a postgres database on AWS in ap-southeast-1 for production",
+        )
 
     stored = await state.get_session(session.session_id)
     events = await state.list_events(session.session_id, 0)
@@ -223,6 +235,96 @@ def test_detects_region_budget_tags_type_encryption_and_backup_violations() -> N
     assert all(violation.alternatives for violation in violations)
 
 
+def key_only_requirements() -> PolicyRequirements:
+    return PolicyRequirements(
+        allowed_regions=("ap-southeast-1",),
+        required_tags={"owner": "platform", "Team": "*"},
+    )
+
+
+def manifest_with_tags(tags: dict[str, str]) -> ResourceManifest:
+    payload = deepcopy(COMPLIANT_MANIFEST)
+    payload["tags"] = tags
+    return ResourceManifest.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("team", "passes"),
+    [(None, False), ("", False), ("   ", False), ("payments", True), ("x", True)],
+)
+def test_key_only_required_tag_needs_any_non_blank_value(team: str | None, passes: bool) -> None:
+    tags = {"owner": "platform"} if team is None else {"owner": "platform", "Team": team}
+
+    violations = validate_manifest_policy(manifest_with_tags(tags), key_only_requirements())
+
+    missing = [v for v in violations if v.code == "required_tags_missing"]
+    if passes:
+        assert missing == []
+    else:
+        # Key-only tags are named without a value in the remediation hint.
+        assert len(missing) == 1
+        assert "Team" in missing[0].alternatives[0]
+        assert "Team=*" not in missing[0].alternatives[0]
+
+
+@pytest.mark.parametrize("owner", [None, "", "Platform", "platform-team"])
+def test_valued_required_tag_still_needs_exact_match(owner: str | None) -> None:
+    tags = {"Team": "payments"} if owner is None else {"Team": "payments", "owner": owner}
+
+    violations = validate_manifest_policy(manifest_with_tags(tags), key_only_requirements())
+
+    missing = [v for v in violations if v.code == "required_tags_missing"]
+    assert len(missing) == 1
+    assert "owner=platform" in missing[0].alternatives[0]
+    assert "Team" not in missing[0].alternatives[0]
+
+
+@pytest.mark.parametrize("value", ["*", " * "])
+def test_placeholder_is_never_a_valid_manifest_tag_value(value: str) -> None:
+    with pytest.raises(ValidationError, match="placeholder"):
+        manifest_with_tags({"owner": "platform", "Team": value})
+
+
+@pytest.mark.anyio
+async def test_model_draft_with_placeholder_tag_fails_turn_without_a_draft() -> None:
+    smuggled = deepcopy(COMPLIANT_MANIFEST)
+    smuggled["tags"] = {"owner": "platform", "Team": "*"}
+    service, state, _ = build_service(
+        manifest_output(smuggled), FakePolicyRequirementsTool(key_only_requirements())
+    )
+    session = await create_session(service)
+
+    with pytest.raises(InvalidModelResponseError, match="placeholder"):
+        await service.run_turn(
+            session_id=session.session_id,
+            message="Use ap-southeast-1 on AWS for production with postgres",
+        )
+
+    stored = await state.get_session(session.session_id)
+    assert stored.status == "FAILED"
+    events = await state.list_events(session.session_id, 0)
+    assert not any(event.type == "manifest.draft" for event in events)
+
+
+@pytest.mark.anyio
+async def test_model_draft_missing_key_only_tag_fails_turn() -> None:
+    # Current behaviour: an unknown value stops the run (never falls back to "*"),
+    # but asking the user depends on the model emitting a clarification_question.
+    service, state, _ = build_service(
+        manifest_output(COMPLIANT_MANIFEST), FakePolicyRequirementsTool(key_only_requirements())
+    )
+    session = await create_session(service)
+
+    with pytest.raises(InvalidModelResponseError, match="Add these required tags: Team"):
+        await service.run_turn(
+            session_id=session.session_id,
+            message="Use ap-southeast-1 on AWS for production with postgres",
+        )
+
+    stored = await state.get_session(session.session_id)
+    assert stored.status == "FAILED"
+
+
 @pytest.mark.anyio
 async def test_rejects_manifest_that_conflicts_with_loaded_policy() -> None:
     conflicting = deepcopy(COMPLIANT_MANIFEST)
@@ -232,7 +334,10 @@ async def test_rejects_manifest_that_conflicts_with_loaded_policy() -> None:
     session = await create_session(service)
 
     with pytest.raises(InvalidModelResponseError, match="Region.*not allowed"):
-        await service.run_turn(session_id=session.session_id, message="Use us-east-1")
+        await service.run_turn(
+            session_id=session.session_id,
+            message="Use us-east-1 on AWS for production with postgres",
+        )
 
     stored = await state.get_session(session.session_id)
     assert stored.status == "FAILED"
@@ -250,9 +355,15 @@ def test_runtime_prompt_contains_constraints_and_conflict_instructions() -> None
     assert "ask the user to confirm" in prompt
 
 
-def test_rejects_enabled_policy_without_allowed_regions() -> None:
-    with pytest.raises(ValidationError, match="at least one allowed region"):
-        PolicyRequirements(enabled=True)
+def test_enabled_policy_without_allowed_regions_is_unrestricted() -> None:
+    unrestricted = PolicyRequirements(enabled=True)
+    payload = deepcopy(COMPLIANT_MANIFEST)
+    payload["region"] = "eu-west-3"
+    payload["policy"] = {"requirements_loaded": True, "applied_constraints": []}
+
+    violations = validate_manifest_policy(ResourceManifest.model_validate(payload), unrestricted)
+
+    assert violations == ()
 
 
 def test_budget_policy_cannot_be_omitted_from_manifest() -> None:
@@ -296,7 +407,7 @@ async def test_mcp_adapter_calls_exact_required_tool_and_validates_result() -> N
 
 @pytest.mark.anyio
 async def test_mcp_adapter_rejects_malformed_tool_result() -> None:
-    caller = FakeMCPToolCaller({"allowed_regions": []})
+    caller = FakeMCPToolCaller({"allowed_regions": "us-east-1"})
     tool = MCPPolicyRequirementsTool(caller)
     service, _, _ = build_service(manifest_output(COMPLIANT_MANIFEST), tool)
     session = await create_session(service)

@@ -4,7 +4,7 @@ import re
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.manifest import ResourceManifest
 
@@ -53,7 +53,15 @@ def _freeze_payload(value: object) -> object:
 
 class ComponentPayloadData(OutputModel):
     component_id: str = Field(min_length=1, max_length=128)
+    component_version: str = "1.0.0"
     payload: dict[str, object]
+
+    @field_validator("component_version")
+    @classmethod
+    def validate_component_version(cls, value: str) -> str:
+        if not _SEMVER_PATTERN.fullmatch(value):
+            raise ValueError("component_version must be a valid semantic version")
+        return value
 
     @field_validator("component_id")
     @classmethod
@@ -78,6 +86,12 @@ class ClarificationAnswerField(OutputModel):
     type: Literal["string", "number", "boolean", "strings"]
     options: tuple[str, ...] | None = None
 
+    @model_validator(mode="after")
+    def validate_options_type(self) -> ClarificationAnswerField:
+        if self.options is not None and self.type not in ("string", "strings"):
+            raise ValueError("options are only allowed for string fields")
+        return self
+
 
 class ClarificationQuestionData(OutputModel):
     question: str = Field(min_length=1, max_length=10000)
@@ -86,6 +100,14 @@ class ClarificationQuestionData(OutputModel):
         min_length=1,
         max_length=20,
     )
+    # Structured detail for the FE-C03 clarification UI. Mirrors
+    # frontend/lib/clarification/types.ts (ClarificationQuestionPayload); all
+    # fields are optional so older plain-text envelopes remain valid.
+    question_id: str | None = Field(default=None, max_length=64)
+    input_type: Literal["text", "select", "multi_select", "boolean", "confirmation"] | None = None
+    options: tuple[str, ...] = ()
+    required: bool = True
+    field_mapping: str | None = Field(default=None, max_length=128)
 
 
 class ToolSummaryData(OutputModel):

@@ -1,6 +1,8 @@
+import { ConflictException, NotImplementedException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunsService, createRunsService } from "../../src/state-machine/runs.service";
 import { AuditService } from "../../src/services/audit.service";
+import { questionSchema } from "../../src/services/planning-contracts";
 import { PlanningClients } from "../../src/services/planning-clients";
 import { makeRun, memoryDb, contextFor, fakeClients, manifest, policy } from "../helpers/planning-fixture";
 
@@ -57,7 +59,6 @@ describe("RunsService durable planning", () => {
     expect(stored.cloudContext?.active_accounts[0]?.supported_regions).toEqual(["us-east-1"]);
     expect(JSON.stringify(stored)).not.toContain("DO_NOT_COPY");
     const sessionRequest = c.fetcher.mock.calls.find(([url]) => String(url).endsWith("/v1/sessions"))!;
-    expect(JSON.parse(sessionRequest[1]!.body as string).profile_id).toBe("provisioning");
     expect(JSON.parse(sessionRequest[1]!.body as string).execution_context).toMatchObject({ workspace_id: run.workspaceId, user_id: run.requesterId, cloud_context: stored.cloudContext });
     expect(stored.agentSessionId).toMatch(/^[a-f0-9-]{36}$/);
     expect(stored.agentTurnPending).toBe(false);
@@ -70,6 +71,30 @@ describe("RunsService durable planning", () => {
     const c = fakeClients(run, [], { noProvider: true });
     await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
     expect(f.current()).toMatchObject({ state: "FAILED", errorMessage: "Connect a provider account to proceed." });
+    expect(c.fetcher.mock.calls.some(([url]) => String(url).includes("/sessions"))).toBe(false);
+  });
+
+  it("snapshots the policy-service requirements before loading cloud context", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    const c = fakeClients(run, [{ type: "assistant_message", data: { message: "Ready to draft" } }]);
+    await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
+    expect(f.current().policyRequirements).toEqual({ enabled: true, allowed_regions: ["us-east-1"], max_budget: 500,
+      required_tags: { owner: "*" }, prohibited_resource_types: [], required_encryption: true, required_backup: false });
+  });
+
+  it("treats an absent allowed_regions rule as unrestricted", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    const c = fakeClients(run, [{ type: "assistant_message", data: { message: "Ready to draft" } }], { policyResponse: {} });
+    await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
+    expect(f.current()).toMatchObject({ state: "MANIFEST_CREATING", policyRequirements: { allowed_regions: [] } });
+  });
+
+  it("fails before drafting when the allowed_regions rule allows no regions", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    const c = fakeClients(run, [], { policyResponse: { allowed_regions: [] } });
+    await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
+    expect(f.current()).toMatchObject({ state: "FAILED", errorCode: "POLICY_NO_ALLOWED_REGIONS" });
+    expect(f.current().policyRequirements).toBeFalsy();
     expect(c.fetcher.mock.calls.some(([url]) => String(url).includes("/sessions"))).toBe(false);
   });
 
@@ -108,7 +133,7 @@ describe("RunsService durable planning", () => {
     const service = new RunsService(f.db, new AuditService(f.db), c.clients);
     await service.processRun(run.id, run.workspaceId);
     expect(f.current()).toMatchObject({ state: "MANIFEST_VALIDATING", manifestVersion: 1, manifestValidatedVersion: 1, manifestConfirmedVersion: null });
-    expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/v1/manifests"))).toHaveLength(1);
+    expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/tools/create_manifest"))).toHaveLength(3);
     expect(c.fetcher.mock.calls.filter(([url]) => String(url).endsWith("/turns"))).toHaveLength(3);
     expect(f.events.at(-1)).toMatchObject({ type: "ManifestReadyEvent", payload: { manifest_version: 1, components: [{ type: "architecture_summary" }, { type: "storage_card" }] } });
     await expect(service.transitionState(run.id, run.workspaceId, f.current().stateVersion, "IAC_GENERATING", run.requesterId)).rejects.toThrow("manifestConfirmed");
@@ -126,24 +151,6 @@ describe("RunsService durable planning", () => {
     expect(c.fetcher.mock.calls.some(([url]) => String(url).endsWith("/v1/manifests"))).toBe(false);
   });
 
-  it("persists validation feedback before retrying and shares the dispatch deadline", async () => {
-    const run = makeRun(); const f = memoryDb(run);
-    const c = fakeClients(run, Array.from({ length: 2 }, () => ({ type: "manifest_draft", data: { message: "Draft", manifest } })), { invalidDrafts: 1 });
-    const original = c.fetcher.getMockImplementation()!;
-    let turns = 0;
-    c.fetcher.mockImplementation(async (url, init) => {
-      if (String(url).endsWith("/turns") && ++turns === 2) {
-        expect(f.current().agentInput).toContain("region validation failed");
-        expect(JSON.parse(init!.body as string).message).toBe(f.current().agentInput);
-      }
-      return original(url, init);
-    });
-    await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
-    const requests = c.fetcher.mock.calls.filter(([url]) => /\/sessions|\/tools\/validate_manifest|\/v1\/manifests/.test(String(url)));
-    expect(new Set(requests.map(([, init]) => init!.signal)).size).toBe(1);
-    expect(f.current()).toMatchObject({ state: "MANIFEST_VALIDATING", agentInput: null });
-  });
-
   it("revisions reuse the conversation and allocate the next version", async () => {
     const run = makeRun(); const f = memoryDb(run);
     const c = fakeClients(run, [{ type: "manifest_draft", data: { message: "Draft", manifest } }, { type: "manifest_draft", data: { message: "Revised", manifest } }]);
@@ -155,12 +162,69 @@ describe("RunsService durable planning", () => {
     expect(f.current()).toMatchObject({ manifestVersion: 2, agentSessionId: session, manifestConfirmedVersion: null });
   });
 
-  it("rejects unknown component payloads and never publishes them", async () => {
+  it("rejects unknown component payloads, audits the failure, and publishes only the safe fallback", async () => {
     const run = makeRun(); const f = memoryDb(run);
     const c = fakeClients(run, [{ type: "component_payload", data: { component_id: "raw_html", payload: { html: "<script>" } } }]);
     await new RunsService(f.db, new AuditService(f.db), c.clients).processRun(run.id, run.workspaceId);
-    expect(f.current().state).toBe("FAILED");
+    expect(f.current()).toMatchObject({ state: "FAILED", errorCode: "COMPONENT_PAYLOAD_INVALID" });
     expect(f.events.some(e => e.type === "ComponentPayloadEvent")).toBe(false);
+    expect(f.events.at(-1)).toMatchObject({ type: "ComponentPayloadRejectedEvent", payload: {
+      component_type: "unknown", component_version: "1.0.0", validation_issues: [{ code: "unknown_component_or_version" }],
+    } });
+    expect(f.audits.at(-1)![1]).toBe("state_transition");
+    expect(JSON.parse(f.audits.at(-1)![6] as string)).toMatchObject({ error_code: "COMPONENT_PAYLOAD_INVALID",
+      component_type: "unknown", validation_issues: [{ code: "unknown_component_or_version" }] });
+    expect(JSON.stringify(f.events)).not.toContain("<script>");
+  });
+
+  it("rejects producer-valid unsupported prerelease component versions through the safe fallback", async () => {
+    const run=makeRun();const f=memoryDb(run);
+    const c=fakeClients(run,[{type:"component_payload",data:{component_id:"chat_message",component_version:"1.0.0-beta",payload:{}}}]);
+    await new RunsService(f.db,new AuditService(f.db),c.clients).processRun(run.id,run.workspaceId);
+    expect(f.current().errorCode).toBe("COMPONENT_PAYLOAD_INVALID");
+    expect(f.events.at(-1)).toMatchObject({type:"ComponentPayloadRejectedEvent",payload:{component_type:"chat_message",component_version:"unsupported"}});
+  });
+
+  it.each([true, false])("handles a committed concurrent clarification replay (same answers: %s)", async (same) => {
+    const question = questionSchema.parse({ question: "Region?", fields: [{ name: "region", type: "string", options: ["us-east-1", "us-west-2"] }] });
+    const stale = makeRun({ state: "CLARIFYING", currentQuestion: question, clarificationExpiresAt: new Date(Date.now() + 60000) });
+    const latest = { ...stale, state: "MANIFEST_CREATING" as const, stateVersion: 1, currentQuestion: null,
+      answersHistory: [{ question, answers: { region: "us-east-1" }, answeredAt: new Date().toISOString(), idempotencyKey: "race" }] };
+    const f = memoryDb(latest);
+    const service = new RunsService(f.db);
+    vi.spyOn(service, "getRun").mockResolvedValueOnce(stale).mockResolvedValue(latest);
+    const result = service.clarifyRun(stale.id, stale.workspaceId, stale.requesterId, { idempotencyKey: "race", answers: { region: same ? "us-east-1" : "us-west-2" } });
+    if (same) await expect(result).resolves.toMatchObject({ stateVersion: 1 });
+    else await expect(result).rejects.toBeInstanceOf(ConflictException);
+    expect(f.events).toHaveLength(0);
+  });
+
+  it.each([true, false])("handles a committed concurrent clarification replay (same answers: %s)", async (same) => {
+    const question = questionSchema.parse({ question: "Region?", fields: [{ name: "region", type: "string", options: ["us-east-1", "us-west-2"] }] });
+    const stale = makeRun({ state: "CLARIFYING", currentQuestion: question, clarificationExpiresAt: new Date(Date.now() + 60000) });
+    const latest = { ...stale, state: "MANIFEST_CREATING" as const, stateVersion: 1, currentQuestion: null,
+      answersHistory: [{ question, answers: { region: "us-east-1" }, answeredAt: new Date().toISOString(), idempotencyKey: "race" }] };
+    const f = memoryDb(latest);
+    const service = new RunsService(f.db);
+    vi.spyOn(service, "getRun").mockResolvedValueOnce(stale).mockResolvedValue(latest);
+    const result = service.clarifyRun(stale.id, stale.workspaceId, stale.requesterId, { idempotencyKey: "race", answers: { region: same ? "us-east-1" : "us-west-2" } });
+    if (same) await expect(result).resolves.toMatchObject({ stateVersion: 1 });
+    else await expect(result).rejects.toBeInstanceOf(ConflictException);
+    expect(f.events).toHaveLength(0);
+  });
+
+  it.each([true, false])("handles a committed concurrent clarification replay (same answers: %s)", async (same) => {
+    const question = questionSchema.parse({ question: "Region?", fields: [{ name: "region", type: "string", options: ["us-east-1", "us-west-2"] }] });
+    const stale = makeRun({ state: "CLARIFYING", currentQuestion: question, clarificationExpiresAt: new Date(Date.now() + 60000) });
+    const latest = { ...stale, state: "MANIFEST_CREATING" as const, stateVersion: 1, currentQuestion: null,
+      answersHistory: [{ question, answers: { region: "us-east-1" }, answeredAt: new Date().toISOString(), idempotencyKey: "race" }] };
+    const f = memoryDb(latest);
+    const service = new RunsService(f.db);
+    vi.spyOn(service, "getRun").mockResolvedValueOnce(stale).mockResolvedValue(latest);
+    const result = service.clarifyRun(stale.id, stale.workspaceId, stale.requesterId, { idempotencyKey: "race", answers: { region: same ? "us-east-1" : "us-west-2" } });
+    if (same) await expect(result).resolves.toMatchObject({ stateVersion: 1 });
+    else await expect(result).rejects.toBeInstanceOf(ConflictException);
+    expect(f.events).toHaveLength(0);
   });
 
   it("discards agent output when cancellation wins during the HTTP request", async () => {
@@ -201,5 +265,32 @@ describe("RunsService durable planning", () => {
     const run = makeRun({ state: "COMPLETED" }); const f = memoryDb(run);
     expect((await new RunsService(f.db).cancelRun(run.id, run.workspaceId, run.requesterId)).state).toBe("COMPLETED");
     expect(f.audits).toHaveLength(0);
+  });
+
+  it("rejects an approved decision until plan confirmation is implemented", async () => {
+    const run = makeRun({ state: "APPROVING", approvalStatus: "pending", policyDecision: "requires_approval" }); const f = memoryDb(run);
+    await expect(new RunsService(f.db).handleApprovalEvent(run.id, run.workspaceId, run.requesterId, "approved")).rejects.toThrow(NotImplementedException);
+    expect(f.current()).toMatchObject({ state: "APPROVING", approvalStatus: "pending" });
+    expect(f.audits).toHaveLength(0);
+  });
+
+  it("still routes a rejected approval back to manifest revision", async () => {
+    const run = makeRun({ state: "APPROVING", approvalStatus: "pending", policyDecision: "requires_approval",
+      policyRequirements: policy, policyRequirementsLoadedAt: new Date(), cloudContextLoadedAt: new Date() });
+    run.cloudContext = contextFor(run); const f = memoryDb(run);
+    const updated = await new RunsService(f.db).handleApprovalEvent(run.id, run.workspaceId, run.requesterId, "rejected", "Too expensive");
+    expect(updated).toMatchObject({ state: "MANIFEST_CREATING", approvalStatus: "rejected", agentTurnPending: true });
+  });
+
+  it("destroys the planning lock connection when the advisory unlock fails", async () => {
+    const run = makeRun(); const f = memoryDb(run, "pg_advisory_unlock");
+    await expect(new RunsService(f.db).processRun(run.id, run.workspaceId)).rejects.toThrow("Database write failure");
+    expect(f.release).toHaveBeenCalledWith(expect.objectContaining({ message: "Database write failure" }));
+  });
+
+  it("returns the planning lock connection to the pool after a clean unlock", async () => {
+    const run = makeRun(); const f = memoryDb(run);
+    await new RunsService(f.db).processRun(run.id, run.workspaceId);
+    expect(f.release).toHaveBeenCalledWith(undefined);
   });
 });

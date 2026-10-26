@@ -6,7 +6,7 @@ import {
 } from "../../src/services/chat-persistence.service";
 import type { ChatEventsService } from "../../src/services/chat-events.service";
 import type { DbService } from "../../src/db/db.service";
-import { ConflictError } from "../../src/common/errors/typed-errors";
+import { ConflictError, ForbiddenError } from "../../src/common/errors/typed-errors";
 
 describe("ChatPersistenceService", () => {
   const baseParams = {
@@ -78,17 +78,41 @@ describe("ChatPersistenceService", () => {
     expect(result).toEqual({ turnId: "turn-uuid-1", runId: "run-uuid-1", replayed: false });
     expect(executedQueries[0]).toBe("BEGIN");
     expect(executedQueries[1]).toContain("provisr_identity.memberships");
-    expect(executedQueries[2]).toContain("pg_advisory_xact_lock");
-    expect(executedQueries[3]).toContain("SELECT id, provisioning_run_id, request_fingerprint FROM provisr_state.chat_turns");
-    expect(executedQueries[4]).toContain("provisr_state.chat_sessions");
-    expect(executedQueries[5]).toContain("INSERT INTO provisr_state.provisioning_runs");
-    expect(executedQueries[6]).toContain("provisr_audit.chain");
-    expect(executedQueries[8]).toContain("INSERT INTO provisr_audit.audit_events");
-    expect(executedQueries[9]).toContain("INSERT INTO provisr_state.chat_turns");
-    expect(executedQueries[10]).toContain("INSERT INTO provisr_state.chat_messages");
+    expect(executedQueries[2]).toContain("role::text = ANY");
+    expect(executedQueries[3]).toContain("pg_advisory_xact_lock");
+    expect(executedQueries[4]).toContain("SELECT id, provisioning_run_id, request_fingerprint FROM provisr_state.chat_turns");
+    expect(executedQueries[5]).toContain("provisr_state.chat_sessions");
+    expect(executedQueries[6]).toContain("INSERT INTO provisr_state.provisioning_runs");
+    expect(executedQueries[7]).toContain("provisr_audit.chain");
+    expect(executedQueries[9]).toContain("INSERT INTO provisr_audit.audit_events");
+    expect(executedQueries[10]).toContain("INSERT INTO provisr_state.chat_turns");
+    expect(executedQueries[11]).toContain("INSERT INTO provisr_state.chat_messages");
     expect(events.append).toHaveBeenCalledTimes(1);
     expect(executedQueries[executedQueries.length - 1]).toBe("COMMIT");
     expect(poolClient.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects planning turns from members without a provisioning role", async () => {
+    const executedQueries: string[] = [];
+    const poolClient = {
+      query: vi.fn().mockImplementation(async (sql: string) => {
+        executedQueries.push(sql);
+        if (sql.includes("role::text = ANY")) return { rows: [] };
+        if (sql.includes("SELECT 1 FROM provisr_identity.memberships")) return { rows: [{ "?column?": 1 }] };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    const db = {
+      connect: vi.fn().mockResolvedValue(poolClient),
+      query: vi.fn(),
+    } as unknown as DbService;
+    const service = new ChatPersistenceService(db, {} as ChatEventsService);
+
+    await expect(service.submitPlanningTurn(baseParams)).rejects.toThrow(ForbiddenError);
+    expect(executedQueries.some((sql) => sql.includes("INSERT INTO provisr_state.provisioning_runs"))).toBe(false);
+    expect(db.query).not.toHaveBeenCalled();
+    expect(executedQueries.at(-1)).toBe("ROLLBACK");
   });
 
   it("replays matching request if turn exists during transaction", async () => {

@@ -42,7 +42,9 @@ export class PostgresPolicyPreflightStore implements PolicyPreflightStore {
          WHERE id = $1 AND deleted_at IS NULL`,
         [workspaceId],
       );
-      return row.rows[0]?.policies_enabled ?? false;
+      // Fail closed: an unknown workspace must never be treated as policies-disabled.
+      if (!row.rows[0]) throw new Error("Workspace not found");
+      return row.rows[0].policies_enabled;
     } finally {
       result.release();
     }

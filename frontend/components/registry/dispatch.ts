@@ -42,7 +42,7 @@ export function resolvePayload(
   const entry = registry.get(payload.type);
   if (!entry) return { kind: "unknown", type: payload.type };
 
-  if (payload.version === entry.version) {
+  if (payload.version === entry.version || (/^\d+\.\d+$/.test(entry.version) && payload.version === `${entry.version}.0`)) {
     const parsed = entry.schema.safeParse(payload.data);
     if (!parsed.success) {
       return {

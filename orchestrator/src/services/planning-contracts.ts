@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { componentSchemas } from "@provisr/shared-contracts";
+import { COMPONENT_SCHEMA_VERSION, componentSchemasByVersion } from "@provisr/shared-contracts";
 
 export const cloudAccountSchema = z.object({
   id: z.string().uuid(), workspace_id: z.string().uuid(), provider: z.enum(["aws", "azure", "gcp"]),
@@ -20,10 +20,16 @@ const answerFieldSchema = z.object({
   name: z.string().regex(/^[a-z][a-z0-9_]*$/).max(64),
   type: z.enum(["string", "number", "boolean", "strings"]),
   options: z.array(z.string().min(1)).min(1).nullish(),
-}).strict();
+}).strict().refine(f => !f.options || f.type === "string" || f.type === "strings", "Answer options are only allowed for string fields");
 export const questionSchema = z.object({
   question: z.string().trim().min(1).max(10000),
   fields: z.array(answerFieldSchema).min(1).max(20).default([{ name: "answer", type: "string" }]),
+  // Optional FE-C03 presentation detail from the agent's question bank; answers are still validated against `fields`.
+  question_id: z.string().min(1).max(64).nullish(),
+  input_type: z.enum(["text", "select", "multi_select", "boolean", "confirmation"]).nullish(),
+  options: z.array(z.string().min(1)).max(50).nullish(),
+  required: z.boolean().nullish(),
+  field_mapping: z.string().min(1).max(128).nullish(),
 }).strict().refine(q => new Set(q.fields.map(f => f.name)).size === q.fields.length, "Duplicate answer fields");
 export type ClarificationQuestion = z.infer<typeof questionSchema>;
 
@@ -49,7 +55,7 @@ export const agentEnvelopeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("assistant_message"), data: z.object({ message: text }).strict() }),
   z.object({ type: z.literal("clarification_question"), data: questionSchema }),
   z.object({ type: z.literal("manifest_draft"), data: z.object({ message: text, manifest: z.record(z.unknown()) }).strict() }),
-  z.object({ type: z.literal("component_payload"), data: z.object({ component_id: z.string(), payload: z.record(z.unknown()) }).strict() }),
+  z.object({ type: z.literal("component_payload"), data: z.object({ component_id: z.string(), component_version: z.string().max(128).regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/).default(COMPONENT_SCHEMA_VERSION), payload: z.record(z.unknown()) }).strict() }),
   z.object({ type: z.literal("tool_summary"), data: z.object({ tool_name: text, summary: text }).strict() }),
   z.object({ type: z.literal("error"), data: z.object({ code: text, message: text, retryable: z.boolean().default(false) }).strict() }),
 ]);
@@ -61,14 +67,31 @@ export const agentResponseSchema = z.object({
   }).strict(),
 }).strict();
 
-export function validateComponent(id: string, payload: unknown): Record<string, unknown> {
-  if (!Object.hasOwn(componentSchemas, id)) throw new Error("Unknown component type");
-  return componentSchemas[id as keyof typeof componentSchemas].parse(payload);
+export type ComponentPayloadIssue = { path: string; code: string };
+
+export class ComponentPayloadValidationError extends Error {
+  constructor(readonly componentType: string, readonly componentVersion: string, readonly issues: ComponentPayloadIssue[]) {
+    super("Component payload failed schema validation");
+    this.name = "ComponentPayloadValidationError";
+  }
+}
+
+export function validateComponent(id: string, payload: unknown, version: string = COMPONENT_SCHEMA_VERSION): Record<string, unknown> {
+  const versions = Object.hasOwn(componentSchemasByVersion, id)
+    ? componentSchemasByVersion[id as keyof typeof componentSchemasByVersion] : undefined;
+  const schema = versions && Object.hasOwn(versions, version)
+    ? versions[version as keyof typeof versions] : undefined;
+  if (!schema) throw new ComponentPayloadValidationError(versions ? id : "unknown", version === COMPONENT_SCHEMA_VERSION ? version : "unsupported", [{ path: "$", code: "unknown_component_or_version" }]);
+  const result = schema.safeParse(payload);
+  if (!result.success) throw new ComponentPayloadValidationError(id, version,
+    result.error.issues.map(issue => ({ path: "$", code: issue.code })));
+  return result.data as Record<string, unknown>;
 }
 
 /** Project validated manifest data into the existing domain registry. */
 export function manifestComponents(manifest: Record<string, unknown>, requestId: string, version: number) {
-  const resources = z.array(z.object({ name: z.string(), type: z.string() }).passthrough()).parse(manifest.resources);
+  const resources: Array<Record<string, unknown> & { name: string; type: string }> = z.array(z.object({ name: z.string().optional(), logical_name: z.string().optional(), type: z.string() }).passthrough())
+    .parse(manifest.resources).map(resource => ({ ...resource, name: resource.name ?? resource.logical_name ?? "resource" }));
   const component = (type: string, data: unknown) => ({ type, version: "1.0.0", requestId, data: validateComponent(type, data) });
   return [component("architecture_summary", { provider: manifest.provider, region: manifest.region,
     environment: manifest.environment, resources: resources.map((resource, index) => ({ id: `${version}:${index}`, name: resource.name, type: resource.type })) }),

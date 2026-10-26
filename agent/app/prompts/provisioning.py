@@ -246,9 +246,11 @@ PROVISIONING_AGENT_V1_1 = PromptBundle(
 _POLICY_AWARE_PLANNING_RULES = """POLICY-AWARE PLANNING
 The AUTHORITATIVE POLICY REQUIREMENTS in runtime context come from the
 get_policy_requirements MCP tool. Before returning manifest_draft:
-- choose a region from allowed_regions
+- choose a region from allowed_regions; when it is empty there is no region rule, so
+  choose from the verified account's supported regions
 - keep the proposed monthly budget at or below max_budget when it is present
-- copy every required_tags key and value into the manifest tags
+- copy every required_tags key and value into the manifest tags; a value of "*" means the
+  key is required with any value: use the value the user gave, or ask a clarification_question
 - never include a type listed in prohibited_resource_types
 - set security.encryption_enabled to true when required_encryption is true
 - set backup.enabled to true when required_backup is true
@@ -272,6 +274,11 @@ PROVISIONING_AGENT_PROMPT = PROVISIONING_AGENT_V1_1.content.replace(
     '- "backup": {"enabled": true|false}\n'
     '- "policy": {"requirements_loaded":true,"applied_constraints":['
     '"allowed_regions",...]}\n',
+)
+
+PROVISIONING_AGENT_PROMPT = PROVISIONING_AGENT_PROMPT.replace(
+    '"component_id":"registered_component","payload":{...}',
+    '"component_id":"registered_component","component_version":"1.0.0","payload":{...}',
 )
 
 PROVISIONING_AGENT_V1_2 = PromptBundle(

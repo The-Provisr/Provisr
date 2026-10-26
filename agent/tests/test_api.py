@@ -75,7 +75,9 @@ def test_clarification_turn_generates_replayable_sse_events() -> None:
 
         turn = client.post(
             f"/v1/sessions/{session_id}/turns",
-            json={"message": "Create an API server"},
+            json={
+                "message": "Create an API server on AWS in us-east-1 for production with postgres"
+            },
         )
         assert turn.status_code == 200
         assert turn.json()["result"]["type"] == "clarification_question"
@@ -102,7 +104,7 @@ def test_invalid_output_fails_and_audits_session() -> None:
 
         response = client.post(
             f"/v1/sessions/{session_id}/turns",
-            json={"message": "Create a server"},
+            json={"message": "Create a server on AWS in us-east-1 for production with postgres"},
         )
         events = client.get(f"/v1/sessions/{session_id}/events")
         retry = client.post(
@@ -123,7 +125,7 @@ def test_mismatched_output_request_id_fails_validation() -> None:
         created = create_session(client)
         response = client.post(
             f"/v1/sessions/{created.json()['session']['session_id']}/turns",
-            json={"message": "Create a server"},
+            json={"message": "Create a server on AWS in us-east-1 for production with postgres"},
         )
 
     assert response.status_code == 502
@@ -134,7 +136,7 @@ def test_unknown_session_uses_problem_details() -> None:
     with build_client(clarification_output()) as client:
         response = client.post(
             "/v1/sessions/missing/turns",
-            json={"message": "Create a server"},
+            json={"message": "Create a server on AWS in us-east-1 for production with postgres"},
         )
 
     assert response.status_code == 404

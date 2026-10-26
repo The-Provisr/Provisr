@@ -1,19 +1,7 @@
 import type { ClarificationAnswers } from "@/lib/clarification/types";
+import { orchestrationBaseUrl } from "@/lib/orchestration/base-url";
 
 const CLARIFY_TIMEOUT_MS = 10_000;
-
-function orchestrationBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_ORCHESTRATION_API_URL;
-  if (configured) {
-    return configured;
-  }
-  if (process.env.NODE_ENV === "development") {
-    return "http://localhost:4000";
-  }
-  throw new Error(
-    "NEXT_PUBLIC_ORCHESTRATION_API_URL must be configured for client execution",
-  );
-}
 
 /**
  * POST /v1/runs/:id/clarify — resumes the suspended run with the answers.

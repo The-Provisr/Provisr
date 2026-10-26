@@ -2,7 +2,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.models import AgentSession, ExecutionContext
+from app.domain.models import AgentSession, AnsweredQuestion, ExecutionContext
 from app.outputs.models import AgentOutputEnvelope
 
 
@@ -30,10 +30,26 @@ class CreateSessionResponse(ApiModel):
 
 class RunTurnRequest(ApiModel):
     message: str = Field(min_length=1, max_length=20000)
+    # Structured answers to a previous clarification question; persisted before
+    # the turn so the agent never re-asks a confirmed field.
+    answers: list[AnsweredQuestion] = Field(default_factory=list)
 
 
 class RunTurnResponse(ApiModel):
     result: AgentOutputEnvelope
+
+
+class PolicyViolationExplanationRequest(ApiModel):
+    rule_key: str = Field(min_length=1, max_length=128)
+    severity: str = Field(min_length=1, max_length=32)
+    evidence: dict[str, object] = Field(default_factory=dict)
+    remediation_hint: str = Field(default="", max_length=2000)
+
+
+class PolicyViolationExplanationResponse(ApiModel):
+    explanation: str
+    manifest_part: str
+    remediation: str
 
 
 class ProblemDetails(ApiModel):

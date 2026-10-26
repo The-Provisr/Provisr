@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { ExecutionContext } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { ALLOW_NO_WORKSPACE_MEMBERSHIP_KEY } from "../../src/middleware/allow-no-workspace.decorator";
 import { IS_PUBLIC_KEY } from "../../src/middleware/public.decorator";
 import { AuthGuard, extractBearerToken, isSseEventsPath } from "../../src/middleware/auth.guard";
 import { UnauthorizedError, ForbiddenError, DependencyError } from "../../src/common/errors/typed-errors";
@@ -85,6 +86,7 @@ describe("AuthGuard", () => {
     delete process.env.AUTH_DEV_BYPASS;
     Reflect.deleteMetadata(IS_PUBLIC_KEY, handler);
     Reflect.deleteMetadata(IS_PUBLIC_KEY, clazz);
+    Reflect.deleteMetadata(ALLOW_NO_WORKSPACE_MEMBERSHIP_KEY, handler);
   });
 
   it("lets @Public handlers through without a user", async () => {
@@ -143,6 +145,13 @@ describe("AuthGuard", () => {
       await expect(guard.canActivate(mockContext({ authHeader: "Bearer jwt.token.here" }))).rejects.toBeInstanceOf(
         ForbiddenError,
       );
+    });
+
+    it("allows authenticated bootstrap without membership but still requires a token", async () => {
+      Reflect.defineMetadata(ALLOW_NO_WORKSPACE_MEMBERSHIP_KEY, true, handler);
+      const { guard } = harness({ memberships: [] });
+      expect(await guard.canActivate(mockContext({ authHeader: "Bearer jwt.token.here" }))).toBe(true);
+      await expect(guard.canActivate(mockContext({}))).rejects.toBeInstanceOf(UnauthorizedError);
     });
 
     it("propagates a Clerk outage as a dependency error, not 403", async () => {

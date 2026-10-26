@@ -6,6 +6,9 @@ import { PlanningClients } from "../../src/services/planning-clients";
 
 export const policy = { enabled: true, allowed_regions: ["us-east-1"], max_budget: 500,
   required_tags: { owner: "platform" }, prohibited_resource_types: [], required_encryption: true, required_backup: true };
+/** The policy-service (BE-M02) projection behind `policy`: flat, key-only tags, no backup rule. */
+export const policyServiceResponse = { allowed_regions: ["us-east-1"], max_monthly_budget_usd: 500,
+  required_tags: ["owner"], required_encryption: true };
 export const manifest = { schema_version: "1.0", provider: "aws", region: "us-east-1", environment: "development",
   monthly_budget_usd: 100, tags: { owner: "platform" }, security: { encryption_enabled: true }, backup: { enabled: true },
   policy: { requirements_loaded: true, applied_constraints: ["allowed_regions", "max_budget", "required_tags", "required_encryption", "required_backup"] },
@@ -14,10 +17,10 @@ export function makeRun(overrides: Partial<ProvisioningRun> = {}): ProvisioningR
   return { id: randomUUID(), sessionId: randomUUID(), workspaceId: randomUUID(), requesterId: randomUUID(),
     state: "RECEIVED", stateVersion: 0, prompt: "Create a bucket", manifestVersion: null, policyDecision: null,
     approvalStatus: "not_required", executionStatus: "pending", idempotencyKey: randomUUID(), correlationId: randomUUID(),
-    errorCode: null, errorMessage: null, iacArtifactId: null, createdAt: new Date(), updatedAt: new Date(), completedAt: null,
+    errorCode: null, errorMessage: null, createdAt: new Date(), updatedAt: new Date(), completedAt: null,
     policyRequirements: null, policyRequirementsLoadedAt: null, cloudContext: null, cloudContextLoadedAt: null,
     agentSessionId: null, agentTurnPending: true, agentInput: null, currentQuestion: null, clarificationExpiresAt: null,
-    answersHistory: [], manifestValidationAttempts: 0, manifestValidatedVersion: null, manifestConfirmedVersion: null, manifestConfirmedAt: null, ...overrides };
+    answersHistory: [], manifestValidationAttempts: 0, manifestValidatedVersion: null, manifestConfirmedVersion: null, manifestConfirmedAt: null, iacArtifactId: null, ...overrides };
 }
 export function contextFor(run: ProvisioningRun) {
   return { connected_providers: ["aws" as const], active_accounts: [{ id: randomUUID(), workspace_id: run.workspaceId,
@@ -65,23 +68,31 @@ export function memoryDb(initial: ProvisioningRun, failSql?: string) {
   return { db, query, release, audits, events, current: () => structuredClone(run) };
 }
 
-export function fakeClients(run: ProvisioningRun, outputs: Array<{ type: string; data: unknown }>, options: { invalidDrafts?: number; noProvider?: boolean } = {}) {
+export function fakeClients(run: ProvisioningRun, outputs: Array<{ type: string; data: unknown }>, options: { invalidDrafts?: number; noProvider?: boolean; policyResponse?: Record<string, unknown> } = {}) {
   let validationCalls = 0;
   let manifestVersion = 0;
   const cloud = contextFor(run);
   const fetcher = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
     const path = new URL(String(url)).pathname;
     let body: unknown;
-    if (path.endsWith("/policy-requirements")) body = { requirements: policy };
-    else if (path === "/v1/cloud-accounts") body = { accounts: options.noProvider ? [] : cloud.active_accounts };
-    else if (path.startsWith("/v1/cloud-accounts/")) body = { ...cloud.active_accounts[0], metadata: {
-      supported_regions: ["us-east-1"], resource_counts: { aws_s3: 0 }, quota_limits: { aws_s3: 100 }, secret_access_key: "DO_NOT_COPY" } };
+    if (path.endsWith("/policy-requirements")) body = options.policyResponse ?? policyServiceResponse;
+    else if (path === "/tools/get_cloud_account_capabilities") body = { workspace_id: run.workspaceId,
+      accounts: options.noProvider ? [] : cloud.active_accounts.map(a => ({ id: a.id, provider: a.provider,
+        status: a.status, account_alias: a.label, available_regions: a.supported_regions,
+        checked_at: a.verified_at, execution_ready: false })) };
     else if (path === "/v1/sessions") body = { session: { session_id: randomUUID() } };
     else if (path.endsWith("/turns")) {
       const output = outputs.shift();
       if (!output) throw new Error("No test output remaining");
       body = { result: { ...output, version: "1.0.0", request_id: run.id, metadata: { confidence: 1, source: "llm_generated", warnings: [] } } };
-    } else if (path === "/tools/validate_manifest") body = { valid: ++validationCalls > (options.invalidDrafts ?? 0), errors: ["region validation failed"] };
+    } else if (path === "/tools/create_manifest") {
+      const valid = ++validationCalls > (options.invalidDrafts ?? 0);
+      body = valid ? {manifest_id:randomUUID(),version:++manifestVersion,url:"http://manifest/v1/runs/manifests/1",validation:{valid:true}}
+        : {valid:false,errors:["region validation failed"]};
+    } else if (path === "/tools/validate_manifest") {
+      const valid = ++validationCalls > (options.invalidDrafts ?? 0);
+      body = { valid, errors: valid ? [] : ["region validation failed"] };
+    }
     else if (path === "/tools/validate_manifest_schema") body = { valid: true, errors: [] };
     else if (path === "/v1/manifests") body = { version: ++manifestVersion };
     else throw new Error(`Unexpected test URL ${path}`);

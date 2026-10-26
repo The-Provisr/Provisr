@@ -13,7 +13,11 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from src.context.fastapi import install_context_error_handler, require_context
 from src.context.membership import MembershipStore, PostgresMembershipStore
 from src.context.models import MCPContext
+from src.servers.cloud_state_server import router as cloud_router
 from src.servers.domain_server import router as domain_router
+from src.servers.iac_generation import router as iac_router
+from src.servers.manifest_creation import router as manifest_creation_router
+from src.servers.manifest_server import router as backend_manifest_router
 from src.servers.manifest_validation import router as manifest_router
 
 
@@ -22,12 +26,20 @@ class Resources:
     membership_store: MembershipStore
     http_client: httpx.AsyncClient
     backend_url: str
+    manifest_backend_url: str
+    cloud_backend_url: str
+    cloud_service_token: str
+    iac_service_token: str
 
 
 def create_app(
     membership_store: MembershipStore | None = None,
     http_client: httpx.AsyncClient | None = None,
     backend_url: str | None = None,
+    manifest_backend_url: str | None = None,
+    cloud_backend_url: str | None = None,
+    cloud_service_token: str | None = None,
+    iac_service_token: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -56,6 +68,16 @@ def create_app(
             membership_store=resolved_store,
             http_client=client,
             backend_url=resolved_backend_url,
+            manifest_backend_url=(manifest_backend_url or os.getenv(
+                "MANIFEST_SERVICE_URL", "http://localhost:8090",
+            )).rstrip("/"),
+            cloud_backend_url=(cloud_backend_url or os.getenv(
+                "CLOUD_ACCOUNT_SERVICE_URL", "http://localhost:8089",
+            )).rstrip("/"),
+            cloud_service_token=(cloud_service_token if cloud_service_token is not None
+                                 else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
+            iac_service_token=(iac_service_token if iac_service_token is not None
+                               else os.getenv("ORCHESTRATOR_SERVICE_TOKEN", "")),
         )
         try:
             yield
@@ -70,8 +92,12 @@ def create_app(
         lifespan=lifespan,
     )
     install_context_error_handler(application)
-    application.include_router(manifest_router)
     application.include_router(domain_router)
+    application.include_router(manifest_router)
+    application.include_router(backend_manifest_router)
+    application.include_router(cloud_router)
+    application.include_router(iac_router)
+    application.include_router(manifest_creation_router)
 
     @application.get("/health/live")
     async def live() -> dict[str, str]:

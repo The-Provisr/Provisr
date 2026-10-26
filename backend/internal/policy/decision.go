@@ -26,11 +26,11 @@ const (
 
 // Violation describes a single rule evaluation that flagged the input.
 type Violation struct {
-	RuleKey         string
-	Severity        string
-	Description     string
-	Evidence        string
-	RemediationHint string
+	RuleKey         string `json:"rule_key"`
+	Severity        string `json:"severity"`
+	Description     string `json:"description"`
+	Evidence        string `json:"evidence"`
+	RemediationHint string `json:"remediation_hint"`
 }
 
 // denySeverity reports whether a severity class blocks execution outright.

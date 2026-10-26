@@ -26,6 +26,8 @@ import {
   ChatPersistenceService,
   createChatPersistenceService,
 } from "./services/chat-persistence.service";
+import { UsersController } from "./routes/users.controller";
+import { WorkspaceBootstrapService } from "./services/workspace-bootstrap.service";
 import { WorkspacesController } from "./routes/workspaces.controller";
 import { SessionsController } from "./routes/sessions.controller";
 import { ProvisioningRunsController } from "./routes/provisioning-runs.controller";
@@ -34,19 +36,38 @@ import { ArtifactsController } from "./routes/artifacts.controller";
 import { SseController } from "./routes/sse.controller";
 import { RunsService, createRunsService } from "./state-machine/runs.service";
 import { PlanningClients, loadPlanningConfig } from "./services/planning-clients";
+import { CloudAccountsController, CloudCapabilitiesController } from "./routes/cloud-accounts.controller";
+import { MembersController } from "./routes/members.controller";
+import { InvitationsController } from "./routes/invitations.controller";
+import { PermissionsController } from "./routes/permissions.controller";
+import { GATEWAY_CONFIG, GatewayConfig, loadGatewayConfig } from "./services/gateway-config";
+import { UpstreamClient } from "./services/upstream-client";
+import { CloudAccountsClient } from "./services/cloud-accounts.client";
+import { WorkspaceServiceClient } from "./services/workspace-service.client";
+import { WorkspaceAccessService } from "./services/workspace-access.service";
 
 @Module({
   imports: [],
   controllers: [
     AppController,
     WorkspacesController,
+    UsersController,
     SessionsController,
     ProvisioningRunsController,
     ApprovalsController,
     ArtifactsController,
     SseController,
+    CloudAccountsController,
+    CloudCapabilitiesController,
+    MembersController,
+    InvitationsController,
+    PermissionsController,
   ],
   providers: [
+    { provide: WorkspaceBootstrapService,
+      useFactory: (db: DbService, audit: AuditService) => new WorkspaceBootstrapService(db, audit,
+        (process.env.WORKSPACE_SERVICE_URL ?? "http://localhost:8088").replace(/\/+$/, "")),
+      inject: [DbService, AuditService] },
     {
       provide: DB_CONFIG,
       useFactory: () => loadDbConfig(),
@@ -70,8 +91,8 @@ import { PlanningClients, loadPlanningConfig } from "./services/planning-clients
     },
     {
       provide: IdentityService,
-      useFactory: (clerk: ClerkAuthService) => new IdentityService(clerk),
-      inject: [ClerkAuthService],
+      useFactory: (db: DbService, clerk: ClerkAuthService) => new IdentityService(db, clerk),
+      inject: [DbService, ClerkAuthService],
     },
     {
       provide: ChatEventsService,
@@ -94,6 +115,32 @@ import { PlanningClients, loadPlanningConfig } from "./services/planning-clients
       useFactory: (db: DbService, audit: AuditService) => createRunsService(db, audit,
         process.env.NODE_ENV === "test" ? undefined : new PlanningClients(loadPlanningConfig(process.env))),
       inject: [DbService, AuditService],
+    },
+    {
+      provide: GATEWAY_CONFIG,
+      useFactory: () => loadGatewayConfig(),
+    },
+    {
+      // Adapter to workspace-service (BE-A03); no auth header: the service
+      // performs no authentication itself and the gateway is the boundary.
+      provide: WorkspaceServiceClient,
+      useFactory: (config: GatewayConfig) =>
+        new WorkspaceServiceClient(new UpstreamClient(config.workspaceServiceUrl, fetch, config.timeoutMs)),
+      inject: [GATEWAY_CONFIG],
+    },
+    {
+      provide: CloudAccountsClient,
+      useFactory: (config: GatewayConfig) =>
+        new CloudAccountsClient(
+          new UpstreamClient(config.cloudAccountServiceUrl, fetch, config.timeoutMs),
+          config.serviceToken,
+        ),
+      inject: [GATEWAY_CONFIG],
+    },
+    {
+      provide: WorkspaceAccessService,
+      useFactory: (workspace: WorkspaceServiceClient) => new WorkspaceAccessService(workspace),
+      inject: [WorkspaceServiceClient],
     },
     {
       // useFactory + inject instead of useClass so the guard works under

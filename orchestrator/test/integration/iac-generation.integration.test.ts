@@ -53,8 +53,8 @@ describe.skipIf(!connection)("OR-013 real PostgreSQL (MCP HTTP mocked)", () => {
   }
 
   it("rolls migration down/up before links exist and indexes generation work", async () => {
-    await db.query(await readFile(resolve(migrations,"000023_iac_orchestration.down.sql"),"utf8"));
-    await db.query(await readFile(resolve(migrations,"000023_iac_orchestration.up.sql"),"utf8"));
+    await db.query(await readFile(resolve(migrations,"000027_iac_orchestration.down.sql"),"utf8"));
+    await db.query(await readFile(resolve(migrations,"000027_iac_orchestration.up.sql"),"utf8"));
     const index = await db.query<{ indexdef: string }>(`SELECT indexdef FROM pg_indexes WHERE indexname='idx_run_planning_work'`);
     expect(index.rows[0]!.indexdef).toContain("IAC_GENERATING");
   });
@@ -68,7 +68,7 @@ describe.skipIf(!connection)("OR-013 real PostgreSQL (MCP HTTP mocked)", () => {
     expect(events.rows.map(e => e.payload.message).filter(Boolean)).toEqual(["Generating Terraform templates...","Validating generated output..."]);
     expect(events.rows.at(-1)!.payload).toMatchObject({ to: "PLAN_CREATING",iac_artifact_id: f.artifact.iac_artifact_id,manifest_version: 2 });
     expect((await db.query(`SELECT 1 FROM provisr_audit.audit_events WHERE resource_id=$1`,[f.run.id])).rows).toHaveLength(3);
-    await expect(db.query(await readFile(resolve(migrations,"000023_iac_orchestration.down.sql"),"utf8"))).rejects.toThrow("Cannot discard");
+    await expect(db.query(await readFile(resolve(migrations,"000027_iac_orchestration.down.sql"),"utf8"))).rejects.toThrow("Cannot discard");
   });
 
   it("keeps a generated artifact unlinked when cancellation wins the network race", async () => {

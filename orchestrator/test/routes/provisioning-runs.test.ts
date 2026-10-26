@@ -189,6 +189,19 @@ describe("ProvisioningRunsController", () => {
     completedAt: null,
   } as unknown as ProvisioningRun;
 
+  it.each(["", "x".repeat(256)])("rejects invalid header idempotency keys before mutation", (key) => {
+    const service = { clarifyRun: vi.fn() } as unknown as RunsService;
+    const controller = new ProvisioningRunsController(service);
+    expect(() => controller.clarify(UUID, UUID, { answers: {} }, user, key)).toThrow();
+    expect(service.clarifyRun).not.toHaveBeenCalled();
+  });
+
+  it("passes a valid header key through the clarification boundary", () => {
+    const service = { clarifyRun: vi.fn().mockResolvedValue(mockRun) } as unknown as RunsService;
+    new ProvisioningRunsController(service).clarify(UUID, UUID, { answers: {}, idempotencyKey: "body" }, user, "header");
+    expect(service.clarifyRun).toHaveBeenCalledWith(UUID, UUID, user.userId, { answers: {}, idempotencyKey: "header" });
+  });
+
   it("delegates operations to RunsService", async () => {
     const runsService = {
       createRun: vi.fn().mockResolvedValue(mockRun),

@@ -112,7 +112,7 @@ branch `feat/155-mcp-014-generate-iac`, commit
 `646944515ba81ddb925eaa70eb387746120ebb6f`. These implementations were found in
 remote repository evidence but are absent from this checkout. Deploy both services
 and BE-D04's `000022_terraform_artifact_generation` migration, then apply
-`000023_iac_orchestration` before running this worker. MCP must use the same
+`000027_iac_orchestration` before running this worker. MCP must use the same
 `ORCHESTRATOR_SERVICE_TOKEN` as manifest-service. OR-013 does not copy or replace
 either generator implementation.
 
@@ -134,7 +134,7 @@ run recoverable. Failure persists only controlled `error_code`/`error_message`
 fields and enters `FAILED`. Upstream error bodies and Terraform contents never
 enter run errors or SSE. Work stops at `PLAN_CREATING`.
 
-Migration 23 rolls back before artifact links exist; it refuses to discard links
+Migration 27 rolls back before artifact links exist; it refuses to discard links
 after generation. Stop the worker before rollback.
 
 Focused proof:

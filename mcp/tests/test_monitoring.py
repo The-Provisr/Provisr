@@ -312,7 +312,7 @@ def test_mounted_endpoints_are_stateless_and_do_not_call_cloud(provider):
                 },
             )
             assert validated.json()["valid"] is True
-            for tool in ("validate_manifest", "validate_manifest_schema"):
+            for tool in ("validate_manifest_schema",):
                 cloud = {
                     "active_accounts": [
                         {
@@ -334,7 +334,7 @@ def test_mounted_endpoints_are_stateless_and_do_not_call_cloud(provider):
                     },
                 )
                 assert response.json()["valid"] is True
-        assert len(membership.calls) == 4
+        assert len(membership.calls) == 3
         assert calls == []
     finally:
         asyncio.run(http_client.aclose())

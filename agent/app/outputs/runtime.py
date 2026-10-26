@@ -24,8 +24,14 @@ def render_runtime_system_prompt(
         context = json.dumps(execution_context.model_dump(mode="json"), sort_keys=True)
         prompt += (
             "\n\nVALIDATED EXECUTION CONTEXT\n" + context + "\n"
-            "Draft only for the verified accounts and supported regions in this context. "
-            "Null resource counts or quotas mean unknown; never invent available capacity."
+            "Use only a provider listed as connected and only regions verified for that "
+            "provider. When there is one connected provider, use it. When there are several "
+            "and the user has not selected one, ask the user or give an evidence-based "
+            "recommendation among those providers. Use default_region when the user has not "
+            "specified a region. Reference existing_resources when integrating with them, "
+            "do not recreate or duplicate existing resources, and choose non-conflicting "
+            "names. Respect reported resource counts and quota limits. Null counts or quotas "
+            "mean unknown; never invent available capacity."
         )
     if policy_requirements is None:
         return prompt

@@ -9,12 +9,35 @@ from app.api.dependencies import AgentServiceDependency, StateStoreDependency
 from app.api.schemas import (
     CreateSessionRequest,
     CreateSessionResponse,
+    PolicyViolationExplanationRequest,
+    PolicyViolationExplanationResponse,
     RunTurnRequest,
     RunTurnResponse,
 )
 from app.domain.models import AgentEvent
+from app.policy.explanation import explain_policy_violation
 
 router = APIRouter()
+
+
+@router.post(
+    "/v1/policy/violations/explain",
+    response_model=PolicyViolationExplanationResponse,
+    tags=["policy"],
+)
+async def explain_violation(
+    body: PolicyViolationExplanationRequest,
+    request: Request,
+) -> PolicyViolationExplanationResponse:
+    require_orchestrator(request)
+    return PolicyViolationExplanationResponse.model_validate(
+        explain_policy_violation(
+            rule_key=body.rule_key,
+            severity=body.severity,
+            evidence=body.evidence,
+            remediation_hint=body.remediation_hint,
+        )
+    )
 
 
 def require_orchestrator(request: Request) -> None:
@@ -73,6 +96,11 @@ async def run_turn(
     session = await state.get_session(session_id)
     if session.execution_context is not None:
         require_orchestrator(request)
+    if body.answers:
+        await service.record_clarification_answers(
+            session_id=session_id,
+            answers=body.answers,
+        )
     result = await service.run_turn(session_id=session_id, message=body.message)
     return RunTurnResponse(result=result)
 

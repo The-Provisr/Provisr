@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/provisr/backend/internal/manifest"
 	"github.com/provisr/backend/internal/terraform"
+	"github.com/provisr/backend/pkg/secretscan"
 )
 
 type Request struct {
@@ -48,6 +49,7 @@ type Failure struct {
 	Code        string                  `json:"error"`
 	Message     string                  `json:"message"`
 	Unsupported []terraform.Unsupported `json:"unsupported,omitempty"`
+	Findings    []secretscan.Finding    `json:"findings,omitempty"`
 }
 
 func (e *Failure) Error() string { return e.Message }

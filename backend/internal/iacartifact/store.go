@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/provisr/backend/internal/manifest"
 	"github.com/provisr/backend/internal/terraform"
+	"github.com/provisr/backend/pkg/secretscan"
 )
 
 type DBGenerator struct{ db *sql.DB }
@@ -87,6 +88,11 @@ func (s *DBGenerator) Generate(ctx context.Context, input Request) (*Artifact, e
 		if err = json.Unmarshal(existing, &artifact); err != nil {
 			return nil, err
 		}
+		// Rescan before display so rows stored before BE-D06 are never shown
+		// with secrets. Replays stay read-only, so this refusal is not audited.
+		if findings := scanFiles(artifact.Files); len(findings) > 0 {
+			return nil, secretFailure(findings)
+		}
 		return &artifact, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -116,6 +122,20 @@ func (s *DBGenerator) Generate(ctx context.Context, input Request) (*Artifact, e
 	}
 	if len(bundle.Unsupported) > 0 {
 		return nil, &Failure{Status: 422, Code: "unsupported", Message: "Manifest includes unsupported resource types", Unsupported: bundle.Unsupported}
+	}
+	// Block storage before the artifact can reach the database or the user,
+	// but commit the audit event so the finding is recorded.
+	if findings := scanFiles(bundle.Files); len(findings) > 0 {
+		err = secretscan.RecordFindings(ctx, tx, secretscan.AuditInput{WorkspaceID: c.WorkspaceID, CorrelationID: c.CorrelationID,
+			ActorID: "manifest-service", ResourceType: "provisioning_run", ResourceID: c.RequestID,
+			ArtifactKind: "terraform", Action: secretscan.ActionBlocked, Findings: findings})
+		if err != nil {
+			return nil, err
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, secretFailure(findings)
 	}
 	a := &Artifact{ID: uuid.NewString(), ManifestID: input.ManifestID, ManifestVersion: version,
 		RunID: c.RequestID, WorkspaceID: c.WorkspaceID, SessionID: c.SessionID, Files: bundle.Files,
@@ -149,6 +169,18 @@ func (s *DBGenerator) Generate(ctx context.Context, input Request) (*Artifact, e
 		return nil, err
 	}
 	return a, nil
+}
+
+func scanFiles(files []terraform.File) []secretscan.Finding {
+	scan := make([]secretscan.File, 0, len(files))
+	for _, f := range files {
+		scan = append(scan, secretscan.File{Path: f.Path, Content: f.Content})
+	}
+	return secretscan.ScanFiles(scan)
+}
+
+func secretFailure(findings []secretscan.Finding) *Failure {
+	return &Failure{Status: 422, Code: "secret_detected", Message: secretscan.Message("Terraform artifact"), Findings: findings}
 }
 
 func appendAudit(ctx context.Context, tx *sql.Tx, input Request, a *Artifact) error {

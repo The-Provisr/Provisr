@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/provisr/backend/internal/manifest"
+	"github.com/provisr/backend/pkg/secretscan"
 )
 
 type fakeGenerator struct {
@@ -119,5 +120,24 @@ func TestPrivateEndpointRejectsInvalidUUIDs(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+type secretGenerator struct{}
+
+func (secretGenerator) Generate(context.Context, Request) (*Artifact, error) {
+	return nil, secretFailure([]secretscan.Finding{{Type: "password", Location: "terraform.tfvars:1:12", Detector: "keyword"}})
+}
+
+func TestPrivateEndpointReturnsSecretFindings(t *testing.T) {
+	body, _ := json.Marshal(request())
+	r := httptest.NewRequest("POST", "/v1/iac/generate", strings.NewReader(string(body)))
+	r.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	NewHandler(secretGenerator{}, "test-token").ServeHTTP(w, r)
+	var got secretscan.Response
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != 422 || got.Error != "secret_detected" ||
+		len(got.Findings) != 1 || got.Findings[0].Location != "terraform.tfvars:1:12" {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
 }

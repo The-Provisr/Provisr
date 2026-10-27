@@ -53,3 +53,13 @@ Database tests additionally require `TEST_DATABASE_URL` pointing to a disposable
 `provisr_or_planning_test_*` database with all migrations and `provisr_app` role.
 They prove concurrent replay, immutable storage, access/version guards, audit
 rollback, and generation under the application database role.
+
+## BE-D06 — secret scanning
+
+Before storage, rendered files are scanned with `pkg/secretscan` (see its
+README). Any finding blocks the artifact: no row is inserted, a hash-chained
+`secret_detected` audit event commits (apply migration `000028_secret_scanning`),
+and the route returns `422 {"error":"secret_detected","findings":[{type,location,detector,line,column}]}`.
+Findings never include the secret value. Artifacts replayed by idempotency key
+are rescanned before they are returned. MCP-014 forwards the findings in the
+same structure.

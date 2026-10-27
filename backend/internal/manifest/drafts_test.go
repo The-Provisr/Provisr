@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+
+	"github.com/provisr/backend/pkg/secretscan"
 )
 
 const testToken = "test-only-manifest-token"
@@ -183,5 +186,46 @@ func TestManifestAuditRollbackPostgres(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM provisr_manifest.manifests WHERE run_id=$1`, body.RunID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("rollback count %d,error %v", count, err)
+	}
+}
+
+func TestManifestSecretsBlockedAndAuditedPostgres(t *testing.T) {
+	db := testDatabase(t)
+	validator := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("manifest with secrets reached the validator")
+	}))
+	t.Cleanup(validator.Close)
+	handler := NewDraftHandler(db, &http.Client{Timeout: time.Second}, validator.URL, testToken)
+	body := seedDraft(t, db, "engineer")
+	secret := "AKIA" + "IOSFODNN7" + "EXAMPLE"
+	body.Content = json.RawMessage(`{"provider":"aws","region":"us-east-1","resources":[{"type":"aws_s3","name":"b","properties":{"user_data":"export KEY=` + secret + `"}}]}`)
+	w := send(handler, body)
+	if w.Code != 422 || !strings.Contains(w.Body.String(), `"secret_detected"`) ||
+		!strings.Contains(w.Body.String(), "manifest:/resources/0/properties/user_data") || strings.Contains(w.Body.String(), secret) {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var manifests, audits int
+	var payload string
+	_ = db.QueryRow(`SELECT count(*) FROM provisr_manifest.manifests WHERE run_id=$1`, body.RunID).Scan(&manifests)
+	if err := db.QueryRow(`SELECT count(*), max(payload::text) FROM provisr_audit.audit_events WHERE resource_id=$1 AND event_type='secret_detected'`,
+		body.RunID).Scan(&audits, &payload); err != nil || manifests != 0 || audits != 1 || strings.Contains(payload, secret) {
+		t.Fatalf("manifests %d audits %d payload %s err %v", manifests, audits, payload, err)
+	}
+}
+
+func TestStoreRecordsSecretFindingsAgainstRunPostgres(t *testing.T) {
+	db := testDatabase(t)
+	body := seedDraft(t, db, "engineer")
+	findings := []secretscan.Finding{{Type: "password", Location: "manifest:/resources/0/properties/master_password", Detector: "keyword"}}
+	if err := NewStore(db).RecordSecretFindings(context.Background(), body.RunID, findings); err != nil {
+		t.Fatal(err)
+	}
+	var workspace, correlation string
+	if err := db.QueryRow(`SELECT workspace_id, correlation_id FROM provisr_audit.audit_events WHERE resource_id=$1 AND event_type='secret_detected'`,
+		body.RunID).Scan(&workspace, &correlation); err != nil || workspace != body.Context.WorkspaceID || correlation != body.Context.CorrelationID {
+		t.Fatalf("audit attribution %s %s %v", workspace, correlation, err)
+	}
+	if err := NewStore(db).RecordSecretFindings(context.Background(), uuid.NewString(), findings); err == nil {
+		t.Fatal("audit recorded for unknown run")
 	}
 }

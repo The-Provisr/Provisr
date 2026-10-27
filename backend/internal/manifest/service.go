@@ -15,6 +15,7 @@ import (
 
 	"github.com/provisr/backend/pkg/health"
 	"github.com/provisr/backend/pkg/middleware"
+	"github.com/provisr/backend/pkg/secretscan"
 )
 
 const maxBody = 1 << 20
@@ -139,6 +140,19 @@ func (s *server) handleStoreVersion(w http.ResponseWriter, r *http.Request) {
 		s.writeError(r.Context(), w, http.StatusBadRequest, "validation_error", "content is required")
 		return
 	}
+	// BE-D06: block storage of manifests carrying secrets and audit the finding
+	// locations; the values themselves are never stored, logged or returned.
+	if findings := scanRecord(req.Content, req.SourceMetadata); len(findings) > 0 {
+		if auditor, ok := s.store.(SecretAuditor); ok {
+			if err := auditor.RecordSecretFindings(r.Context(), runID, findings); err != nil {
+				zerolog.Ctx(r.Context()).Error().Err(err).Msg("failed to audit manifest secret findings")
+				s.writeError(r.Context(), w, http.StatusServiceUnavailable, "unavailable", "manifest secret audit unavailable")
+				return
+			}
+		}
+		s.writeSecretFindings(r.Context(), w, findings)
+		return
+	}
 
 	var record *ManifestRecord
 	var err error
@@ -196,7 +210,7 @@ func (s *server) handleGetLatest(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(r.Context(), w, err)
 		return
 	}
-	s.writeJSON(r.Context(), w, http.StatusOK, record)
+	s.writeRecord(r.Context(), w, record)
 }
 
 func (s *server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
@@ -216,10 +230,45 @@ func (s *server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(r.Context(), w, err)
 		return
 	}
-	s.writeJSON(r.Context(), w, http.StatusOK, record)
+	s.writeRecord(r.Context(), w, record)
 }
 
 // --- Helpers ---
+
+// scanRecord scans manifest content and source metadata. Content that is not
+// a JSON document is scanned as text so nothing bypasses the scanner.
+func scanRecord(content json.RawMessage, sourceMetadata any) []secretscan.Finding {
+	findings, err := secretscan.ScanJSON("manifest", content)
+	if err != nil {
+		findings = secretscan.ScanText("manifest", string(content))
+	}
+	if sourceMetadata != nil {
+		if raw, err := json.Marshal(sourceMetadata); err == nil {
+			more, _ := secretscan.ScanJSON("source_metadata", raw)
+			findings = append(findings, more...)
+		}
+	}
+	return findings
+}
+
+// writeRecord scans a stored manifest before display, so versions persisted
+// before BE-D06 are never shown with secrets.
+func (s *server) writeRecord(ctx context.Context, w http.ResponseWriter, record *ManifestRecord) {
+	var metadata any
+	if len(record.SourceMetadata) > 0 {
+		metadata = record.SourceMetadata
+	}
+	if findings := scanRecord(record.Content, metadata); len(findings) > 0 {
+		s.writeSecretFindings(ctx, w, findings)
+		return
+	}
+	s.writeJSON(ctx, w, http.StatusOK, record)
+}
+
+func (s *server) writeSecretFindings(ctx context.Context, w http.ResponseWriter, findings []secretscan.Finding) {
+	zerolog.Ctx(ctx).Warn().Int("finding_count", len(findings)).Msg("manifest blocked by secret scanning")
+	s.writeJSON(ctx, w, http.StatusUnprocessableEntity, (&secretscan.BlockedError{Kind: "manifest", Findings: findings}).Body())
+}
 
 // decodeSingleJSON decodes exactly one JSON value into dst and rejects trailing
 // data (e.g. a second object or junk after the value). It writes a 400 response

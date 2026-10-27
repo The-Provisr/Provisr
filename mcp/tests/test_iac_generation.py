@@ -193,6 +193,21 @@ def test_unsupported_resources_remain_structured_without_backend_details():
     assert "DO_NOT_COPY" not in response.text
 
 
+def test_secret_findings_remain_structured_without_backend_details():
+    findings = [{"type": "password", "location": "terraform.tfvars:3:14", "detector": "keyword", "line": 3, "column": 14}]
+    response, _ = call(result={"error": "secret_detected", "message": "DO_NOT_COPY", "findings": findings}, status=422)
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"] == "secret_detected"
+    assert response.json()["detail"]["findings"] == findings
+    assert "DO_NOT_COPY" not in response.text
+
+
+def test_malformed_secret_findings_are_not_forwarded():
+    findings = [{"type": "password", "location": "DO_NOT_COPY value=hunter2", "detector": "keyword"}]
+    response, _ = call(result={"error": "secret_detected", "message": "m", "findings": findings}, status=422)
+    assert response.status_code == 422 and "DO_NOT_COPY" not in response.text
+
+
 @pytest.mark.parametrize("error", [httpx.ReadTimeout("DO_NOT_COPY"), httpx.ConnectError("DO_NOT_COPY")])
 def test_network_failures_are_sanitized(error):
     response, _ = call(result=error)

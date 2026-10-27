@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/provisr/backend/pkg/health"
+	"github.com/provisr/backend/pkg/secretscan"
 )
 
 type Context struct {
@@ -148,6 +149,12 @@ func (s *draftServer) validate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if findings, ok := scanDraft(w, body); !ok || len(findings) > 0 {
+		if ok {
+			respond(w, 422, (&secretscan.BlockedError{Kind: "manifest", Findings: findings}).Body())
+		}
+		return
+	}
 	valid, validationErrors, err := s.validateDraft(r, body)
 	if err != nil {
 		fail(w, 503, "Manifest validation unavailable")
@@ -184,6 +191,16 @@ func (s *draftServer) store(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != sql.ErrNoRows {
 		fail(w, 503, "Manifest storage unavailable")
+		return
+	}
+	// BE-D06: a manifest carrying secrets is never stored; only the audited
+	// finding locations are kept.
+	findings, ok := scanDraft(w, body)
+	if !ok {
+		return
+	}
+	if len(findings) > 0 {
+		s.blockSecrets(w, r, body, findings)
 		return
 	}
 	valid, validationErrors, err := s.validateDraft(r, body)
@@ -269,4 +286,43 @@ func (s *draftServer) store(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 201, map[string]int{"version": version})
+}
+
+func scanDraft(w http.ResponseWriter, body draftRequest) ([]secretscan.Finding, bool) {
+	findings, err := secretscan.ScanJSON("manifest", body.Content)
+	if err != nil {
+		fail(w, 400, "Invalid draft request")
+		return nil, false
+	}
+	return findings, true
+}
+
+func (s *draftServer) blockSecrets(w http.ResponseWriter, r *http.Request, body draftRequest, findings []secretscan.Finding) {
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail(w, 503, "Manifest audit unavailable")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Audit only against a run the caller owns, so findings cannot be written
+	// into another workspace's chain.
+	var owned bool
+	err = tx.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM provisr_state.provisioning_runs
+      WHERE id = $1 AND workspace_id = $2 AND requester_id = $3)`, body.RunID, body.Context.WorkspaceID, body.Context.UserID).Scan(&owned)
+	if err != nil {
+		fail(w, 503, "Manifest audit unavailable")
+		return
+	}
+	if !owned {
+		fail(w, 403, "Run context mismatch")
+		return
+	}
+	err = secretscan.RecordFindings(r.Context(), tx, secretscan.AuditInput{WorkspaceID: body.Context.WorkspaceID,
+		CorrelationID: body.Context.CorrelationID, ActorID: "state-service", ResourceType: "provisioning_run",
+		ResourceID: body.RunID, ArtifactKind: "manifest", Action: secretscan.ActionBlocked, Findings: findings})
+	if err != nil || tx.Commit() != nil {
+		fail(w, 503, "Manifest audit unavailable")
+		return
+	}
+	respond(w, 422, (&secretscan.BlockedError{Kind: "manifest", Findings: findings}).Body())
 }

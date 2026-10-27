@@ -27,7 +27,7 @@ type StatCardProps = {
   label: string;
   value: string;
   detail?: string;
-  tone?: "neutral" | "blue" | "amber" | "green";
+  tone?: "neutral" | "blue" | "amber" | "green" | "red";
 };
 
 type TableProps = {
@@ -48,6 +48,7 @@ const toneClasses = {
   blue: "border-blue-100 bg-blue-50",
   amber: "border-amber-100 bg-amber-50",
   green: "border-green-100 bg-green-50",
+  red: "border-red-100 bg-red-50",
 };
 
 export const workspaceNavItems = [
@@ -147,6 +148,7 @@ export function StatusBadge({ children, tone = "neutral" }: { children: ReactNod
     blue: "border-blue-100 bg-blue-50 text-blue-700",
     amber: "border-amber-100 bg-amber-50 text-amber-700",
     green: "border-green-100 bg-green-50 text-green-700",
+    red: "border-red-100 bg-red-50 text-red-700",
   };
 
   return <Badge className={classes[tone]}>{children}</Badge>;

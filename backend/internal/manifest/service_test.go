@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -192,5 +193,44 @@ func TestGetVersionRejectsNonInteger(t *testing.T) {
 	rec := doRequest(t, newTestHandler(), http.MethodGet, "/v1/runs/"+runID+"/manifests/abc", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestStoreVersionBlocksSecrets(t *testing.T) {
+	store := NewMemoryStore()
+	handler := NewWithStore(zerolog.Nop(), store)
+	runID := uuid.NewString()
+	secret := "Sup3rS3cret" + "Value!"
+	body := `{"content":{"provider":"aws","region":"us-east-1","resources":[{"logical_name":"db","type":"database.aws.rds","properties":{"master_password":"` + secret + `"}}]}}`
+	rec := doRequest(t, handler, http.MethodPost, "/v1/runs/"+runID+"/manifests", body)
+	if rec.Code != http.StatusUnprocessableEntity || strings.Contains(rec.Body.String(), secret) {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Error    string `json:"error"`
+		Findings []struct{ Type, Location string }
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Error != "secret_detected" || len(got.Findings) != 1 ||
+		got.Findings[0].Type != "password" || got.Findings[0].Location != "manifest:/resources/0/properties/master_password" {
+		t.Fatalf("unexpected body %s", rec.Body.String())
+	}
+	if metas, _ := store.ListManifestVersions(context.Background(), runID); len(metas) != 0 {
+		t.Fatal("manifest with secret was stored")
+	}
+}
+
+func TestGetVersionRefusesLegacySecrets(t *testing.T) {
+	store := NewMemoryStore()
+	handler := NewWithStore(zerolog.Nop(), store)
+	runID := uuid.NewString()
+	secret := "AKIA" + "IOSFODNN7" + "EXAMPLE"
+	if _, err := store.StoreManifestVersion(context.Background(), runID, json.RawMessage(`{"provider":"aws","note":"`+secret+`"}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/v1/runs/" + runID + "/manifests/latest", "/v1/runs/" + runID + "/manifests/1"} {
+		rec := doRequest(t, handler, http.MethodGet, path, "")
+		if rec.Code != http.StatusUnprocessableEntity || strings.Contains(rec.Body.String(), secret) || !strings.Contains(rec.Body.String(), "aws_access_key_id") {
+			t.Fatalf("%s: status %d body %s", path, rec.Code, rec.Body.String())
+		}
 	}
 }

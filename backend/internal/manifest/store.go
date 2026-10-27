@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+
+	"github.com/provisr/backend/pkg/secretscan"
 )
 
 var (
@@ -42,6 +44,11 @@ type ManifestRecord struct {
 // IdempotentStore persists a manifest version once per run and idempotency key.
 type IdempotentStore interface {
 	StoreManifestVersionWithKey(ctx context.Context, runID, key string, content any, sourceMetadata any) (*ManifestRecord, error)
+}
+
+// SecretAuditor records blocked secret findings for a run (BE-D06).
+type SecretAuditor interface {
+	RecordSecretFindings(ctx context.Context, runID string, findings []secretscan.Finding) error
 }
 
 // ManifestRecordMeta contains summary metadata for a manifest version.
@@ -129,6 +136,29 @@ func (s *DBStore) StoreManifestVersionWithKey(ctx context.Context, runID, key st
 	}
 	record.Hash = hash
 	return &record, nil
+}
+
+// RecordSecretFindings audits a blocked manifest against its run's workspace
+// and correlation, which the caller of this route cannot supply.
+func (s *DBStore) RecordSecretFindings(ctx context.Context, runID string, findings []secretscan.Finding) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var workspaceID, correlationID string
+	err = tx.QueryRowContext(ctx, `SELECT workspace_id, correlation_id FROM provisr_state.provisioning_runs WHERE id = $1`, runID).
+		Scan(&workspaceID, &correlationID)
+	if err != nil {
+		return fmt.Errorf("failed to load run for secret audit: %w", err)
+	}
+	err = secretscan.RecordFindings(ctx, tx, secretscan.AuditInput{WorkspaceID: workspaceID, CorrelationID: correlationID,
+		ActorID: "manifest-service", ResourceType: "provisioning_run", ResourceID: runID,
+		ArtifactKind: "manifest", Action: secretscan.ActionBlocked, Findings: findings})
+	if err != nil {
+		return fmt.Errorf("failed to audit secret findings: %w", err)
+	}
+	return tx.Commit()
 }
 
 // maxVersionRetries bounds how many times StoreManifestVersion retries when a

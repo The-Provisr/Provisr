@@ -101,6 +101,21 @@ class UnsupportedResult(StrictModel):
     unsupported: list[Unsupported] = Field(min_length=1, max_length=1000)
 
 
+class SecretFinding(StrictModel):
+    """BE-D06 finding: where a secret is and its kind, never the value."""
+    type: str = Field(pattern=r"^[a-z0-9_]{1,64}$")
+    location: str = Field(pattern=r"^[A-Za-z0-9_./:~-]{1,512}$")
+    detector: Literal["regex", "keyword", "base64", "entropy"]
+    line: int | None = Field(default=None, ge=1)
+    column: int | None = Field(default=None, ge=1)
+
+
+class SecretResult(StrictModel):
+    error: Literal["secret_detected"]
+    message: str
+    findings: list[SecretFinding] = Field(min_length=1, max_length=1000)
+
+
 def unavailable() -> HTTPException:
     return HTTPException(status_code=502, detail="Terraform artifact generation unavailable")
 
@@ -156,6 +171,16 @@ async def generate_iac(
         raise unavailable() from exc
 
     if status == 422:
+        try:
+            blocked = SecretResult.model_validate_json(chunks)
+        except ValidationError:
+            blocked = None
+        if blocked is not None:
+            raise HTTPException(status_code=422, detail={
+                "error": "secret_detected",
+                "message": "Generated Terraform contains potential secrets; use secret references instead",
+                "findings": [item.model_dump(exclude_none=True) for item in blocked.findings],
+            })
         try:
             unsupported = UnsupportedResult.model_validate_json(chunks)
         except ValidationError:

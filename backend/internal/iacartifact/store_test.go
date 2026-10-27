@@ -32,7 +32,14 @@ func database(t *testing.T) *sql.DB {
 	return db
 }
 
+const seedManifest = `{"schema_version":"1.0","provider":"aws","region":"us-east-1","resources":[{"logical_name":"bucket","type":"storage.aws.s3","properties":{"name":"private-test-bucket","versioning":false}}]}`
+
 func seed(t *testing.T, db *sql.DB) Request {
+	t.Helper()
+	return seedWith(t, db, seedManifest)
+}
+
+func seedWith(t *testing.T, db *sql.DB, content string) Request {
 	t.Helper()
 	r := request()
 	c := r.Context
@@ -47,8 +54,7 @@ func seed(t *testing.T, db *sql.DB) Request {
 	exec(`INSERT INTO provisr_state.chat_sessions(id,workspace_id,user_id,title) VALUES ($1,$2,$3,'Test')`, c.SessionID, c.WorkspaceID, c.UserID)
 	exec(`INSERT INTO provisr_state.provisioning_runs(id,session_id,workspace_id,requester_id,prompt,idempotency_key,correlation_id,state)
 	 VALUES ($1,$2,$3,$4,'Test',$6,$5,'IAC_GENERATING')`, c.RequestID, c.SessionID, c.WorkspaceID, c.UserID, c.CorrelationID, c.RequestID)
-	exec(`INSERT INTO provisr_manifest.manifests(id,run_id,version,content) VALUES ($1,$2,1,$3)`, r.ManifestID, c.RequestID,
-		`{"schema_version":"1.0","provider":"aws","region":"us-east-1","resources":[{"logical_name":"bucket","type":"storage.aws.s3","properties":{"name":"private-test-bucket","versioning":false}}]}`)
+	exec(`INSERT INTO provisr_manifest.manifests(id,run_id,version,content) VALUES ($1,$2,1,$3)`, r.ManifestID, c.RequestID, content)
 	exec(`UPDATE provisr_state.provisioning_runs SET manifest_version=1,manifest_validated_version=1,manifest_confirmed_version=1,manifest_confirmed_at=now() WHERE id=$1`, c.RequestID)
 	return r
 }
@@ -261,5 +267,28 @@ func TestGenerationWithApplicationRolePostgres(t *testing.T) {
 	defer func() { _ = app.Close() }()
 	if _, err = (&DBGenerator{db: app}).Generate(context.Background(), r); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSecretFindingsBlockStorageAndAuditPostgres(t *testing.T) {
+	db := database(t)
+	secret := "Sup3rS3cret" + "Value!"
+	r := seedWith(t, db, strings.Replace(seedManifest, `"resources"`, `"tags":{"deploy_password":"`+secret+`"},"resources"`, 1))
+	_, err := (&DBGenerator{db: db}).Generate(context.Background(), r)
+	expectCode(t, err, "secret_detected")
+	var f *Failure
+	errors.As(err, &f)
+	body, _ := json.Marshal(f)
+	if len(f.Findings) == 0 || strings.Contains(string(body), secret) {
+		t.Fatalf("findings missing or leaked: %s", body)
+	}
+	var artifacts, audits int
+	var payload string
+	if err = db.QueryRow(`SELECT count(*) FROM provisr_iac.artifacts WHERE run_id=$1`, r.Context.RequestID).Scan(&artifacts); err != nil || artifacts != 0 {
+		t.Fatalf("artifact stored despite secret: %d %v", artifacts, err)
+	}
+	if err = db.QueryRow(`SELECT count(*), max(payload::text) FROM provisr_audit.audit_events WHERE event_type='secret_detected' AND resource_id=$1`,
+		r.Context.RequestID).Scan(&audits, &payload); err != nil || audits != 1 || strings.Contains(payload, secret) || !strings.Contains(payload, `"blocked"`) {
+		t.Fatalf("audit %d %s %v", audits, payload, err)
 	}
 }

@@ -277,6 +277,7 @@ services:
     environment:
       PORT: "5100"
       BACKEND_URL: http://provisioning-service:8083
+      PROVISIONING_SERVICE_URL: http://provisioning-service:8083
       MANIFEST_SERVICE_URL: http://manifest-service:8090
       PRICING_SERVICE_URL: http://pricing-service:8091
       CLOUD_ACCOUNT_SERVICE_URL: http://cloud-account-service:8089

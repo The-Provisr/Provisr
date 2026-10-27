@@ -53,6 +53,8 @@ export function DashboardShell({ children, sidebar, clerkEnabled }: DashboardShe
   }, [collapsed]);
 
   useEffect(() => {
+    if (!clerkEnabled) return;
+
     let cancelled = false;
     async function load() {
       try {
@@ -73,7 +75,7 @@ export function DashboardShell({ children, sidebar, clerkEnabled }: DashboardShe
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [clerkEnabled]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {

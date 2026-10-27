@@ -1,0 +1,7 @@
+# Use this workspace to collaborate
+workspace:
+  id: 1fc3d731-cc38-4560-a91d-3e3ec137bf98
+
+localResources:
+  collections:
+    - ../Provisr_API.postman_collection.json

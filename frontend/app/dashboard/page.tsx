@@ -14,7 +14,12 @@ export const metadata: Metadata = {
 };
 
 export default async function DashboardPage() {
-  await auth.protect();
+  const clerkEnabled = Boolean(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
+  );
+  if (clerkEnabled) {
+    await auth.protect();
+  }
 
   return (
     <AppShell>
@@ -24,7 +29,7 @@ export default async function DashboardPage() {
       />
       <PageBody>
         <div className="mx-auto max-w-[900px] space-y-4">
-          <SessionBanner />
+          {clerkEnabled ? <SessionBanner /> : null}
           <SectionCard title="Workspace overview">
             <p className="text-sm text-gray-600">
               Summary widgets for policy posture, active resources, pending

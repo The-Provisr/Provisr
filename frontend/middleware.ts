@@ -14,6 +14,10 @@ const isPublicRoute = createRouteMatcher([
 
 const isOnboardingRoute = createRouteMatcher(["/onboarding/:path*", "/post-auth"]);
 
+// Invitees usually have no workspace yet; the accept page must not bounce them
+// to onboarding. It still requires sign-in (not public).
+const isInvitationRoute = createRouteMatcher(["/invitations/:path*"]);
+
 const withClerk = clerkMiddleware(async (auth, request) => {
   const isApi = request.nextUrl.pathname.startsWith("/api");
 
@@ -36,7 +40,13 @@ const withClerk = clerkMiddleware(async (auth, request) => {
 
   // Signed in but no workspace → onboarding.
   const hasWorkspace = Boolean(sessionClaims?.metadata?.workspaceId);
-  if (userId && !hasWorkspace && !isOnboardingRoute(request) && !isPublicRoute(request)) {
+  if (
+    userId &&
+    !hasWorkspace &&
+    !isOnboardingRoute(request) &&
+    !isInvitationRoute(request) &&
+    !isPublicRoute(request)
+  ) {
     return NextResponse.redirect(new URL("/onboarding", request.url));
   }
 

@@ -245,16 +245,32 @@ export const driftStatusSchema = z.object({
     .optional(),
 });
 
+// Artifact attached to a timeline step. All fields beyond id/title are
+// optional so step payloads stay valid before artifact endpoints exist.
+export const executionTimelineArtifactSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  type: z
+    .enum(["manifest", "terraform", "plan", "policy_report", "cost_report", "diagram", "log"])
+    .optional(),
+  url: z.string().optional(),
+});
+
+export type ExecutionTimelineArtifact = z.infer<typeof executionTimelineArtifactSchema>;
+
 export const executionTimelineSchema = z.object({
   currentStep: z.string(),
+  runId: z.string().optional(),
   steps: z.array(
     z.object({
       id: z.string(),
       name: z.string(),
-      status: z.enum(["pending", "running", "succeeded", "failed", "skipped"]),
+      description: z.string().optional(),
+      status: z.enum(["pending", "running", "succeeded", "failed", "skipped", "cancelled"]),
       durationMs: z.number().optional(),
       startedAt: z.string().optional(),
       completedAt: z.string().optional(),
+      artifacts: z.array(executionTimelineArtifactSchema).optional(),
     }),
   ),
 });

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ExecutionTimelineComponent } from "@/components/registry/components/execution_timeline";
 import { Button } from "@/components/ui/button";
 import { ChatComposer } from "@/components/ui/chat-composer";
 import { ChatSidebar } from "@/components/ui/chat-sidebar";
@@ -19,16 +20,19 @@ import { AppShell } from "@/components/ui/provisr-app";
 import { RegistryProvider } from "@/components/registry/RegistryProvider";
 import { SSEStatusBadge } from "@/components/ui/sse-status-badge";
 import { useSSE } from "@/lib/sse/use-sse";
+import {
+  appendRunTransition,
+  buildTimeline,
+  isKnownRunState,
+  type RunTransition,
+} from "@/lib/runs/timeline";
 
-const progressSteps = [
-  "Request",
-  "Policy",
-  "Manifest",
-  "Plan",
-  "Review",
-  "Approval",
-  "Execute",
-];
+// The demo page mirrors a single run (run-demo-001). Events for other runs
+// are ignored; events without a run id are attributed to the visible run.
+const DEMO_RUN_ID = "run-demo-001";
+// The demo conversation is at the "Plan ready for review" checkpoint.
+const DEMO_INITIAL_STATE = "POLICY_CHECKING";
+const DEMO_RUN_CREATED_AT = "2026-08-08T09:41:00Z";
 
 const summaryItems = [
   ["Provider", "AWS"],
@@ -42,7 +46,54 @@ const drawerTabs = ["Manifest", "Policy", "Terraform Plan", "Approval"];
 export default function ChatPage() {
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(drawerTabs[0]);
-  const { status } = useSSE();
+  const { status, subscribe } = useSSE();
+  const [runState, setRunState] = useState(DEMO_INITIAL_STATE);
+  const [transitions, setTransitions] = useState<RunTransition[]>([]);
+
+  useEffect(() => {
+    return subscribe("run_state_changed", (event) => {
+      const payload = event.data;
+      const eventRunId =
+        typeof payload.run_id === "string"
+          ? payload.run_id
+          : typeof payload.runId === "string"
+            ? payload.runId
+            : null;
+      if (eventRunId && eventRunId !== DEMO_RUN_ID) return;
+
+      const to =
+        typeof payload.to === "string"
+          ? payload.to
+          : typeof payload.state === "string"
+            ? payload.state
+            : null;
+      if (!to || !isKnownRunState(to)) return;
+
+      const at =
+        typeof payload.occurred_at === "string"
+          ? payload.occurred_at
+          : typeof payload.occurredAt === "string"
+            ? payload.occurredAt
+            : new Date().toISOString();
+
+      setRunState(to);
+      setTransitions((previous) => appendRunTransition(previous, to, at));
+    });
+  }, [subscribe]);
+
+  const timeline = useMemo(
+    () =>
+      buildTimeline({
+        run: {
+          id: DEMO_RUN_ID,
+          state: runState,
+          createdAt: DEMO_RUN_CREATED_AT,
+          manifestVersion: 2,
+        },
+        transitions,
+      }),
+    [runState, transitions],
+  );
 
   return (
     <RegistryProvider>
@@ -138,24 +189,7 @@ export default function ChatPage() {
                   }}
                 />
 
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-                  {progressSteps.map((step, index) => (
-                    <div className="flex items-center gap-2" key={step}>
-                      <span
-                        className={
-                          index < 5
-                            ? "text-xs font-medium text-slate-900"
-                            : "text-xs font-medium text-gray-400"
-                        }
-                      >
-                        {step}
-                      </span>
-                      {index < progressSteps.length - 1 ? (
-                        <span className="h-px w-4 bg-gray-200" />
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
+                <ExecutionTimelineComponent data={timeline} />
 
                 <div className="max-w-[520px] rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
                   <div className="mb-3 text-sm font-semibold text-gray-900">

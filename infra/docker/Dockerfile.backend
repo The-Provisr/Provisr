@@ -15,10 +15,13 @@ RUN CGO_ENABLED=0 go build -o /services/policy-service ./cmd/policy-service && \
     CGO_ENABLED=0 go build -o /services/manifest-service ./cmd/manifest-service && \
     CGO_ENABLED=0 go build -o /services/pricing-service ./cmd/pricing-service
 
+FROM hashicorp/terraform:1.15.8 AS terraform
+
 FROM alpine:3.20 AS service
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /services/ ./
+COPY --from=terraform /bin/terraform /usr/local/bin/terraform
 USER 65534
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/health/live || exit 1
